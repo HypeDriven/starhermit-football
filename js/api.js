@@ -29,6 +29,17 @@ export function initAuth() {
 
 export function getAuth() { return { token, slug, userId, username, online: !!token && !!slug }; }
 
+// The launch token carries no name claim — resolve the real display name from
+// the public profile endpoint (allowed for game-scoped tokens).
+export async function resolveUsername() {
+  if (!token || !userId) return username;
+  try {
+    const p = await req('GET', `/api/v1/users/${userId}/profile`);
+    username = p.nickname || p.username || username;
+  } catch { /* keep the fallback */ }
+  return username;
+}
+
 async function req(method, path, body) {
   const res = await fetch(path, {
     method,

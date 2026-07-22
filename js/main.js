@@ -49,7 +49,7 @@ function setStatus(t) { $('menu-status').textContent = t; }
 
 function setupMenu() {
   $('menu-user').textContent = auth.online
-    ? `Signed in as ${auth.username}`
+    ? `Signed in as ${api.getAuth().username}`
     : 'Offline mode — practice only (launch via StarHermit for multiplayer)';
   $('btn-quick').disabled = !auth.online;
   $('btn-lobby').disabled = !auth.online;
@@ -123,7 +123,7 @@ function ensureMatch() {
 
 function startPractice() {
   showScreen(null);
-  ensureMatch().startPractice({ teamSize, myName: auth.username });
+  ensureMatch().startPractice({ teamSize, myName: api.getAuth().username });
 }
 
 async function onMatchReady(room) {
@@ -196,9 +196,11 @@ function disposeMatch() {
 
 // ── boot ──
 lobby = createLobby({ onMatchReady, onLeave: () => showScreen('screen-menu'), setStatus });
-setupMenu();
 showScreen('screen-menu');
-$('loading').classList.add('hidden');
+api.resolveUsername().finally(() => {
+  setupMenu();
+  $('loading').classList.add('hidden');
+});
 
 // idle stadium backdrop behind the menu
 const clock = new THREE.Clock();
