@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>StarHermit Football</title>
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.min.js" } }
+</script>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<!-- ══ HUD (in-match) ══ -->
+<div id="hud" class="hidden">
+  <div id="scorebar">
+    <span id="score-home-name">HOME</span>
+    <span id="score-home">0</span><span id="score-sep">–</span><span id="score-away">0</span>
+    <span id="score-away-name">AWAY</span>
+    <span id="match-clock">00:00</span>
+  </div>
+  <div id="ball-arrow" class="hidden"><div id="ball-arrow-head">▲</div><div id="ball-arrow-dist"></div></div>
+  <div id="power-bar" class="hidden"><div id="power-fill"></div></div>
+  <div id="event-banner" class="hidden"></div>
+</div>
+
+<!-- ══ Touch controls ══ -->
+<div id="touch-ui" class="hidden">
+  <div id="joystick"><div id="joystick-knob"></div></div>
+  <div id="touch-buttons">
+    <button id="btn-tackle" class="tbtn">TACKLE</button>
+    <button id="btn-pass" class="tbtn">PASS</button>
+    <button id="btn-shoot" class="tbtn big">SHOOT</button>
+  </div>
+</div>
+
+<!-- ══ Menu / lobby screens ══ -->
+<div id="screens">
+  <div id="screen-menu" class="screen">
+    <h1 class="logo">STARHERMIT <span>FOOTBALL</span></h1>
+    <div id="menu-user" class="muted"></div>
+    <div class="menu-buttons">
+      <button id="btn-quick" class="mbtn primary">QUICK PLAY</button>
+      <button id="btn-lobby" class="mbtn">CREATE LOBBY</button>
+      <button id="btn-practice" class="mbtn">PRACTICE vs AI</button>
+    </div>
+    <div id="menu-team-size">Team size
+      <select id="team-size"></select> per side
+    </div>
+    <div id="menu-invites"></div>
+    <div class="muted small" id="menu-status"></div>
+  </div>
+
+  <div id="screen-lobby" class="screen hidden">
+    <h2>LOBBY</h2>
+    <div id="lobby-roster"></div>
+    <div class="menu-buttons">
+      <button id="btn-invite" class="mbtn">INVITE FRIENDS</button>
+      <button id="btn-find" class="mbtn primary">FIND MATCH</button>
+      <button id="btn-leave" class="mbtn danger">LEAVE</button>
+    </div>
+    <div id="lobby-timer" class="muted"></div>
+  </div>
+
+  <div id="screen-invite" class="screen hidden">
+    <h2>INVITE FRIENDS</h2>
+    <div id="invite-list"></div>
+    <div class="menu-buttons"><button id="btn-invite-back" class="mbtn">BACK</button></div>
+  </div>
+
+  <div id="screen-result" class="screen hidden">
+    <h2 id="result-title">FULL TIME</h2>
+    <div id="result-score"></div>
+    <div id="result-stats"></div>
+    <div class="menu-buttons"><button id="btn-result-menu" class="mbtn primary">MAIN MENU</button></div>
+  </div>
+</div>
+
+<div id="loading"><div class="logo small-logo">STARHERMIT FOOTBALL</div><div id="loading-msg">Loading…</div></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
