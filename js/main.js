@@ -38,6 +38,7 @@ const auth = api.initAuth();
 let match = null;
 let lobby = null;
 let teamSize = 5;
+let activeRoom = null;   // room the server says we're still a participant of
 
 // ── screens ──
 const screens = ['screen-menu', 'screen-lobby', 'screen-invite', 'screen-result'];
@@ -46,6 +47,51 @@ function showScreen(id) {
   if (!id) for (const s of screens) $(s).classList.add('hidden');
 }
 function setStatus(t) { $('menu-status').textContent = t; }
+
+// ── active room (rejoin / leave prompts) ──
+async function refreshActiveRoom() {
+  if (!auth.online) { activeRoom = null; }
+  else {
+    try { activeRoom = await api.getMyRoom(); }
+    catch { activeRoom = null; }
+  }
+  const btn = $('btn-rejoin');
+  if (activeRoom) {
+    const playing = activeRoom.status === 'Playing' || activeRoom.status === 'playing';
+    btn.textContent = playing ? 'REJOIN MATCH' : 'RETURN TO LOBBY';
+    btn.classList.remove('hidden');
+  } else {
+    btn.classList.add('hidden');
+  }
+}
+
+// Guard for anything that starts a new game while the server still has us in a room.
+async function confirmLeaveActiveRoom() {
+  if (!activeRoom) return true;
+  const playing = activeRoom.status === 'Playing' || activeRoom.status === 'playing';
+  const ok = confirm(playing
+    ? 'You are in a match right now. Leave it? An AI player will take over your footballer.'
+    : 'You already have a lobby open. Leave it and continue?');
+  if (!ok) return false;
+  try { await api.leaveRoom(activeRoom.id); } catch { /* already gone */ }
+  activeRoom = null;
+  $('btn-rejoin').classList.add('hidden');
+  return true;
+}
+
+function rejoinActiveRoom() {
+  if (!activeRoom) return;
+  const room = activeRoom;
+  const playing = room.status === 'Playing' || room.status === 'playing';
+  if (!playing) {
+    // still in lobby stage — just reopen the lobby screen
+    showScreen('screen-lobby');
+    lobby.adopt(room);
+    return;
+  }
+  audio.resume();
+  onMatchReady(room, { isRejoin: true });
+}
 
 function setupMenu() {
   $('menu-user').textContent = auth.online
@@ -63,9 +109,14 @@ function setupMenu() {
   }
   sel.onchange = () => { teamSize = +sel.value; };
 
-  $('btn-practice').onclick = () => { audio.ui(); audio.resume(); startPractice(); };
+  $('btn-practice').onclick = async () => {
+    audio.ui(); audio.resume();
+    if (!(await confirmLeaveActiveRoom())) return;
+    startPractice();
+  };
   $('btn-lobby').onclick = async () => {
     audio.ui(); audio.resume();
+    if (!(await confirmLeaveActiveRoom())) return;
     try {
       showScreen('screen-lobby');
       await lobby.create(teamSize);
@@ -73,11 +124,13 @@ function setupMenu() {
   };
   $('btn-quick').onclick = async () => {
     audio.ui(); audio.resume();
+    if (!(await confirmLeaveActiveRoom())) return;
     try {
       showScreen('screen-lobby');
       await lobby.quickPlay(teamSize);
     } catch (e) { showScreen('screen-menu'); setStatus(`Quick play failed: ${e.message}`); }
   };
+  $('btn-rejoin').onclick = () => { audio.ui(); rejoinActiveRoom(); };
   $('btn-invite').onclick = () => { audio.ui(); lobby.inviteFriends(); };
   $('btn-invite-back').onclick = () => { audio.ui(); $('screen-invite').classList.add('hidden'); };
   $('btn-find').onclick = () => { audio.ui(); lobby.findMatch().catch((e) => setStatus(e.message)); };
@@ -126,7 +179,7 @@ function startPractice() {
   ensureMatch().startPractice({ teamSize, myName: api.getAuth().username });
 }
 
-async function onMatchReady(room) {
+async function onMatchReady(room, { isRejoin = false } = {}) {
   // room.status === Playing with frozen roster (AI seats backfilled)
   showScreen(null);
   const cfg = room.config || room;
@@ -141,7 +194,8 @@ async function onMatchReady(room) {
       onSnapshot: (snap) => m.onSnapshot(snap),
       onInput: (inp, fromId) => m.onRemoteInput(inp, fromId),
       onEvent: (ev) => m.onNetEvent(ev),
-      onRoster: () => {},
+      onRoster: (parts) => m.applyRoster(parts),
+      onPresence: (msg) => m.onPresence(msg),
       onClose: () => { if (m.phase !== 'done') { setStatus('Connection lost'); backToMenu(); } },
     });
   } catch (e) {
@@ -155,7 +209,7 @@ async function onMatchReady(room) {
     seatMap.set(p.id, p.team * ts + p.slot);
   }
   m.setParticipantSeats(seatMap);
-  m.startFromRoom({ room, teamSize: ts, myUserId: me.userId, netClient: net, isHost });
+  await m.startFromRoom({ room, teamSize: ts, myUserId: me.userId, netClient: net, isHost, isRejoin });
 
   // host reports the result
   if (isHost) {
@@ -188,6 +242,7 @@ function backToMenu() {
   if (lobby?.room) lobby.leave();
   showScreen('screen-menu');
   refreshIncomingInvites();
+  refreshActiveRoom();
 }
 
 function disposeMatch() {
@@ -199,6 +254,7 @@ lobby = createLobby({ onMatchReady, onLeave: () => showScreen('screen-menu'), se
 showScreen('screen-menu');
 api.resolveUsername().finally(() => {
   setupMenu();
+  refreshActiveRoom();
   $('loading').classList.add('hidden');
 });
 

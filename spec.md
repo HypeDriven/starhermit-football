@@ -85,8 +85,9 @@ other, and only the server-assigned host can broadcast snapshots.
 
 Trade-offs (accepted): the host client could theoretically cheat its own
 simulation; mitigations are out of scope for v1 (competitive integrity on this
-platform is already trust-based for non-scripted games). Host disconnect ends
-the match (v1); host migration is a later enhancement (§11).
+platform is already trust-based for non-scripted games). Resilience — AI
+takeover on leave, disconnect stand-ins, host migration, and host rejoin
+state recovery — is covered in §4.5.
 
 ## 4. Game flow
 
@@ -139,6 +140,28 @@ personalities (§7). Practice mode skips the server entirely.
 4. **Full time**: final whistle, crowd reaction by result, celebration
    animation for winners, stats screen (score, possession, shots), then
    back to lobby / report result to leaderboard.
+
+### 4.5 Leaving, rejoining, and host migration
+
+- **Rejoin**: the menu checks `GET /rooms/mine` on load and shows a
+  **REJOIN MATCH** (Playing) or **RETURN TO LOBBY** button. Starting anything
+  else (Quick Play / Create Lobby / Practice) while in a room prompts for
+  confirmation first.
+- **AI takeover on leave**: explicitly leaving a Playing room converts the
+  leaver's seat into an AI seat (new server-generated nickname, roster push) —
+  the match continues and the user is free to join something else.
+- **Disconnect stand-in**: if a guest's socket drops, the host zeroes their
+  input and an AI stand-in takes over their footballer after a 5 s grace
+  period; reconnecting restores control. A Playing room whose host has no
+  connection for > 60 s is closed by a server sweep.
+- **Host migration**: if the host leaves with other humans present, the server
+  transfers `IsHost` to the longest-joined human; that client takes over the
+  simulation by rehydrating from the last snapshot it received.
+- **Host rejoin recovery**: a rejoining host broadcasts `state-request`; any
+  still-connected guest answers with its latest snapshot
+  (`state-response`, guest→host routing), and the host rehydrates its sim
+  (score, clock, positions). With no guests left to answer, the match
+  restarts from kickoff.
 
 ## 5. Client: rendering & presentation
 
@@ -295,7 +318,7 @@ backfill, host-authoritative frame routing.
 | POST | `/rooms/{id}/open` | Host: open to matchmaking; starts backfill timer. |
 | POST | `/rooms/quick-join` | Body `{ gameSlug (implied by token), seats: 1 }` → placed in oldest open room with free seats for this game, else 404 (client then creates its own open room). |
 | POST | `/rooms/{id}/start` | Host: AI-backfill empty seats, status→Playing, returns frozen roster. Idempotent; auto-invoked by a worker at backfill deadline. |
-| POST | `/rooms/{id}/leave` | Leave (host leaving in Lobby/Open transfers host to longest-serving human; none left → Closed). |
+| POST | `/rooms/{id}/leave` | Leave. In Lobby/Open the seat is removed (host leaving transfers host to the longest-serving human; none left → Closed). In Playing the seat converts to an AI participant (fresh server nickname, roster pushed) so the match continues; host leaving transfers `IsHost` to the longest-serving remaining human, or closes the room if none remain. |
 | POST | `/rooms/{id}/result` | Host: submit result JSON (validated vs roster, score sanity-clamped); stored on room, fan-out over WS. |
 | GET | `/rooms/mine` | Caller's active room, if any (reconnect). |
 
@@ -322,13 +345,14 @@ Party pinning: invite-joins are seated on the host's team while space lasts.
   1 s), enforced per connection with a token bucket; violation →
   `PolicyViolation` close (same enforcement style as `RelayWebSocketHandler`).
 
-### 8.4 Backfill worker
+### 8.4 Backfill & stale-room workers
 
-`Platform.Workers` job (modeled on `CleanupStaleRelaySessionsJob`): sweeps
+`Platform.Workers` jobs (modeled on `CleanupStaleRelaySessionsJob`): one sweeps
 `Open` rooms whose `OpenedAt + backfillAfterSeconds` has passed and performs
-the same atomic start/backfill as `POST .../start`. AI nicknames are drawn
-from a server-side name pool with `Random.Shared`, uniqueness enforced per
-room.
+the same atomic start/backfill as `POST .../start` (AI nicknames drawn from a
+server-side pool, unique per room). Another closes stale rooms: `Playing`
+rooms whose host has had no live socket for > 60 s, and `Lobby`/`Open` rooms
+idle for > 60 min with no connected participants.
 
 ### 8.5 Security & generalization notes
 
@@ -419,10 +443,11 @@ guest prediction share exactly one code path; rendering consumes sim state.
 
 ## 12. Out of scope (v1)
 
-- Host migration mid-match; reconnect-and-resume a match in progress.
 - Fouls/cards/offside (kick-and-rush rules: out-of-bounds → throw-in style
   restart only, goals + kickoffs; keeps the sim and AI tractable).
 - Script-owned elo/leaderboards (requires the turn-based script subsystem);
   we use a publisher leaderboard with client-submitted results.
 - Replays, voice, in-game chat beyond lobby ready/chat (platform per-session
   chat requires scripted sessions).
+
+(Host migration and rejoin are IN scope — see §4.5.)

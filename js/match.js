@@ -81,29 +81,31 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     return mesh;
   }
 
-  function buildPlayers(rosterPlayers, myId, myName) {
+  function makeViewFor(p, name) {
+    const kit = TEAM_KITS[p.team];
+    const isMe = p.id === myPlayerId;
+    const view = createPlayerMesh({
+      kit: {
+        shirt: p.role === 'GK' ? kit.gk : kit.shirt,
+        shorts: kit.shorts,
+        socks: p.role === 'GK' ? kit.gk : kit.socks,
+        number: p.slot + 1,
+        gk: p.role === 'GK',
+      },
+      skin: rng(),
+      hair: HAIRS[Math.floor(rng() * HAIRS.length)],
+      name: isMe ? 'You' : name ?? p.name,
+      nameColor: kit.plate,
+      isYou: isMe,
+    });
+    scene.add(view.group);
+    return view;
+  }
+
+  function buildPlayers(rosterPlayers, myId) {
     for (const v of views) v.dispose();
     views = [];
-    for (const p of rosterPlayers) {
-      const kit = TEAM_KITS[p.team];
-      const isMe = p.id === myId;
-      const view = createPlayerMesh({
-        kit: {
-          shirt: p.role === 'GK' ? kit.gk : kit.shirt,
-          shorts: kit.shorts,
-          socks: p.role === 'GK' ? kit.gk : kit.socks,
-          number: p.slot + 1,
-          gk: p.role === 'GK',
-        },
-        skin: rng(),
-        hair: HAIRS[Math.floor(rng() * HAIRS.length)],
-        name: isMe ? 'You' : p.name,
-        nameColor: kit.plate,
-        isYou: isMe,
-      });
-      scene.add(view.group);
-      views[p.id] = view;
-    }
+    for (const p of rosterPlayers) views[p.id] = makeViewFor(p);
   }
 
   // ── public: start modes ───────────────────────────────────────────────────
@@ -119,7 +121,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     beginMatch();
   }
 
-  function startFromRoom({ room, teamSize, myUserId, netClient, isHost }) {
+  async function startFromRoom({ room, teamSize, myUserId, netClient, isHost, isRejoin = false }) {
     cleanup();
     net = netClient;
     mode = isHost ? 'host' : 'guest';
@@ -131,6 +133,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
         userId: part.userId, name: part.username, isAi: part.isAi,
         participantId: part.id,
       };
+      if (part.userId) seatByUserId.set(part.userId, id);
     }
     // map my user → player id
     myPlayerId = seats.findIndex((s) => s && s.userId === myUserId);
@@ -138,24 +141,60 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     const seed = room.seed ?? room.id?.length ?? 42;
     sim = createMatch({ teamSize, roster: seats, seed });
     kickoffTeam = room.kickoffTeam ?? (seed % 2);
-    beginMatch();
+
+    // Host rejoin: the sim lived in the old browser session. Ask still-connected
+    // guests for their latest snapshot; if nobody answers, restart from kickoff.
+    if (isRejoin && mode === 'host') {
+      net.sendMatchEvent({ type: 'state-request' });
+      const snap = await waitForStateResponse(2500);
+      if (snap) rehydrateFromSnapshot(snap);
+    }
+    beginMatch(isRejoin);
   }
 
-  function beginMatch() {
+  // Rebuild sim state from a snapshot (host rejoin recovery).
+  let rehydrated = false;
+  function rehydrateFromSnapshot(snap) {
+    if (!snap || !snap.players) return;
+    for (let i = 0; i < sim.players.length && i < snap.players.length; i++) {
+      Object.assign(sim.players[i], snap.players[i]);
+    }
+    if (snap.ball) Object.assign(sim.ball, snap.ball, { lastTouch: null, vx: 0, vy: 0, vz: 0 });
+    sim.score = [...(snap.score ?? sim.score)];
+    sim.time = snap.time ?? sim.time;
+    sim.half = snap.half ?? sim.half;
+    sim.phase = 'play';
+    rehydrated = true;
+  }
+
+  let stateResponseResolve = null;
+  function waitForStateResponse(ms) {
+    return new Promise((resolve) => {
+      stateResponseResolve = resolve;
+      setTimeout(() => { if (stateResponseResolve) { stateResponseResolve = null; resolve(null); } }, ms);
+    });
+  }
+
+  function beginMatch(skipIntro = false) {
     clearAiPlans();
     buildWorld(sim.pitch);
     buildPlayers(sim.players, myPlayerId);
-    resetKickoffSim();
-    phase = 'walkout';
-    phaseT = 8;
-    walkoutSetup();
+    if (skipIntro) {
+      phase = 'play';
+      if (!rehydrated) resetKickoffSim(); // unrecoverable host rejoin → fresh kickoff
+    } else {
+      resetKickoffSim();
+      phase = 'walkout';
+      phaseT = 8;
+      walkoutSetup();
+    }
     hud.showHud(true);
     hud.setTeamNames(TEAM_KITS[0].label, TEAM_KITS[1].label);
     input.showTouchUi(true);
     audio.crowd.setExcitement(0.6);
     stadium.crowd.setExcitement(0.6);
-    audio.crowd.cheer(0.9);
-    stadium.crowd.pulse(0.8);
+    audio.crowd.cheer(skipIntro ? 0.4 : 0.9);
+    if (!skipIntro) stadium.crowd.pulse(0.8);
   }
 
   function resetKickoffSim() {
@@ -417,6 +456,88 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     return participantSeats.get(pid) ?? null;
   }
 
+  const seatByUserId = new Map();
+  const offlineTimers = new Map();   // seat -> timeout id (AI stand-in pending)
+  const aiStandins = new Set();      // seats currently AI-controlled due to disconnect
+
+  // Server roster changed (e.g. a leaver's seat became AI): re-apply names/flags.
+  function applyRoster(participants) {
+    if (!sim) return;
+    for (const part of participants) {
+      const seat = part.team * sim.teamSize + part.slot;
+      const p = sim.players[seat];
+      if (!p) continue;
+      if (part.userId) seatByUserId.set(part.userId, seat);
+      const becameAi = part.isAi && !p.isAi;
+      p.isAi = !!part.isAi;
+      if (part.isAi) aiStandins.delete(seat); // server-side conversion is final
+      if (part.username && part.username !== p.name) {
+        p.name = part.username;
+        // rebuild the view so the name tag shows the new name
+        const old = views[seat];
+        if (old) { old.dispose(); views[seat] = makeViewFor(p); }
+      }
+      if (becameAi) guestInputs.delete(seat);
+      // Host migration: the server made me the host — take over the simulation
+      // from the last snapshot the old host sent.
+      const me = sim.players[myPlayerId];
+      if (mode === 'guest' && me && part.userId === me.userId && part.isHost) promoteToHost();
+    }
+  }
+
+  function promoteToHost() {
+    const snap = interp?.b;
+    mode = 'host';
+    predict = null;
+    interp = null;
+    guestInputs.clear();
+    if (snap) rehydrateFromSnapshot(snap);
+    snapTimer = 0;
+    hud.banner('HOST MIGRATED', 1500);
+  }
+
+  // Presence over the WS: a disconnected human gets an AI stand-in after a
+  // grace period; a reconnect restores their control.
+  function onPresence(msg) {
+    if (!sim || mode !== 'host' || msg.userId == null) return;
+    const seat = seatByUserId.get(msg.userId);
+    if (seat == null) return;
+    const p = sim.players[seat];
+    if (!p) return;
+    if (msg.online) {
+      clearTimeout(offlineTimers.get(seat));
+      offlineTimers.delete(seat);
+      if (aiStandins.has(seat)) { aiStandins.delete(seat); p.isAi = false; }
+    } else {
+      guestInputs.delete(seat);
+      clearTimeout(offlineTimers.get(seat));
+      offlineTimers.set(seat, setTimeout(() => {
+        offlineTimers.delete(seat);
+        if (sim && sim.phase !== 'end') { aiStandins.add(seat); p.isAi = true; }
+      }, 5000));
+    }
+  }
+
+  function handleNetEvent(ev) {
+    if (!ev || typeof ev !== 'object') return;
+    // guest: host rejoined and wants our latest snapshot (goes back to host only)
+    if (ev.type === 'state-request' && mode === 'guest') {
+      const snap = interp?.b;
+      if (snap) {
+        const { at, ...clean } = snap;
+        net?.sendMatchEvent({ type: 'state-response', snap: clean });
+      }
+      return;
+    }
+    if (ev.type === 'state-response' && mode === 'host' && stateResponseResolve) {
+      const resolve = stateResponseResolve;
+      stateResponseResolve = null;
+      resolve(ev.snap ?? null);
+      return;
+    }
+    handleSimEvent(ev);
+  }
+
   // ── events → audio / banners / crowd ──────────────────────────────────────
 
   function handleSimEvent(ev) {
@@ -522,6 +643,12 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     participantSeats = null;
     interp = null; predict = null;
     acc = 0; excitement = 0.3;
+    rehydrated = false;
+    stateResponseResolve = null;
+    for (const t of offlineTimers.values()) clearTimeout(t);
+    offlineTimers.clear();
+    aiStandins.clear();
+    seatByUserId.clear();
   }
 
   function dispose() {
@@ -540,7 +667,9 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     dispose,
     onSnapshot,
     onRemoteInput,
-    onNetEvent: (ev) => handleSimEvent(ev),
+    onNetEvent: (ev) => handleNetEvent(ev),
+    applyRoster,
+    onPresence,
     setParticipantSeats: (map) => { participantSeats = map; },
     set onFullTime(cb) { onFullTime = cb; },
     get phase() { return phase; },
