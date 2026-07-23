@@ -6,7 +6,7 @@ import { createInput } from './game/input.js';
 import { createHud } from './hud.js';
 import { createMatchController } from './match.js';
 import { createLobby } from './lobby.js';
-import { createNetClient } from './net.js';
+import { createNetClient, createGameClient } from './net.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -39,6 +39,7 @@ let match = null;
 let lobby = null;
 let teamSize = 5;
 let activeRoom = null;   // room the server says we're still a participant of
+let matchRoom = null;    // room the current match is played in (for Esc-leave)
 
 // ── screens ──
 const screens = ['screen-menu', 'screen-lobby', 'screen-invite', 'screen-result'];
@@ -181,47 +182,45 @@ function startPractice() {
 
 async function onMatchReady(room, { isRejoin = false } = {}) {
   // room.status === Playing with frozen roster (AI seats backfilled)
-  showScreen(null);
   const cfg = room.config || room;
   const ts = cfg.seatsPerTeam ?? teamSize;
   const me = api.getAuth();
-  const isHost = (room.hostUserId ?? room.host?.userId) === me.userId;
 
-  const net = createNetClient({ roomId: room.id, getToken: () => me.token });
+  // The platform runs the authoritative match as a scripted game session.
+  const sessionId = room.gameSessionId;
+  if (!sessionId) {
+    setStatus('Match session unavailable — the server could not start the game.');
+    showScreen('screen-menu');
+    return;
+  }
+
+  showScreen(null);
+  matchRoom = room;
   const m = ensureMatch();
+
+  // gameplay transport: server-authoritative games socket
+  const gameNet = createGameClient({ sessionId, getToken: () => me.token });
   try {
-    await net.connect({
+    await gameNet.connect({
       onSnapshot: (snap) => m.onSnapshot(snap),
-      onInput: (inp, fromId) => m.onRemoteInput(inp, fromId),
       onEvent: (ev) => m.onNetEvent(ev),
-      onRoster: (parts) => m.applyRoster(parts),
-      onPresence: (msg) => m.onPresence(msg),
-      onClose: () => { if (m.phase !== 'done') { setStatus('Connection lost'); backToMenu(); } },
+      onClose: () => { if (match && match.phase !== 'done') { setStatus('Connection lost'); backToMenu(); } },
     });
   } catch (e) {
     setStatus(`Could not connect: ${e.message}`);
     return backToMenu();
   }
 
-  // participant id → seat mapping for the host
-  const seatMap = new Map();
-  for (const p of room.participants || []) {
-    seatMap.set(p.id, p.team * ts + p.slot);
-  }
-  m.setParticipantSeats(seatMap);
-  await m.startFromRoom({ room, teamSize: ts, myUserId: me.userId, netClient: net, isHost, isRejoin });
+  // realtime rooms socket stays for roster pushes (name/AI flag changes)
+  const lobbyNet = createNetClient({ roomId: room.id, getToken: () => me.token });
+  lobbyNet.connect({
+    onRoster: (parts) => m.applyRoster(parts),
+  }).catch(() => { /* ancillary — snapshots carry the same data */ });
 
-  // host reports the result
-  if (isHost) {
-    const prev = m.onFullTime;
-    m.onFullTime = (result) => {
-      api.submitResult(room.id, {
-        teamScores: result.score,
-        metadata: { possession: result.stats.possession, shots: result.stats.shots },
-      }).catch(() => {});
-      prev(result);
-    };
-  }
+  await m.startFromRoom({
+    room, teamSize: ts, myUserId: me.userId,
+    netClient: gameNet, lobbyNetClient: lobbyNet, isRejoin,
+  });
 }
 
 function showResult(result) {
@@ -230,10 +229,14 @@ function showResult(result) {
   $('result-title').textContent =
     winner === -1 ? 'DRAW' : (winner === myTeam ? 'VICTORY' : 'DEFEAT');
   $('result-score').textContent = `${score[0]} – ${score[1]}`;
-  const poss = stats.possession[0] + stats.possession[1] || 1;
-  $('result-stats').innerHTML =
-    `Possession: ${Math.round(100 * stats.possession[0] / poss)}% – ${Math.round(100 * stats.possession[1] / poss)}%<br>` +
-    `Shots: ${stats.shots[0]} – ${stats.shots[1]}`;
+  if (stats) {
+    const poss = stats.possession[0] + stats.possession[1] || 1;
+    $('result-stats').innerHTML =
+      `Possession: ${Math.round(100 * stats.possession[0] / poss)}% – ${Math.round(100 * stats.possession[1] / poss)}%<br>` +
+      `Shots: ${stats.shots[0]} – ${stats.shots[1]}`;
+  } else {
+    $('result-stats').innerHTML = '';
+  }
   showScreen('screen-result');
 }
 
@@ -246,8 +249,28 @@ function backToMenu() {
 }
 
 function disposeMatch() {
-  if (match) { match.dispose(); match = null; }
+  const m = match;
+  match = null; // null first: the games client's final onClose must not reenter
+  matchRoom = null;
+  $('leave-confirm').classList.add('hidden');
+  if (m) m.dispose();
 }
+
+// ── in-match leave (Esc) ──
+addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!match || match.phase === 'done' || !matchRoom) return;
+  $('leave-confirm').classList.toggle('hidden');
+});
+$('btn-leave-no').onclick = () => { audio.ui(); $('leave-confirm').classList.add('hidden'); };
+$('btn-leave-yes').onclick = async () => {
+  audio.ui();
+  const room = matchRoom;
+  $('leave-confirm').classList.add('hidden');
+  if (room) { try { await api.leaveRoom(room.id); } catch { /* already gone */ } }
+  activeRoom = null;
+  backToMenu();
+};
 
 // ── boot ──
 lobby = createLobby({ onMatchReady, onLeave: () => showScreen('screen-menu'), setStatus });

@@ -141,7 +141,7 @@ function mesh(geo, mat, x, y, z, parent) {
 export function createPlayerMesh(opts = {}) {
   const kit = opts.kit || { shirt: '#cc2222', shorts: '#ffffff', socks: '#cc2222', number: 9, gk: false };
   const gk = !!kit.gk;
-  const number = kit.number == null ? 9 : kit.number;
+  const number = kit.number == null ? null : kit.number; // null → no back number
 
   const skinColor = new THREE.Color().lerpColors(SKIN_A, SKIN_B, Math.min(1, Math.max(0, opts.skin == null ? 0.5 : opts.skin)));
   const skinKey = `#${skinColor.getHexString()}`;
@@ -172,9 +172,11 @@ export function createPlayerMesh(opts = {}) {
   torso.position.y = 0.10;
   pelvis.add(torso);
   mesh(GEO.torso, shirtMat, 0, 0.27, 0, torso);
-  const numMesh = mesh(GEO.number, numberMaterial(number, kit.shirt), -0.20, 0.30, 0, torso);
-  numMesh.rotation.y = -Math.PI / 2; // face backward (-x)
-  numMesh.castShadow = false;
+  if (number != null) {
+    const numMesh = mesh(GEO.number, numberMaterial(number, kit.shirt), -0.20, 0.30, 0, torso);
+    numMesh.rotation.y = -Math.PI / 2; // face backward (-x)
+    numMesh.castShadow = false;
+  }
 
   // Head + hair cap.
   const head = new THREE.Group();

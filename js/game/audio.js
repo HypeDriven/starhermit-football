@@ -350,6 +350,56 @@ export function createAudio() {
       });
     },
 
+    injury() {
+      if (!ready()) return;
+      const t = ctx.currentTime + 0.001;
+      const pan = rand(-0.2, 0.2);
+      // Human-ish yelp: band-passed sawtooth, pitch drops as the cry dies.
+      for (const det of [-7, 5]) {
+        const osc = ctx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(rand(520, 640), t);
+        osc.frequency.exponentialRampToValueAtTime(rand(240, 300), t + 0.28);
+        osc.detune.value = det;
+
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.setValueAtTime(rand(900, 1200), t);
+        bp.frequency.exponentialRampToValueAtTime(450, t + 0.3);
+        bp.Q.value = 1.6;
+
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(rand(0.06, 0.1), t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+
+        osc.connect(bp);
+        bp.connect(g);
+        chainTail(g, sfxBus, pan);
+        osc.start(t);
+        osc.stop(t + 0.4);
+      }
+      // Soft thud as the player hits the turf.
+      tone(sfxBus, t + 0.05, {
+        freq: rand(90, 110),
+        freqEnd: 42,
+        gain: rand(0.14, 0.2),
+        dur: 0.14,
+        attack: 0.003,
+        pan,
+      });
+      noiseBurst(sfxBus, t + 0.05, {
+        freq: rand(500, 800),
+        freqEnd: 220,
+        q: 1,
+        gain: rand(0.06, 0.1),
+        dur: 0.12,
+        attack: 0.004,
+        rate: rand(0.85, 1.1),
+        pan,
+      });
+    },
+
     footstep() {
       if (!ready()) return;
       const t = ctx.currentTime + 0.001;
@@ -505,6 +555,50 @@ export function createAudio() {
           dur,
           attack: 0.06,
           rate: rand(0.85, 1.1),
+        });
+      },
+
+      boo(strength) {
+        if (!ready()) return;
+        const s = clamp01(strength == null ? 1 : strength);
+        const t = ctx.currentTime + 0.001;
+        const dur = rand(1.8, 2.3);
+        // Descending 'booo': low-mid sawtooth cluster gliding slowly down,
+        // darker and quieter than the ooh.
+        const startF = rand(150, 180);
+        for (const det of [-16, -5, 6, 15]) {
+          const osc = ctx.createOscillator();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(startF + rand(-5, 5), t);
+          osc.frequency.exponentialRampToValueAtTime(rand(85, 105), t + dur * 0.9);
+          osc.detune.value = det;
+
+          const lp = ctx.createBiquadFilter();
+          lp.type = 'lowpass';
+          lp.frequency.setValueAtTime(rand(500, 700), t);
+          lp.frequency.exponentialRampToValueAtTime(240, t + dur);
+
+          const g = ctx.createGain();
+          const peak = rand(0.04, 0.07) * (0.5 + s * 0.5);
+          g.gain.setValueAtTime(0.0001, t);
+          g.gain.exponentialRampToValueAtTime(peak, t + rand(0.12, 0.25));
+          g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+          osc.connect(lp);
+          lp.connect(g);
+          chainTail(g, crowdBus, rand(-0.35, 0.35));
+          osc.start(t);
+          osc.stop(t + dur + 0.05);
+        }
+        // Low rumbling discontent under the vowel.
+        noiseBurst(crowdBus, t, {
+          freq: rand(350, 500),
+          freqEnd: rand(220, 320),
+          q: 0.8,
+          gain: rand(0.12, 0.2) * (0.5 + s * 0.5),
+          dur,
+          attack: 0.15,
+          rate: rand(0.7, 0.9),
         });
       },
 

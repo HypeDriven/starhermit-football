@@ -768,6 +768,7 @@ export function buildStadium(scene, opts) {
   let excTarget = 0;
   let exc = 0;
   let pulseV = 0;
+  let booV = 0;
   let cursor = 0;
   const CHUNK = Math.max(1, Math.ceil(cN / 8)); // animate 1/8 of crowd per frame
   const carr = crowdMesh.instanceMatrix.array;
@@ -777,19 +778,23 @@ export function buildStadium(scene, opts) {
     t += step;
     exc += (excTarget - exc) * Math.min(1, step * 2.5);
     pulseV *= Math.exp(-2.0 * step);
+    booV *= Math.exp(-0.9 * step); // anger lingers longer than joy
     const energy = Math.min(1, exc + pulseV);
 
     // crowd sway/bounce (rotating subset, cheap matrix translation writes)
-    const amp = 0.02 + 0.3 * energy;
+    // boo: the joyful bounce is damped and a fast jittery shake takes over
+    const amp = 0.02 + 0.3 * energy * (1 - booV * 0.65);
     const spd = 2.4 + 5.5 * energy;
     const sway = 0.02 * (0.3 + energy);
+    const shake = 0.09 * booV;
     const end = Math.min(cursor + CHUNK, cN);
     for (let i = cursor; i < end; i++) {
       const o = i * 16;
       const ph = phase[i];
       const j = Math.sin(t * spd * freqV[i] + ph);
-      carr[o + 13] = baseY[i] + (j > 0 ? j * j : 0) * amp * ampV[i];
-      carr[o + 12] = baseX[i] + Math.sin(t * 1.1 + ph * 1.7) * sway;
+      const bj = Math.sin(t * 12.7 * freqV[i] + ph * 2.9);
+      carr[o + 13] = baseY[i] + (j > 0 ? j * j : 0) * amp * ampV[i] + bj * shake * ampV[i];
+      carr[o + 12] = baseX[i] + Math.sin(t * 1.1 + ph * 1.7) * sway + Math.sin(t * 9.3 + ph * 4.1) * shake * 0.4;
       carr[o + 14] = baseZ[i] + Math.cos(t * 0.9 + ph) * sway;
     }
     cursor = end >= cN ? 0 : end;
@@ -853,6 +858,9 @@ export function buildStadium(scene, opts) {
       },
       pulse(strength) {
         pulseV = Math.max(pulseV, Math.min(1, Math.max(0, +strength || 0)));
+      },
+      boo(strength) {
+        booV = Math.max(booV, Math.min(1, Math.max(0, +strength || 0)));
       },
     },
     setNight,

@@ -80,6 +80,18 @@
 
 <div id="loading"><div class="logo small-logo">STARHERMIT FOOTBALL</div><div id="loading-msg">Loading…</div></div>
 
+<!-- Leave-match confirm (Esc in match) -->
+<div id="leave-confirm" class="screen hidden">
+  <h2>LEAVE MATCH?</h2>
+  <div class="muted">An AI player takes over your footballer.</div>
+  <div class="menu-buttons">
+    <button id="btn-leave-yes" class="mbtn danger">LEAVE MATCH</button>
+    <button id="btn-leave-no" class="mbtn primary">KEEP PLAYING</button>
+  </div>
+</div>
+
+<!-- Shared sim core + server script: classic script, must load before modules -->
+<script src="server.js"></script>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

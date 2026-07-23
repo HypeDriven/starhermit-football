@@ -34,22 +34,31 @@ against an AI opponent. Desktop and mobile browsers.
 
 ## 2. Platform reality check (from wiki.starhermit.com)
 
-The platform offers two multiplayer substrates today:
+The platform offers three multiplayer substrates:
 
-- **Scripted games** (`server.js` in a Jint sandbox): server-authoritative but
-  turn-based — `onTick` fires at best every 15 s, stateless ~250 ms
-  invocations, 16 KB text frames. Reference game is correspondence chess.
-  **Not viable for realtime football.**
+- **Scripted games** (`server.js` in a Jint sandbox): server-authoritative.
+  Fresh stateless invocations (~250 ms CPU budget), 16 KB text frames, all
+  state round-tripped through JSON documents. The platform's tick service now
+  supports **per-game tick rates** (`GameDefinition.TickRateHz`, 30 Hz default,
+  clamped to 1000 Hz), and realtime rooms can be **bound to an N-player
+  scripted session** whose ctx carries the room roster (AI seats included) and
+  live presence — enough to run a realtime football sim server-side.
+  Reference game is correspondence chess (low tick rate, turn-based flow).
 - **Peer relay** (`ws/v1/relay`): binary fan-out, but disabled by default,
   `maxParticipants` defaults to 8, 4 KB frames, 10 msgs/s/user, max 5 sessions
   per title, no host/authority concept, no invites/matchmaking/backfill.
   **Insufficient for 22-player football.**
+- **Realtime Rooms** (`/api/v1/realtime`, `ws/v1/realtime`): generalized
+  lobbies — rooms, seats, invites, quick-join matchmaking, AI-seat backfill —
+  added by this project (§8). With the room⇄script bridge they now also create
+  the room-bound scripted session that runs the match.
 
-Nothing in the current API supports: lobbies, >2-player sessions, party
-matchmaking, team assignment, AI backfill, or realtime tick rates. Therefore
-this project adds a new **Realtime Rooms** subsystem to the StarHermit backend
-(§8), designed generically so any fast-paced game can use it, and builds the
-football client on top of it.
+The earlier verdict that scripted games are "not viable for realtime" is
+outdated: tick-rate support plus room-bound sessions make the Jint sandbox a
+viable authoritative match server at 30 Hz. This project therefore runs the
+football simulation as a **scripted game** (`server.js`, §3) and uses Realtime
+Rooms for what they are good at: lobby, invites, matchmaking, backfill,
+roster, and reconnect.
 
 What we reuse as-is from the platform:
 
@@ -59,8 +68,8 @@ What we reuse as-is from the platform:
 - GitHub-games hosting: `starhermit.txt` manifest, static site served at
   `<slug>.starhermit.com`, `/api` + `/ws` proxied same-origin (client uses
   relative URLs only — no base URL, no CORS config).
-- Publisher-defined leaderboard for results reporting (client-submitted,
-  min/max validated) — no script-owned elo since we have no game script.
+- Scripted-games substrate: tick service (30 Hz for this game), gameplay
+  transport `ws/v1/games`, script-owned per-player state/elo via `eloUpdates`.
 
 ## 3. High-level architecture
 
@@ -68,26 +77,29 @@ What we reuse as-is from the platform:
 ┌────────────────────────────┐        ┌──────────────────────────────┐
 │  Browser client (this repo)│        │  StarHermit backend          │
 │  - three.js renderer       │  WS+   │  (../starhermit)             │
-│  - local input → host      │  REST  │  - Realtime Rooms REST + WS  │
-│  - host client = authority │◀──────▶│  - launch tokens / friends   │
-│    simulation + AI         │        │  - leaderboard               │
+│  - inputs up, snapshots    │  REST  │  - Jint sandbox: server.js   │
+│    down (ws/v1/games)      │◀──────▶│    authoritative sim @30 Hz  │
+│  - lobby UI (rooms API)    │        │  - Realtime Rooms (lobby)    │
+│                            │        │  - launch tokens / friends   │
 └────────────────────────────┘        └──────────────────────────────┘
 ```
 
-**Host-authoritative model.** The platform server is a smart transport, not a
-simulator: the room creator's browser runs the authoritative simulation
-(physics, AI, score) at 30 Hz and broadcasts snapshots; other clients send
-only their *inputs* (move vector, sprint, action buttons) to the host. This is
-the standard listen-server pattern and is the only model compatible with a
-server that cannot run a realtime simulation. The server enforces routing,
-roles, capacity, rate limits, and identity (§8.5) — clients cannot spoof each
-other, and only the server-assigned host can broadcast snapshots.
+**Server-authoritative model.** The platform runs `server.js` — the match
+simulation (physics, AI, score, injury/substitution ceremonies) — inside the
+Jint sandbox, ticked at the game's configured rate (30 Hz). Clients send only
+their *inputs* (move vector, sprint, action buttons; ~20 Hz `cmd` frames over
+`ws/v1/games`) and render the script's broadcast snapshots (~15 Hz) with 100 ms
+interpolation. No client has any authority: the script validates every input,
+owns the score and clock, and ends the match by returning `result`. Realtime
+Rooms still handle the pre-match world — lobby, invites, matchmaking, AI-seat
+backfill, roster — and the room⇄script bridge (§8) creates the bound session
+at room start and closes the room when the script returns `result`.
 
-Trade-offs (accepted): the host client could theoretically cheat its own
-simulation; mitigations are out of scope for v1 (competitive integrity on this
-platform is already trust-based for non-scripted games). Resilience — AI
-takeover on leave, disconnect stand-ins, host migration, and host rejoin
-state recovery — is covered in §4.5.
+Trade-offs (accepted): per-invocation statelessness means all sim state
+round-trips through the JSON `sessionState` document (the sim keeps this small
+— quantized snapshots, RNG stored as data, rehydrated each invocation). The
+~250 ms per-invocation CPU budget is comfortable at 30 Hz for a 22-seat sim.
+Leaving, rejoining, and the all-humans-gone rule are covered in §4.5.
 
 ## 4. Game flow
 
@@ -102,7 +114,8 @@ state recovery — is covered in §4.5.
   matchmaking. After 30 s, remaining seats become AI. Team size selectable
   1–11 per side; lobby party is pinned to the same team.
 - **Practice (1 vs AI)** — offline-capable path: no room needed, local
-  simulation, you + AI opponent(s). Uses the same code with a loopback "host".
+  simulation, you + AI opponent(s). Runs the same `server.js` sim code
+  in-browser, looped back locally.
 
 ### 4.2 Lobby & matchmaking sequence
 
@@ -125,43 +138,62 @@ When the 30 s window expires (or the host force-starts early), the host calls
 with an **AI seat**: a participant record flagged `ai: true` with a
 server-generated random nickname (name pool: plausible footballer handles,
 e.g. "Rafa Vento", "Moss Kante", seeded by the server so all clients agree).
-The room is locked (`status=playing`) and the frozen roster is the match
-roster. AI seats are simulated on the host client with position-appropriate
-personalities (§7). Practice mode skips the server entirely.
+The room is locked (`status=playing`), the frozen roster is the match roster,
+and the room⇄script bridge creates the bound GameSession (`server.js`'s
+`createSession` receives the full roster, AI seats included, as
+`ctx.room.roster`). AI seats are simulated by `server.js` server-side with
+position-appropriate personalities (§7). Practice mode skips the server
+entirely.
 
 ### 4.4 Match sequence
 
 1. **Walkout** (~8 s): camera on tunnel, both teams walk out side by side,
    crowd cheer swells, players take formation positions.
 2. **Coin flip**: center-circle close-up; referee flips a coin; winner chooses
-   and kicks off (server/host RNG decides; animation shows the result).
+   and kicks off (server-side RNG inside `server.js` decides; animation shows
+   the result).
 3. **Play**: 2 halves × configurable length (default 3 min). Kickoff after
    each goal, teams swap sides at half time.
 4. **Full time**: final whistle, crowd reaction by result, celebration
    animation for winners, stats screen (score, possession, shots), then
-   back to lobby / report result to leaderboard.
+   back to lobby. The script ends the match by returning `result`
+   (`{ score, winner, draw }`); the platform stores it and closes the room.
 
-### 4.5 Leaving, rejoining, and host migration
+### 4.5 Leaving, rejoining, and the injury ceremony
+
+Mid-match absence is handled **server-side by the script** — the sim watches
+`ctx.presence` on every tick/message. There is no host to migrate; the host
+migration and host rejoin recovery machinery of the old design is gone.
 
 - **Rejoin**: the menu checks `GET /rooms/mine` on load and shows a
   **REJOIN MATCH** (Playing) or **RETURN TO LOBBY** button. Starting anything
   else (Quick Play / Create Lobby / Practice) while in a room prompts for
-  confirmation first.
-- **AI takeover on leave**: explicitly leaving a Playing room converts the
-  leaver's seat into an AI seat (new server-generated nickname, roster push) —
-  the match continues and the user is free to join something else.
-- **Disconnect stand-in**: if a guest's socket drops, the host zeroes their
-  input and an AI stand-in takes over their footballer after a 5 s grace
-  period; reconnecting restores control. A Playing room whose host has no
-  connection for > 60 s is closed by a server sweep.
-- **Host migration**: if the host leaves with other humans present, the server
-  transfers `IsHost` to the longest-joined human; that client takes over the
-  simulation by rehydrating from the last snapshot it received.
-- **Host rejoin recovery**: a rejoining host broadcasts `state-request`; any
-  still-connected guest answers with its latest snapshot
-  (`state-response`, guest→host routing), and the host rehydrates its sim
-  (score, clock, positions). With no guests left to answer, the match
-  restarts from kickoff.
+  confirmation first. Reconnecting to the match means rejoining the room WS
+  plus `ws/v1/games?sessionId=…` and sending a `sync` cmd for a fresh snapshot.
+- **Explicit leave**: `POST .../rooms/{id}/leave` converts the leaver's seat
+  into an AI seat **permanently** (new server-generated nickname, roster push,
+  `presence.left=true`). The match continues and the user is free to join
+  something else; there is no rejoin for that seat.
+- **Disconnect grace**: if a player's sockets drop (`presence.online=false`),
+  the AI immediately takes over their footballer, with a **5 s grace period**
+  before the absence becomes official; reconnecting within grace restores
+  control silently.
+- **Injury ceremony (~10 s)**: once the grace lapses (or a human leaves
+  explicitly), the sim enters the `injury` phase and plays a stretcher
+  ceremony: the footballer falls → the referee runs over and blows the whistle
+  → two carriers bring the stretcher, load the player, and carry them off
+  through the tunnel → the AI substitute runs on from the tunnel and takes the
+  seat → the crowd boos the departure (or cheers a return) → play restarts
+  with a **drop ball** at the injury spot. The same ceremony runs in reverse
+  (`kind: 'rejoin'`) when a disconnected human comes back and retakes their
+  seat. Ceremony progress is broadcast in snapshots (`snap.cer`) and as `ev`
+  events (`injury-start`, `referee-whistle`, `stretcher-load`,
+  `stretcher-off`, `substitution`, drop-ball `restart`); triggers during a
+  ceremony or during goal/halftime queue and play one at a time.
+- **All humans gone**: if no human seat remains occupied (all left or offline
+  past grace), the script ends the match as a **draw** — broadcasts
+  `abandoned-draw`, returns `result { draw: true, score }`, and the platform
+  finishes the session and closes the room.
 
 ## 5. Client: rendering & presentation
 
@@ -247,29 +279,37 @@ ratio, crowd LOD, no post-processing on mobile.
 
 ## 6. Netcode (client side)
 
-- Transport: `ws/v1/realtime?roomId=…` (new, §8). Binary frames
-  (`ArrayBuffer`) for gameplay; small JSON control frames for lobby chat
-  presence/ready flags.
-- **Guests → host**: input packets at 20 Hz: `{seq, moveX, moveZ, sprint,
-  buttons}` bit-packed (~12 B). Guests run client-side prediction for their
-  own footballer and reconcile on snapshots (position blend, error < 0.3 m
-  is rubber-banded smoothly).
-- **Host → room**: snapshot at 15 Hz: full ball state + per-player
-  `{pos, vel, animState, facing}` quantized (22 × ~14 B + ball ≈ 320 B — well
-  under frame limits). Events (kick contact, goal, whistle, card) sent as
-  reliable JSON control frames.
-- **Guests** interpolate remote entities 100 ms behind the newest snapshot
-  (snapshot interpolation buffer), extrapolate ball on kicks.
-- Clock: host stamps snapshots; guests estimate offset from arrival jitter.
-- Match results: host POSTs final score to the room (`.../rooms/{id}/result`)
-  which the server validates against the roster and records; clients then
-  show stats. Leaderboard submit (goals/wins) is per-player, min/max clamped
-  server-side — acknowledged weak integrity (documented platform-wide for
-  non-scripted games).
+- Gameplay transport: `ws/v1/games?sessionId=…` (the scripted-games socket) —
+  JSON **text frames** only, ≤ 16 KB. The realtime-rooms WS
+  (`ws/v1/realtime?roomId=…`) remains connected for lobby/roster/presence only.
+- **Client → server**: input cmds at ~20–30 Hz inside the platform `cmd`
+  envelope: `{type:'input', seq, mx, mz, sprint, pass, shoot, tackle}`
+  (`mx`/`mz` normalized world-space move vector, `shoot` = release power,
+  one-shot flags on the triggering frame). `{type:'sync'}` requests a full
+  snapshot (sent on connect/reconnect).
+- **Server → client**: the script broadcasts `{type:'snap', …}` at ~15 Hz —
+  full state as compact quantized arrays (floats rounded to 2 decimals): match
+  clock/half/phase/score, ball `[x,y,z,vx,vy,vz,owner]`, one flat array per
+  player (pos, vel, facing, anim state + speed, kick/tackle/stun/dive timers,
+  isAi, name), plus `cer` ceremony state. ~0.5–3 KB per snap depending on
+  phase. Discrete moments (kick, goal, whistle, ceremony beats) go out as
+  `{type:'ev', ev}` broadcasts, one per sim event, in order.
+- **Clients** interpolate all entities 100 ms behind the newest snapshot
+  (snapshot interpolation buffer), extrapolate ball on kicks. There is **no
+  host prediction authority**: nothing a client computes is authoritative —
+  even your own footballer is rendered from server snapshots.
+- Clock: the server stamps snapshots (`ts`); clients estimate offset from
+  arrival jitter.
+- Match results: the script ends the match by returning `result`
+  (`{score, winner, draw}`); the platform stores it, finishes the session, and
+  closes the room (§8). Clients show stats from the final snapshot/result.
+  Script-owned per-player records are updated via `eloUpdates` — no
+  client-submitted scores anywhere.
 
 ## 7. AI
 
-AI runs on the host for every AI seat (and for *all* seats in Practice mode).
+AI runs inside `server.js` on the platform for every AI seat (and for *all*
+seats in Practice mode, where the client runs the same code locally).
 Each AI footballer has a **personality**: `{ aggression, positioning,
 dribbling, passing, workRate }` sampled at roster creation plus a random
 nickname from the server.
@@ -292,16 +332,22 @@ tick):
 
 New generalized subsystem for realtime multiplayer games. Deliberately not
 football-specific: rooms, seats, invites, quick-join matchmaking, AI-seat
-backfill, host-authoritative frame routing.
+backfill, roster/presence pushes. For this game the rooms layer handles only
+the pre-match world (lobby/roster); gameplay runs in a room-bound scripted
+session via the room⇄script bridge (§8.7).
 
 ### 8.1 Data model (Platform.Domain / Persistence)
 
 - `RealtimeRoom` — `Id, GameSlug, HostUserId, Status (Lobby|Open|Playing|
   Closed), ConfigJson { teamCount, seatsPerTeam, backfillAfterSeconds,
-  metadata }, CreatedAt, OpenedAt, StartedAt, ClosedAt`.
+  metadata }, GameSessionId (bound scripted session, once started), CreatedAt,
+  OpenedAt, StartedAt, ClosedAt`.
 - `RealtimeParticipant` — `Id, RoomId, UserId (null for AI), Username, IsAi,
   IsHost, Team, Slot, JoinedAt, LeftAt`.
 - `RealtimeInvite` — `Id, RoomId, FromUserId, ToUserId, Status, CreatedAt`.
+- `GameSession.RealtimeRoomId` links a scripted session back to its room
+  (migration `20260722200822_RoomScriptSessions`); `GameDefinition.TickRateHz`
+  holds the per-game tick rate (migration `20260722140138_GameTickRates`).
 - EF Core migration + `StarhermitDbContext.Realtime.cs` partial, mirroring the
   existing Relay persistence style.
 
@@ -317,7 +363,7 @@ backfill, host-authoritative frame routing.
 | POST | `/rooms/invites/{inviteId}/decline` | 204. |
 | POST | `/rooms/{id}/open` | Host: open to matchmaking; starts backfill timer. |
 | POST | `/rooms/quick-join` | Body `{ gameSlug (implied by token), seats: 1 }` → placed in oldest open room with free seats for this game, else 404 (client then creates its own open room). |
-| POST | `/rooms/{id}/start` | Host: AI-backfill empty seats, status→Playing, returns frozen roster. Idempotent; auto-invoked by a worker at backfill deadline. |
+| POST | `/rooms/{id}/start` | Host: AI-backfill empty seats, status→Playing, returns frozen roster. Idempotent; auto-invoked by a worker at backfill deadline. Also creates the room-bound scripted session (§8.7). |
 | POST | `/rooms/{id}/leave` | Leave. In Lobby/Open the seat is removed (host leaving transfers host to the longest-serving human; none left → Closed). In Playing the seat converts to an AI participant (fresh server nickname, roster pushed) so the match continues; host leaving transfers `IsHost` to the longest-serving remaining human, or closes the room if none remain. |
 | POST | `/rooms/{id}/result` | Host: submit result JSON (validated vs roster, score sanity-clamped); stored on room, fan-out over WS. |
 | GET | `/rooms/mine` | Caller's active room, if any (reconnect). |
@@ -378,6 +424,34 @@ xUnit suite in `tests/` mirroring existing patterns: room lifecycle
 seat caps, host transfer, WS routing/rate-limit behavior via handler-level
 tests.
 
+### 8.7 Realtime rooms ⇄ script bridge
+
+The bridge lets a realtime room run its match as a server-authoritative
+scripted session instead of on a host client:
+
+- **Session creation on room start**: when a room enters `Playing` (host
+  force-start or backfill worker), the platform creates an N-player
+  `GameSession` for the game's `server=` script — one `GameSessionPlayer` per
+  human (AI seats are roster-only, not session players) — and links both sides:
+  `GameSession.RealtimeRoomId` and `RealtimeRoom.GameSessionId`. The room DTO
+  and roster push carry `gameSessionId` so clients know which
+  `ws/v1/games?sessionId=…` to connect to.
+- **Extended ctx**: every script invocation for a room-bound session
+  (`createSession`, `onPlayerMessage`, `onTick`) receives
+  `ctx.room = { roomId, metadata, roster }` — the frozen roster, humans and AI
+  seats, ordered by team then slot — and
+  `ctx.presence = { "<userId>": { online, left } }` for every user who is or
+  was a human participant (`online` = a live socket on either WS registry;
+  `left` = the seat was explicitly left and converted to AI). The script
+  drives AI takeover, the injury ceremony, and the all-humans-gone rule from
+  this (§4.5).
+- **Result closes the room**: when the script returns `result` (full time, or
+  the abandoned-draw), the platform finishes the session, stores the result on
+  the room, and closes the room — no host-submitted `POST .../result` for
+  room-bound games.
+- **Tick rate**: the session ticks at `GameDefinition.TickRateHz` (30 Hz for
+  this game; 30 Hz platform default, clamped to 1–1000 Hz).
+
 ## 9. Audio (client, WebAudio — all synthesized, no assets)
 
 - **Ball contact**: layered thump (filtered noise burst + sine thud), pitch/
@@ -389,34 +463,44 @@ tests.
   full swell + air-horn-ish partials for home/away bias. Randomized timing,
   filter, and pan per event → non-repetitive.
 - **Whistle** (referee): two detuned square oscillators with vibrato.
+- **Injury ceremony**: referee whistle on stoppage, crowd **boos** (low,
+  jeering filtered-noise band with descending pitch) when a player is carried
+  off, a warm cheer when a substitute / returning player runs on — all driven
+  by the ceremony `ev` events (§4.5).
 - **Kickoff ambience**: tunnel murmur → swell as teams walk out.
 - Mute + volume in settings; `AudioContext` resumed on first user gesture.
 
 ## 10. Client code layout
 
 ```
-starhermit.txt          # manifest (slug=football, launch=index.html)
+starhermit.txt          # manifest (slug=football, launch=index.html, server=server.js)
+server.js               # authoritative match sim — platform Jint sandbox (30 Hz);
+                        #   also loaded client-side as the shared sim core
 index.html              # shell: canvas, HUD, lobby screens, touch UI
 css/style.css
 js/main.js              # boot, screens state machine (menu→lobby→match)
 js/api.js               # REST client (launch token, friends, rooms, leaderboard)
-js/net.js               # realtime WS client, snapshot buffer, prediction
+js/net.js               # ws/v1/games client: cmd inputs up, snapshot buffer, interpolation
 js/lobby.js             # lobby UI: invites, seats, countdown, quick play
-js/match.js             # match controller: walkout→coin flip→halves→fulltime
+js/match.js             # match controller: walkout→coin flip→halves→fulltime→ceremonies
 js/world/stadium.js     # pitch, stands, floodlights, boards, crowd instancing
 js/world/player.js      # character factory (kits, numbers)
 js/world/animator.js    # procedural animation state machine
 js/world/nametags.js    # floating nickname sprites
-js/game/sim.js          # shared simulation core (physics, ball, rules) — runs on host & offline
-js/game/ai.js           # personalities, roles, utility AI
+js/world/officials.js   # referee + stretcher carriers (injury ceremony actors)
+js/game/sim.js          # thin wrapper re-exporting FootballSim from server.js
+js/game/ai.js           # thin wrapper re-exporting the AI from server.js
 js/game/input.js        # keyboard + touch joystick/buttons
 js/game/camera.js       # follow cam + off-screen ball arrow
 js/game/audio.js        # WebAudio SFX + crowd engine
 vendor/three/           # three.module.js (+ addons actually used)
 ```
 
-`sim.js` is dependency-free (no three imports) so the host simulation and
-guest prediction share exactly one code path; rendering consumes sim state.
+`server.js` is dependency-free (no three imports, no DOM) so the platform's
+Jint sandbox and the browser run exactly one simulation code path: the browser
+loads it as a classic script before the ES-module graph, and `sim.js`/`ai.js`
+re-export `globalThis.FootballSim`. Rendering consumes sim state; online
+matches render from server snapshots only.
 
 ## 11. Phased implementation plan
 
@@ -436,8 +520,8 @@ guest prediction share exactly one code path; rendering consumes sim state.
 7. **Audio** — SFX + crowd engine wired to match events.
 8. **Match presentation** — walkout, coin flip, kickoffs, half time, full
    time, stats.
-9. **Networking** — net client, host/guest sync, prediction/interpolation,
-   lobby screens wired to Realtime Rooms API, invites, quick-join, backfill.
+9. **Networking** — `ws/v1/games` net client, snapshot interpolation, lobby
+   screens wired to Realtime Rooms API, invites, quick-join, backfill.
 10. **Polish & verification** — mobile QA pass, perf caps, README, final
     manual test matrix (desktop Chrome/Firefox, mobile Safari/Chrome).
 
@@ -445,9 +529,5 @@ guest prediction share exactly one code path; rendering consumes sim state.
 
 - Fouls/cards/offside (kick-and-rush rules: out-of-bounds → throw-in style
   restart only, goals + kickoffs; keeps the sim and AI tractable).
-- Script-owned elo/leaderboards (requires the turn-based script subsystem);
-  we use a publisher leaderboard with client-submitted results.
-- Replays, voice, in-game chat beyond lobby ready/chat (platform per-session
-  chat requires scripted sessions).
-
-(Host migration and rejoin are IN scope — see §4.5.)
+- Replays, voice, in-game chat beyond lobby ready/chat (the room-bound session
+  gets a platform chat conversation, but the client doesn't surface it).

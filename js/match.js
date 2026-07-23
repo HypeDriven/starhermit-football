@@ -1,13 +1,21 @@
 // match.js — match orchestration: scene population, match flow (walkout →
-// coin flip → halves → full time), host/guest netcode, audio & HUD wiring.
+// coin flip → halves → full time), netcode, audio & HUD wiring.
+//
+// Modes:
+//   'practice' — local authoritative sim (offline vs AI).
+//   'online'   — server-authoritative: the platform runs server.js; we send
+//                inputs at 20 Hz over the games socket and interpolate the
+//                15 Hz snapshots 100 ms behind. Leave/rejoin/AI stand-ins and
+//                the stretcher ceremony are owned by the server.
 import * as THREE from 'three';
 import {
-  createMatch, stepMatch, emptyInput, takeAiName, makeRng,
-  SPRINT_SPEED, RUN_SPEED, WALK_SPEED, BALL_R, attackSign,
+  createMatch, stepMatch, takeAiName, makeRng, resetKickoff,
+  WALK_SPEED, BALL_R,
 } from './game/sim.js';
 import { computeAiInput, clearAiPlans } from './game/ai.js';
 import { buildStadium } from './world/stadium.js';
 import { createPlayerMesh } from './world/player.js';
+import { createCeremonyViews } from './world/officials.js';
 import { createFollowCamera } from './game/camera.js';
 
 const TEAM_KITS = [
@@ -15,7 +23,9 @@ const TEAM_KITS = [
   { shirt: '#c0392b', shorts: '#232323', socks: '#c0392b', gk: '#8e44ad', plate: '#c0392b', label: 'RED' },
 ];
 const HAIRS = ['#1a1a1a', '#3b2314', '#6e4a21', '#b99256', '#545454', '#8a3b12'];
-const SNAP_HZ = 15, INPUT_HZ = 20, FIXED_DT = 1 / 60;
+const INPUT_HZ = 20, FIXED_DT = 1 / 60;
+const INTERP_DELAY = 0.1;   // render this far behind the newest snapshot
+const SNAP_BUF = 1.5;       // seconds of snapshots to keep
 
 export function createMatchController({ renderer, scene, camera, audio, input, hud }) {
   const followCam = createFollowCamera(camera);
@@ -24,18 +34,21 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
   let coin = null;
 
   // match state
-  let mode = 'practice';        // 'practice' | 'host' | 'guest'
-  let sim = null;               // authoritative sim (practice/host); guests keep a light copy
+  let mode = 'practice';        // 'practice' | 'online'
+  let sim = null;               // authoritative sim (practice); structural copy driven by snapshots (online)
   let views = [];               // PlayerView per player id
   let myPlayerId = 0;
   let phase = 'idle';           // 'walkout' | 'coinflip' | 'play' | 'done'
   let phaseT = 0;
   let acc = 0;
-  let net = null;               // NetClient (host/guest)
-  let guestInputs = new Map();  // host: playerId -> latest input
-  let snapTimer = 0, inputTimer = 0;
-  let interp = null;            // guest interpolation buffer
-  let predict = null;           // guest local prediction of own player
+  let net = null;               // games-socket client (online)
+  let lobbyNet = null;          // realtime-rooms client (roster pushes)
+  let inputTimer = 0, inputSeq = 0;
+  let snaps = [];               // parsed snapshot buffer, oldest first
+  let cerViews = null;          // referee + carriers + stretcher (lazy)
+  let curCer = null;            // interpolated ceremony for views/camera
+  let timers = [];              // {at, fn} on the match-local clock
+  let elapsed = 0;
   let rng = makeRng(7);
   let excitement = 0.3;
   let lastStepCount = 0;
@@ -102,7 +115,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     return view;
   }
 
-  function buildPlayers(rosterPlayers, myId) {
+  function buildPlayers(rosterPlayers) {
     for (const v of views) v.dispose();
     views = [];
     for (const p of rosterPlayers) views[p.id] = makeViewFor(p);
@@ -121,69 +134,34 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     beginMatch();
   }
 
-  async function startFromRoom({ room, teamSize, myUserId, netClient, isHost, isRejoin = false }) {
+  function startFromRoom({ room, teamSize, myUserId, netClient, lobbyNetClient, isRejoin = false }) {
     cleanup();
     net = netClient;
-    mode = isHost ? 'host' : 'guest';
+    lobbyNet = lobbyNetClient ?? null;
+    mode = 'online';
     // roster: sort participants into team/slot seats
     const seats = new Array(teamSize * 2).fill(null);
     for (const part of room.participants) {
       const id = part.team * teamSize + part.slot;
-      seats[id] = {
-        userId: part.userId, name: part.username, isAi: part.isAi,
-        participantId: part.id,
-      };
-      if (part.userId) seatByUserId.set(part.userId, id);
+      seats[id] = { userId: part.userId, name: part.username, isAi: part.isAi };
     }
     // map my user → player id
     myPlayerId = seats.findIndex((s) => s && s.userId === myUserId);
     if (myPlayerId < 0) myPlayerId = 0;
     const seed = room.seed ?? room.id?.length ?? 42;
     sim = createMatch({ teamSize, roster: seats, seed });
-    kickoffTeam = room.kickoffTeam ?? (seed % 2);
-
-    // Host rejoin: the sim lived in the old browser session. Ask still-connected
-    // guests for their latest snapshot; if nobody answers, restart from kickoff.
-    if (isRejoin && mode === 'host') {
-      net.sendMatchEvent({ type: 'state-request' });
-      const snap = await waitForStateResponse(2500);
-      if (snap) rehydrateFromSnapshot(snap);
-    }
+    kickoffTeam = room.kickoffTeam ?? 0; // snapshots reconcile this (snap.kt)
     beginMatch(isRejoin);
   }
 
-  // Rebuild sim state from a snapshot (host rejoin recovery).
-  let rehydrated = false;
-  function rehydrateFromSnapshot(snap) {
-    if (!snap || !snap.players) return;
-    for (let i = 0; i < sim.players.length && i < snap.players.length; i++) {
-      Object.assign(sim.players[i], snap.players[i]);
-    }
-    if (snap.ball) Object.assign(sim.ball, snap.ball, { lastTouch: null, vx: 0, vy: 0, vz: 0 });
-    sim.score = [...(snap.score ?? sim.score)];
-    sim.time = snap.time ?? sim.time;
-    sim.half = snap.half ?? sim.half;
-    sim.phase = 'play';
-    rehydrated = true;
-  }
-
-  let stateResponseResolve = null;
-  function waitForStateResponse(ms) {
-    return new Promise((resolve) => {
-      stateResponseResolve = resolve;
-      setTimeout(() => { if (stateResponseResolve) { stateResponseResolve = null; resolve(null); } }, ms);
-    });
-  }
-
   function beginMatch(skipIntro = false) {
-    clearAiPlans();
+    clearAiPlans(sim);
     buildWorld(sim.pitch);
-    buildPlayers(sim.players, myPlayerId);
+    buildPlayers(sim.players);
     if (skipIntro) {
-      phase = 'play';
-      if (!rehydrated) resetKickoffSim(); // unrecoverable host rejoin → fresh kickoff
+      phase = 'play'; // online rejoin: snapshots restore everything
     } else {
-      resetKickoffSim();
+      if (mode === 'practice') resetKickoffSim();
       phase = 'walkout';
       phaseT = 8;
       walkoutSetup();
@@ -199,11 +177,10 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
 
   function resetKickoffSim() {
     sim.kickoffTeam = kickoffTeam;
-    const { resetKickoff } = simInternals;
     resetKickoff(sim, kickoffTeam);
   }
 
-  // walkout: players start at the tunnel and walk to formation
+  // walkout: players start at the tunnel and walk to formation (presentation)
   const walkTargets = [];
   function walkoutSetup() {
     walkTargets.length = 0;
@@ -224,17 +201,33 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     if (!sim || disposed) return;
     stadium.update(dt, camera);
 
-    if (phase === 'walkout') return updateWalkout(dt);
-    if (phase === 'coinflip') return updateCoinflip(dt);
-    if (phase === 'done') return updateDone(dt);
+    if (phase === 'walkout') { updateWalkout(dt); pumpTimers(dt); return; }
+    if (phase === 'coinflip') { updateCoinflip(dt); pumpTimers(dt); return; }
+    if (phase === 'done') { updateDone(dt); pumpTimers(dt); return; }
 
     // ── play ──
-    if (mode === 'guest') updateGuest(dt);
+    if (mode === 'online') updateOnline(dt);
     else updateAuthoritative(dt);
 
+    pumpTimers(dt);
     syncViews(dt);
     updateHud();
     updateAudio(dt);
+  }
+
+  // Phase-agnostic delayed calls (e.g. the boo that follows an injury gasp).
+  function schedule(delayS, fn) {
+    timers.push({ at: elapsed + delayS, fn });
+  }
+  function pumpTimers(dt) {
+    elapsed += dt;
+    for (let i = timers.length - 1; i >= 0; i--) {
+      if (timers[i].at <= elapsed) {
+        const t = timers[i];
+        timers.splice(i, 1);
+        t.fn();
+      }
+    }
   }
 
   function updateWalkout(dt) {
@@ -282,10 +275,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
       hud.banner(`${label} KICKS OFF`, 2200);
       phase = 'play';
       audio.whistle('short');
-      if (mode !== 'guest') {
-        const { resetKickoff } = simInternals;
-        resetKickoff(sim, kickoffTeam);
-      }
+      if (mode === 'practice') resetKickoff(sim, kickoffTeam);
     }
   }
 
@@ -300,7 +290,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     syncViews(dt);
   }
 
-  // ── authoritative stepping (practice + host) ──────────────────────────────
+  // ── authoritative stepping (practice) ─────────────────────────────────────
 
   function updateAuthoritative(dt) {
     acc = Math.min(acc + dt, 0.25);
@@ -308,17 +298,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
       acc -= FIXED_DT;
       const inputs = collectInputs(FIXED_DT);
       const events = stepMatch(sim, inputs, FIXED_DT);
-      for (const ev of events) {
-        handleSimEvent(ev);
-        if (mode === 'host') net?.sendMatchEvent(ev);
-      }
-    }
-    if (mode === 'host') {
-      snapTimer -= dt;
-      if (snapTimer <= 0) {
-        snapTimer = 1 / SNAP_HZ;
-        net?.sendSnapshot(makeSnapshot());
-      }
+      for (const ev of events) handleSimEvent(ev);
     }
     if (sim.phase === 'end' && phase !== 'done') finishMatch();
   }
@@ -329,14 +309,10 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     const raw = input.getState(followCam.yaw, dt);
     inputs.set(myPlayerId, toSimInput(raw));
     hud.setPower(raw.shootHeld ? raw.shootCharge : 0);
-    if (mode === 'host') {
-      // guests' inputs arrive over the wire
-      for (const [pid, inp] of guestInputs) inputs.set(pid, inp);
-    }
     // AI seats
     for (const p of sim.players) {
       if (inputs.has(p.id)) continue;
-      if (p.isAi || mode === 'practice') inputs.set(p.id, computeAiInput(sim, p, dt));
+      inputs.set(p.id, computeAiInput(sim, p, dt));
     }
     return inputs;
   }
@@ -348,193 +324,149 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     };
   }
 
-  // ── guest: prediction + interpolation ─────────────────────────────────────
+  // ── online: input upstream, snapshot interpolation downstream ─────────────
 
-  function updateGuest(dt) {
-    // send inputs
+  function updateOnline(dt) {
+    // send inputs (20 Hz, immediately on action edges)
     inputTimer -= dt;
     const raw = input.getState(followCam.yaw, dt);
     hud.setPower(raw.shootHeld ? raw.shootCharge : 0);
     if (inputTimer <= 0 || raw.pass || raw.shoot > 0 || raw.tackle) {
       inputTimer = 1 / INPUT_HZ;
-      net?.sendInput(toSimInput(raw));
+      net?.sendInput({ seq: ++inputSeq, ...toSimInput(raw) });
     }
+    applyInterp();
+  }
 
-    // own player: local kinematic prediction + gentle reconcile to snapshots
-    const me = sim.players[myPlayerId];
-    if (predict && me) {
-      const speed = raw.sprint ? SPRINT_SPEED : (Math.hypot(raw.mx, raw.mz) > 0.45 ? RUN_SPEED : WALK_SPEED);
-      const m = Math.hypot(raw.mx, raw.mz);
-      const tx = m > 0.01 ? raw.mx / Math.max(m, 1) * speed * Math.min(1, m * 1.6) : 0;
-      const tz = m > 0.01 ? raw.mz / Math.max(m, 1) * speed * Math.min(1, m * 1.6) : 0;
-      predict.vx += clampNum(tx - predict.vx, -22 * dt, 22 * dt);
-      predict.vz += clampNum(tz - predict.vz, -22 * dt, 22 * dt);
-      predict.x += predict.vx * dt;
-      predict.z += predict.vz * dt;
-      if (Math.hypot(predict.vx, predict.vz) > 0.4) predict.facing = Math.atan2(predict.vz, predict.vx);
-      predict.phase += dt * (2.2 + Math.hypot(predict.vx, predict.vz) * 1.55);
-      // reconcile: snap if far off
-      const err = Math.hypot(predict.x - me.x, predict.z - me.z);
-      if (err > 2.5) { predict.x = me.x; predict.z = me.z; predict.vx = me.vx; predict.vz = me.vz; }
-      else { predict.x += (me.x - predict.x) * Math.min(1, dt * 4); predict.z += (me.z - predict.z) * Math.min(1, dt * 4); }
-      me.x = predict.x; me.z = predict.z; me.vx = predict.vx; me.vz = predict.vz;
-      me.facing = predict.facing; me.phase = predict.phase;
-      me.anim = animForSpeed(Math.hypot(predict.vx, predict.vz));
-      me.animSpeed = Math.hypot(predict.vx, predict.vz);
-    }
-
-    // interpolate everyone + ball from snapshot buffer
-    if (interp && interp.a && interp.b) {
-      const t = (performance.now() / 1000 - interp.b.at) / Math.max(1e-3, interp.b.at - interp.a.at);
-      const k = Math.min(1.25, Math.max(0, t));
-      for (let i = 0; i < sim.players.length; i++) {
-        if (i === myPlayerId && predict) continue;
-        const pa = interp.a.players[i], pb = interp.b.players[i];
-        if (!pa || !pb) continue;
-        const p = sim.players[i];
-        p.x = pa.x + (pb.x - pa.x) * k;
-        p.z = pa.z + (pb.z - pa.z) * k;
-        p.vx = pb.vx; p.vz = pb.vz;
-        p.facing = pb.facing; p.anim = pb.anim; p.animSpeed = pb.animSpeed;
-        p.phase = pa.phase + (pb.phase - pa.phase) * k;
-        p.kickT = pb.kickT; p.tackleT = pb.tackleT; p.diveT = pb.diveT;
-        p.diveDir = pb.diveDir; p.celebrateT = pb.celebrateT;
+  function applyInterp() {
+    const n = snaps.length;
+    if (!n) return;
+    const rt = performance.now() / 1000 - INTERP_DELAY;
+    let a = snaps[0], b = snaps[n - 1], k = 1;
+    if (rt <= a.at) { a = b; }
+    else if (rt >= b.at) { a = b; }
+    else {
+      for (let i = n - 1; i > 0; i--) {
+        if (snaps[i - 1].at <= rt) { a = snaps[i - 1]; b = snaps[i]; break; }
       }
-      const ba = interp.a.ball, bb = interp.b.ball;
-      sim.ball.x = ba.x + (bb.x - ba.x) * k;
-      sim.ball.y = ba.y + (bb.y - ba.y) * k;
-      sim.ball.z = ba.z + (bb.z - ba.z) * k;
-      sim.ball.owner = bb.owner;
+      k = (rt - a.at) / Math.max(1e-3, b.at - a.at);
+    }
+
+    for (let i = 0; i < sim.players.length; i++) {
+      const pa = a.pl[i], pb = b.pl[i];
+      if (!pa || !pb) continue;
+      const p = sim.players[i];
+      p.x = pa.x + (pb.x - pa.x) * k;
+      p.z = pa.z + (pb.z - pa.z) * k;
+      p.vx = pb.vx; p.vz = pb.vz;
+      p.facing = pb.facing; p.anim = pb.anim; p.animSpeed = pb.animSpeed;
+      p.phase = pa.phase + (pb.phase - pa.phase) * k;
+      p.kickT = pb.kickT; p.tackleT = pb.tackleT; p.stunT = pb.stunT;
+      p.diveT = pb.diveT; p.diveDir = pb.diveDir; p.celebrateT = pb.celebrateT;
+    }
+    const ba = a.b, bb = b.b;
+    sim.ball.x = ba.x + (bb.x - ba.x) * k;
+    sim.ball.y = ba.y + (bb.y - ba.y) * k;
+    sim.ball.z = ba.z + (bb.z - ba.z) * k;
+    sim.ball.vx = bb.vx; sim.ball.vz = bb.vz;
+    sim.ball.owner = bb.owner;
+
+    // ceremony: interpolate when both snapshots carry the same one
+    if (!b.cer) {
+      curCer = null;
+    } else if (a.cer && a.cer.k === b.cer.k && a.cer.v === b.cer.v) {
+      curCer = lerpCer(a.cer, b.cer, k);
+    } else {
+      curCer = b.cer;
     }
   }
 
-  function onSnapshot(snap) {
-    if (mode !== 'guest') return;
-    const now = performance.now() / 1000;
-    interp = { a: interp?.b ?? snap0(snap, now), b: snap0(snap, now), };
-    // reconcile score/clock
-    sim.score = snap.score;
-    sim.time = snap.time;
-    sim.half = snap.half;
-    if (sim.phase !== 'end' && snap.phase === 'end') finishMatch();
-    // reconcile own player target
-    const meSnap = snap.players[myPlayerId];
-    if (meSnap) {
-      const me = sim.players[myPlayerId];
-      me.x = meSnap.x; me.z = meSnap.z; me.vx = meSnap.vx; me.vz = meSnap.vz;
-      if (!predict) predict = { ...meSnap };
-      // hard states override prediction
-      if (meSnap.stunT > 0 || meSnap.tackleT > 0) { predict.x = meSnap.x; predict.z = meSnap.z; }
-    }
+  function lerpEnt(ea, eb, k) {
+    return [
+      ea[0] + (eb[0] - ea[0]) * k,
+      ea[1] + (eb[1] - ea[1]) * k,
+      eb[2], eb[3], eb[4],
+      ea[5] + (eb[5] - ea[5]) * k,
+    ];
   }
 
-  function snap0(snap, at) { return { ...snap, at }; }
-
-  function makeSnapshot() {
+  function lerpCer(ca, cb, k) {
     return {
-      time: sim.time, half: sim.half, phase: sim.phase, score: sim.score,
-      ball: { x: sim.ball.x, y: sim.ball.y, z: sim.ball.z, owner: sim.ball.owner },
-      players: sim.players.map((p) => ({
-        x: r2(p.x), z: r2(p.z), vx: r2(p.vx), vz: r2(p.vz),
-        facing: r2(p.facing), anim: p.anim, animSpeed: r2(p.animSpeed), phase: r2(p.phase),
-        kickT: r2(p.kickT), tackleT: r2(p.tackleT), stunT: r2(p.stunT),
-        diveT: r2(p.diveT), diveDir: r2(p.diveDir), celebrateT: r2(p.celebrateT),
-      })),
+      k: cb.k, t: cb.t, v: cb.v, vn: cb.vn, rn: cb.rn, sp: cb.sp,
+      ref: lerpEnt(ca.ref, cb.ref, k),
+      ca: [lerpEnt(ca.ca[0], cb.ca[0], k), lerpEnt(ca.ca[1], cb.ca[1], k)],
+      st: [
+        ca.st[0] + (cb.st[0] - ca.st[0]) * k,
+        ca.st[1] + (cb.st[1] - ca.st[1]) * k,
+        cb.st[2], cb.st[3],
+      ],
     };
   }
 
-  function onRemoteInput(inp, fromId) {
-    if (mode !== 'host') return;
-    // host maps sender participant → seat
-    const seat = seatByParticipant(fromId);
-    if (seat != null) guestInputs.set(seat, inp);
+  function onSnapshot(snap) {
+    if (mode !== 'online' || !sim) return;
+    const parsed = parseSnap(snap);
+    parsed.at = performance.now() / 1000;
+    snaps.push(parsed);
+    while (snaps.length > 2 && snaps[0].at < parsed.at - SNAP_BUF) snaps.shift();
+
+    // reconcile flow state
+    sim.score[0] = parsed.sc[0]; sim.score[1] = parsed.sc[1];
+    sim.time = parsed.t;
+    sim.half = parsed.h;
+    sim.phase = parsed.ph;
+    kickoffTeam = parsed.kt;
+
+    // names/isAi ride in the snapshot — covers substitutions even if the
+    // roster push lags; rebuild the name tag when a player's name changes
+    for (let i = 0; i < parsed.pl.length && i < sim.players.length; i++) {
+      const ps = parsed.pl[i], p = sim.players[i];
+      p.isAi = !!ps.isAi;
+      if (ps.name && ps.name !== p.name) {
+        p.name = ps.name;
+        const old = views[i];
+        if (old) { old.dispose(); views[i] = makeViewFor(p); }
+      }
+    }
+
+    if (phase !== 'done' && parsed.ph === 'end') finishMatch();
   }
 
-  let participantSeats = null;
-  function seatByParticipant(pid) {
-    if (!participantSeats) return null;
-    return participantSeats.get(pid) ?? null;
+  function parseSnap(snap) {
+    const pl = snap.pl.map((e) => ({
+      id: e[0], team: e[1], x: e[2], z: e[3], vx: e[4], vz: e[5], facing: e[6],
+      anim: e[7], animSpeed: e[8], phase: e[9], kickT: e[10], tackleT: e[11],
+      stunT: e[12], diveT: e[13], diveDir: e[14], celebrateT: e[15],
+      isAi: e[16], name: e[17],
+    }));
+    const b = snap.b;
+    return {
+      at: 0, t: snap.t, h: snap.h, ph: snap.ph, sc: snap.sc, kt: snap.kt,
+      b: { x: b[0], y: b[1], z: b[2], vx: b[3], vy: b[4], vz: b[5], owner: b[6] >= 0 ? b[6] : null },
+      pl, cer: snap.cer || null,
+    };
   }
 
-  const seatByUserId = new Map();
-  const offlineTimers = new Map();   // seat -> timeout id (AI stand-in pending)
-  const aiStandins = new Set();      // seats currently AI-controlled due to disconnect
-
-  // Server roster changed (e.g. a leaver's seat became AI): re-apply names/flags.
+  // Server roster changed (e.g. a leaver's seat became AI): re-apply
+  // names/flags. Snapshots carry the same data, so this is a fast-path backup.
   function applyRoster(participants) {
     if (!sim) return;
     for (const part of participants) {
       const seat = part.team * sim.teamSize + part.slot;
       const p = sim.players[seat];
       if (!p) continue;
-      if (part.userId) seatByUserId.set(part.userId, seat);
-      const becameAi = part.isAi && !p.isAi;
       p.isAi = !!part.isAi;
-      if (part.isAi) aiStandins.delete(seat); // server-side conversion is final
       if (part.username && part.username !== p.name) {
         p.name = part.username;
         // rebuild the view so the name tag shows the new name
         const old = views[seat];
         if (old) { old.dispose(); views[seat] = makeViewFor(p); }
       }
-      if (becameAi) guestInputs.delete(seat);
-      // Host migration: the server made me the host — take over the simulation
-      // from the last snapshot the old host sent.
-      const me = sim.players[myPlayerId];
-      if (mode === 'guest' && me && part.userId === me.userId && part.isHost) promoteToHost();
-    }
-  }
-
-  function promoteToHost() {
-    const snap = interp?.b;
-    mode = 'host';
-    predict = null;
-    interp = null;
-    guestInputs.clear();
-    if (snap) rehydrateFromSnapshot(snap);
-    snapTimer = 0;
-    hud.banner('HOST MIGRATED', 1500);
-  }
-
-  // Presence over the WS: a disconnected human gets an AI stand-in after a
-  // grace period; a reconnect restores their control.
-  function onPresence(msg) {
-    if (!sim || mode !== 'host' || msg.userId == null) return;
-    const seat = seatByUserId.get(msg.userId);
-    if (seat == null) return;
-    const p = sim.players[seat];
-    if (!p) return;
-    if (msg.online) {
-      clearTimeout(offlineTimers.get(seat));
-      offlineTimers.delete(seat);
-      if (aiStandins.has(seat)) { aiStandins.delete(seat); p.isAi = false; }
-    } else {
-      guestInputs.delete(seat);
-      clearTimeout(offlineTimers.get(seat));
-      offlineTimers.set(seat, setTimeout(() => {
-        offlineTimers.delete(seat);
-        if (sim && sim.phase !== 'end') { aiStandins.add(seat); p.isAi = true; }
-      }, 5000));
     }
   }
 
   function handleNetEvent(ev) {
     if (!ev || typeof ev !== 'object') return;
-    // guest: host rejoined and wants our latest snapshot (goes back to host only)
-    if (ev.type === 'state-request' && mode === 'guest') {
-      const snap = interp?.b;
-      if (snap) {
-        const { at, ...clean } = snap;
-        net?.sendMatchEvent({ type: 'state-response', snap: clean });
-      }
-      return;
-    }
-    if (ev.type === 'state-response' && mode === 'host' && stateResponseResolve) {
-      const resolve = stateResponseResolve;
-      stateResponseResolve = null;
-      resolve(ev.snap ?? null);
-      return;
-    }
     handleSimEvent(ev);
   }
 
@@ -556,7 +488,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
         hud.setScore(sim.score[0], sim.score[1]);
         break;
       }
-      case 'restart': audio.whistle('short'); break;
+      case 'restart': audio.whistle('short'); break; // sideline/goalline/drop-ball
       case 'halftime': audio.whistle('long'); hud.banner('HALF TIME', 3000); break;
       case 'kickoff': audio.whistle('short'); break;
       case 'fulltime': {
@@ -566,6 +498,32 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
         if (ev.winner === -1) audio.crowd.cheer(0.5);
         else if (won) { audio.crowd.cheer(1); stadium.crowd.pulse(1); }
         else audio.crowd.cheer(0.3);
+        break;
+      }
+      // ── ceremony / session events (server-owned) ──
+      case 'injury-start': {
+        audio.injury();
+        audio.crowd.gasp();
+        if (ev.kind === 'leave') {
+          hud.banner(`INJURY — ${ev.name} CAN'T CONTINUE`, 3200);
+          // the crowd turns on the leaver a beat later
+          schedule(1, () => { audio.crowd.boo(0.9); stadium?.crowd.boo(0.9); });
+        }
+        break;
+      }
+      case 'referee-whistle': audio.whistle('short'); break;
+      case 'stretcher-load': break; // visuals only (ceremony views)
+      case 'stretcher-off': break;
+      case 'substitution': {
+        audio.crowd.cheer(0.8);
+        stadium.crowd.pulse(0.8);
+        hud.banner(ev.kind === 'rejoin' ? `${ev.inName} IS BACK` : `${ev.inName} COMES ON`, 2800);
+        break;
+      }
+      case 'abandoned-draw': {
+        audio.whistle('long');
+        hud.banner('MATCH ABANDONED — DRAW', 4200);
+        finishMatch(-1);
         break;
       }
     }
@@ -608,7 +566,29 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     ballMesh.position.set(sim.ball.x, sim.ball.y, sim.ball.z);
     ballMesh.rotation.x += sim.ball.vx * dt * 2;
     ballMesh.rotation.z -= sim.ball.vz * dt * 2;
-    if (phase === 'play') followCam.update(dt, sim.players[myPlayerId], sim.ball);
+
+    // ceremony extras live only while the snapshot carries a ceremony
+    if (curCer) {
+      if (!cerViews) cerViews = createCeremonyViews(scene);
+      cerViews.update(dt, curCer);
+    } else if (cerViews) {
+      cerViews.dispose();
+      cerViews = null;
+    }
+
+    if (phase === 'play') {
+      if (curCer) {
+        // cutscene: frame the injury spot from the south sideline
+        const sp = curCer.sp;
+        followCam.frame(
+          { x: sp[0], y: 1, z: sp[1] },
+          { x: sp[0] + 3, y: 4.5, z: sp[1] + 11 },
+          dt, 2.5,
+        );
+      } else {
+        followCam.update(dt, sim.players[myPlayerId], sim.ball);
+      }
+    }
   }
 
   function updateHud() {
@@ -616,16 +596,17 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     hud.setScore(sim.score[0], sim.score[1]);
   }
 
-  function finishMatch() {
+  function finishMatch(winner = null) {
+    if (phase === 'done') return;
     phase = 'done';
     hud.setPower(0);
-    if (mode === 'host') net?.sendMatchEvent({ type: 'fulltime', score: sim.score });
+    const w = winner ?? (sim.score[0] === sim.score[1] ? -1 : (sim.score[0] > sim.score[1] ? 0 : 1));
     setTimeout(() => {
       onFullTime?.({
         score: [...sim.score],
-        stats: sim.stats,
+        stats: mode === 'practice' ? sim.stats : null, // server owns online stats
         myTeam: sim.players[myPlayerId].team,
-        winner: sim.score[0] === sim.score[1] ? -1 : (sim.score[0] > sim.score[1] ? 0 : 1),
+        winner: w,
       });
     }, 4500);
   }
@@ -639,16 +620,13 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     if (stadium) { stadium.dispose(); stadium = null; }
     if (ballMesh) { scene.remove(ballMesh); ballMesh = null; }
     if (coin) { scene.remove(coin); coin = null; }
-    guestInputs.clear();
-    participantSeats = null;
-    interp = null; predict = null;
+    if (cerViews) { cerViews.dispose(); cerViews = null; }
+    curCer = null;
+    snaps = [];
+    timers = [];
+    elapsed = 0;
+    inputTimer = 0; inputSeq = 0;
     acc = 0; excitement = 0.3;
-    rehydrated = false;
-    stateResponseResolve = null;
-    for (const t of offlineTimers.values()) clearTimeout(t);
-    offlineTimers.clear();
-    aiStandins.clear();
-    seatByUserId.clear();
   }
 
   function dispose() {
@@ -656,6 +634,8 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     cleanup();
     net?.close();
     net = null;
+    lobbyNet?.close();
+    lobbyNet = null;
     input.showTouchUi(false);
     hud.showHud(false);
   }
@@ -666,28 +646,11 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     update,
     dispose,
     onSnapshot,
-    onRemoteInput,
     onNetEvent: (ev) => handleNetEvent(ev),
     applyRoster,
-    onPresence,
-    setParticipantSeats: (map) => { participantSeats = map; },
     set onFullTime(cb) { onFullTime = cb; },
     get phase() { return phase; },
     get sim() { return sim; },
     get myPlayerId() { return myPlayerId; },
   };
-}
-
-// sim's resetKickoff is exported; re-exported here as a tiny indirection so the
-// controller reads naturally.
-import { resetKickoff as _resetKickoff } from './game/sim.js';
-const simInternals = { resetKickoff: _resetKickoff };
-
-function r2(v) { return Math.round(v * 100) / 100; }
-function clampNum(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
-function animForSpeed(spd) {
-  if (spd > SPRINT_SPEED * 0.75) return 'sprint';
-  if (spd > WALK_SPEED + 0.4) return 'run';
-  if (spd > 0.4) return 'walk';
-  return 'idle';
 }
