@@ -21,7 +21,8 @@ export function initAuth() {
   if (claims) {
     slug = claims.game_scope || null;
     userId = claims.sub || null;
-    username = claims.unique_name || claims.name || claims.sub?.slice(0, 8) || 'You';
+    // Never fall back to a raw id fragment — 'Player' until the profile resolves.
+    username = claims.unique_name || claims.name || 'Player';
     return { token, slug, userId, username, online: !!slug };
   }
   return { token: null, slug: null, userId: null, username: 'You', online: false };
@@ -29,14 +30,22 @@ export function initAuth() {
 
 export function getAuth() { return { token, slug, userId, username, online: !!token && !!slug }; }
 
-// The launch token carries no name claim — resolve the real display name from
-// the public profile endpoint (allowed for game-scoped tokens).
+// Newer launch tokens carry a unique_name claim; older ones don't — resolve the
+// real display name from the public profile endpoint (allowed for game-scoped
+// tokens). Retried a few times: a flaky network must not leave the menu
+// showing a placeholder.
 export async function resolveUsername() {
   if (!token || !userId) return username;
-  try {
-    const p = await req('GET', `/api/v1/users/${userId}/profile`);
-    username = p.nickname || p.username || username;
-  } catch { /* keep the fallback */ }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const p = await req('GET', `/api/v1/users/${userId}/profile`);
+      const name = p.nickname || p.username;
+      if (name) { username = name; break; }
+      return username; // profile exists but has no name fields — don't retry
+    } catch {
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+    }
+  }
   return username;
 }
 
@@ -78,3 +87,13 @@ export const quickJoin = () => req('POST', '/api/v1/realtime/rooms/quick-join', 
 export const startRoom = (id) => req('POST', `/api/v1/realtime/rooms/${id}/start`);
 export const leaveRoom = (id) => req('POST', `/api/v1/realtime/rooms/${id}/leave`);
 export const submitResult = (id, result) => req('POST', `/api/v1/realtime/rooms/${id}/result`, result);
+
+// ── game sessions ──
+// Detail includes chatConversationId — the bridge from a match to its voice room.
+export const getSession = (sessionId) => req('GET', `/api/v1/games/${slug}/sessions/${sessionId}`);
+
+// ── voice rooms (platform voice relay; used for WebRTC signaling) ──
+export const listVoiceRooms = (conversationId) => req('GET', `/api/v1/voice/rooms?conversationId=${encodeURIComponent(conversationId)}`);
+export const createVoiceRoom = (conversationId) => req('POST', '/api/v1/voice/rooms', { conversationId });
+export const joinVoiceRoom = (roomId) => req('POST', `/api/v1/voice/rooms/${roomId}/join`);
+export const leaveVoiceRoom = (roomId) => req('POST', `/api/v1/voice/rooms/${roomId}/leave`);

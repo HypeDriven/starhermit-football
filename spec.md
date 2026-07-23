@@ -576,6 +576,8 @@ js/game/ai.js           # thin wrapper re-exporting the AI from server.js
 js/game/input.js        # keyboard (remappable, §5.6) + touch joystick/buttons
 js/game/camera.js       # follow cam + off-screen ball arrow
 js/game/audio.js        # WebAudio SFX + crowd engine
+js/menuScene.js         # menu backdrop: AI-vs-AI exhibition match + cinematic camera
+js/voice.js             # in-match voice chat (WebRTC mesh, distance-based volume — §13)
 vendor/three/           # three.module.js (+ addons actually used)
 ```
 
@@ -617,5 +619,33 @@ matches render from server snapshots only.
 
 - Fouls/cards/offside (kick-and-rush rules: out-of-bounds → throw-in style
   restart only, goals + kickoffs; keeps the sim and AI tractable).
-- Replays, voice, in-game chat beyond lobby ready/chat (the room-bound session
+- Replays, in-game text chat beyond lobby ready/chat (the room-bound session
   gets a platform chat conversation, but the client doesn't surface it).
+
+## 13. Voice chat
+
+Opt-out in-match voice between the human players of an online match.
+
+- **Menu setting**: a "Voice chat" checkbox on the main menu, enabled by
+  default, persisted in `localStorage` (`starhermit-football-voice`).
+  Toggling it mid-match joins/leaves the voice room on the spot.
+- **Transport**: WebRTC full-mesh audio (`RTCPeerConnection`, public STUN).
+  Signaling rides the platform **voice relay** (`/ws/v1/voice`): opaque,
+  directed `{type:'rtc', to, payload}` frames the server stamps with the
+  sender id and forwards only to the addressed participant — no backend
+  changes required, payloads stay under the relay's ~4 KB frame cap (ICE is
+  trickled per candidate). Glare is resolved with the standard
+  polite/impolite ("perfect negotiation") pattern keyed on userId order.
+- **Room bridging**: match → `GET /api/v1/games/{slug}/sessions/{id}` →
+  `chatConversationId` → list-or-create `/api/v1/voice/rooms` → join →
+  connect the relay socket. AI seats never join (no userId).
+- **Positional audio**: each remote stream runs through
+  `GainNode → StereoPannerNode`. Gain is recomputed at 10 Hz from the world
+  distance between my footballer and the speaker's footballer (full volume
+  within 4 m, silent beyond 55 m, squared falloff); pan follows the direction
+  relative to my facing. Nearby players sound nearby, distant ones distant.
+- **Best-effort**: any failure (mic denied, voice disabled platform-side,
+  relay unreachable) degrades silently — the match never depends on voice.
+- The Windows client needs no changes: games run in the system browser over
+  https, so the normal mic-permission prompt applies (persisted per game
+  profile).

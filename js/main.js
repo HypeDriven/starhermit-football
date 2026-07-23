@@ -7,6 +7,8 @@ import { createHud } from './hud.js';
 import { createMatchController } from './match.js';
 import { createLobby } from './lobby.js';
 import { createNetClient, createGameClient } from './net.js';
+import { createMenuScene } from './menuScene.js';
+import { createVoice } from './voice.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -34,6 +36,8 @@ const audio = createAudio();
 const input = createInput();
 const hud = createHud();
 const auth = api.initAuth();
+const menuScene = createMenuScene({ scene, camera });
+const voice = createVoice();
 
 let match = null;
 let lobby = null;
@@ -110,6 +114,10 @@ function setupMenu() {
   }
   sel.onchange = () => { teamSize = +sel.value; };
 
+  const optVoice = $('opt-voice');
+  optVoice.checked = voice.isEnabled();
+  optVoice.onchange = () => voice.setEnabled(optVoice.checked);
+
   $('btn-practice').onclick = async () => {
     audio.ui(); audio.resume();
     if (!(await confirmLeaveActiveRoom())) return;
@@ -170,6 +178,7 @@ async function refreshIncomingInvites() {
 // ── match lifecycle ──
 function ensureMatch() {
   if (match) return match;
+  menuScene.stop(); // the real match takes over the stadium
   match = createMatchController({ renderer, scene, camera, audio, input, hud });
   match.onFullTime = (result) => showResult(result);
   return match;
@@ -221,10 +230,14 @@ async function onMatchReady(room, { isRejoin = false } = {}) {
     room, teamSize: ts, myUserId: me.userId,
     netClient: gameNet, lobbyNetClient: lobbyNet, isRejoin,
   });
+
+  // voice chat (best-effort; honors the menu checkbox)
+  voice.joinMatch({ sessionId });
 }
 
 function showResult(result) {
   disposeMatch();
+  menuScene.start();
   const { score, stats, myTeam, winner } = result;
   $('result-title').textContent =
     winner === -1 ? 'DRAW' : (winner === myTeam ? 'VICTORY' : 'DEFEAT');
@@ -242,6 +255,7 @@ function showResult(result) {
 
 function backToMenu() {
   disposeMatch();
+  menuScene.start();
   if (lobby?.room) lobby.leave();
   showScreen('screen-menu');
   refreshIncomingInvites();
@@ -252,6 +266,7 @@ function disposeMatch() {
   const m = match;
   match = null; // null first: the games client's final onClose must not reenter
   matchRoom = null;
+  voice.leaveMatch();
   $('leave-confirm').classList.add('hidden');
   if (m) m.dispose();
 }
@@ -281,12 +296,19 @@ api.resolveUsername().finally(() => {
   $('loading').classList.add('hidden');
 });
 
-// idle stadium backdrop behind the menu
+// idle stadium backdrop behind the menu: an AI-vs-AI exhibition match with a
+// drifting cinematic camera (see menuScene.js). Runs whenever no match is live.
+menuScene.start();
 const clock = new THREE.Clock();
 function loop() {
   requestAnimationFrame(loop);
   const dt = Math.min(clock.getDelta(), 0.1);
-  if (match) match.update(dt);
+  if (match) {
+    match.update(dt);
+    voice.updatePositions(dt, match.sim?.players, match.myPlayerId);
+  } else {
+    menuScene.update(dt);
+  }
   renderer.render(scene, camera);
 }
 loop();

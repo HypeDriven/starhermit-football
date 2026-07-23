@@ -56,6 +56,49 @@ export function createNetClient({ roomId, getToken }) {
   };
 }
 
+// createVoiceClient: voice relay socket (ws/v1/voice?roomId=…). Carries room
+// roster/presence and directed WebRTC signaling. Server → client frames are
+// {event:'voice.*', data:{…}}; client → server: {type:'rtc'|'mute'|...}.
+// Binary audio frames exist for native clients; the web client never sends any.
+export function createVoiceClient({ roomId, getToken }) {
+  let ws = null;
+  let handlers = {};
+  let connected = false;
+
+  function connect(h) {
+    handlers = h || {};
+    return new Promise((resolve, reject) => {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const url = `${proto}://${location.host}/ws/v1/voice?roomId=${encodeURIComponent(roomId)}&access_token=${encodeURIComponent(getToken())}`;
+      ws = new WebSocket(url);
+      ws.onopen = () => { connected = true; resolve(); };
+      ws.onerror = () => { if (!connected) reject(new Error('Voice socket connection failed')); };
+      ws.onclose = (e) => { connected = false; handlers.onClose?.(e); };
+      ws.onmessage = (m) => {
+        if (typeof m.data !== 'string') return; // native PCM relay frames — not for us
+        let msg;
+        try { msg = JSON.parse(m.data); } catch { return; }
+        if (msg && typeof msg.event === 'string') handlers.onEvent?.(msg.event, msg.data || {});
+      };
+    });
+  }
+
+  function send(obj) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      const s = JSON.stringify(obj);
+      if (s.length < 3800) ws.send(s); // server caps frames at 4000 bytes
+    }
+  }
+
+  return {
+    connect,
+    // directed WebRTC signaling: delivered to `to` as voice.rtc with our userId stamped in
+    sendRtc: (to, payload) => send({ type: 'rtc', to, payload }),
+    close: () => { try { ws?.close(); } catch {} ws = null; connected = false; },
+    get connected() { return connected; },
+  };
+}
+
 export function createGameClient({ sessionId, getToken }) {
   let ws = null;
   let handlers = {};
