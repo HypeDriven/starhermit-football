@@ -142,6 +142,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     // roster: sort participants into team/slot seats
     const seats = new Array(teamSize * 2).fill(null);
     for (const part of room.participants) {
+      if (part.leftAt) continue; // lobby leavers; their seat was AI-backfilled
       const id = part.team * teamSize + part.slot;
       seats[id] = { userId: part.userId, name: part.username, isAi: part.isAi };
     }
@@ -452,6 +453,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
   function applyRoster(participants) {
     if (!sim) return;
     for (const part of participants) {
+      if (part.leftAt) continue;
       const seat = part.team * sim.teamSize + part.slot;
       const p = sim.players[seat];
       if (!p) continue;

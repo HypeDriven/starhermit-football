@@ -144,7 +144,8 @@ export function createLobby({ onMatchReady, onLeave, setStatus }) {
   function render() {
     if (!room) return;
     const teamSize = room.config?.seatsPerTeam ?? room.seatsPerTeam ?? 5;
-    const parts = room.participants || [];
+    // leavers keep their participant row (leftAt set) — their seat is open again
+    const parts = (room.participants || []).filter((p) => !p.leftAt);
     rosterEl.innerHTML = '';
     const cols = [[], []];
     for (let t = 0; t < 2; t++) {
@@ -167,7 +168,22 @@ export function createLobby({ onMatchReady, onLeave, setStatus }) {
       for (let t = 0; t < 2; t++) {
         const p = cols[t][s];
         const el = document.createElement('div');
-        el.className = 'seat' + (p ? '' : ' empty');
+        el.className = 'seat ' + (t === 0 ? 'blue' : 'red') + (p ? '' : ' empty');
+
+        // profile picture — outboard side of the slot (left for blue, right
+        // for red); AI and open seats keep the cell so the columns line up
+        const av = document.createElement('span');
+        av.className = 'avatar';
+        if (p && !p.isAi && p.userId) {
+          api.getUserAvatarUrl(p.userId).then((url) => {
+            if (!url || !av.isConnected) return;
+            const img = document.createElement('img');
+            img.src = url;
+            img.alt = '';
+            av.appendChild(img);
+          });
+        }
+        el.appendChild(av);
 
         // which position this slot plays (same slot→role rule as the sim)
         const role = roleForSlot(s, teamSize);
@@ -204,7 +220,7 @@ export function createLobby({ onMatchReady, onLeave, setStatus }) {
   // themself; the server rejects taken seats and post-start moves).
   async function moveTo(team, slot) {
     const me = api.getAuth();
-    const mine = (room?.participants || []).find((p) => p.userId === me.userId);
+    const mine = (room?.participants || []).find((p) => p.userId === me.userId && !p.leftAt);
     if (!mine) return;
     try {
       room = await api.setSeats(room.id, [{ participantId: mine.id, team, slot }]);

@@ -68,6 +68,22 @@ async function req(method, path, body) {
   return data;
 }
 
+// Avatar images need the Bearer header, which <img src> can't send — fetch to a
+// blob URL instead, cached per user for the session (misses cache as null too:
+// a user with no avatar still 404s the same way on every poll otherwise).
+const avatarUrls = new Map();
+export function getUserAvatarUrl(uid) {
+  if (!uid || !token) return Promise.resolve(null);
+  if (!avatarUrls.has(uid)) {
+    avatarUrls.set(uid,
+      fetch(`/api/v1/users/${uid}/avatar`, { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => (r.ok ? r.blob() : null))
+        .then((b) => (b ? URL.createObjectURL(b) : null))
+        .catch(() => null));
+  }
+  return avatarUrls.get(uid);
+}
+
 // ── platform ──
 export const getGameInfo = () => req('GET', `/api/v1/games/${slug}`);
 export const remintLaunchToken = () => req('POST', `/api/v1/games/${slug}/launch-token`)
