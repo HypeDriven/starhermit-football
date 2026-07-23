@@ -20,3 +20,17 @@ owner=2712e04e-461b-4d23-81ae-e40b429128a8
 # the platform's per-game tick-rate support — see spec.md section 3. Realtime
 # Rooms (/api/v1/realtime, /ws/v1/realtime) are used for lobby/roster only.
 server=server.js
+
+# Default desktop-browser controls (spec.md sections 5.6 and 8.8). Players can
+# rebind these per game from the platform client's game-details page; on launch
+# in a non-mobile browser the game fetches the player's effective bindings via
+# GET /api/v1/games/<slug>/controls and remaps its keyboard handling to them.
+# Format: control.<action>=<KeyboardEvent.code>[+<code>...] | <label>
+control.up=KeyW+ArrowUp | Move up
+control.down=KeyS+ArrowDown | Move down
+control.left=KeyA+ArrowLeft | Move left
+control.right=KeyD+ArrowRight | Move right
+control.sprint=ShiftLeft+ShiftRight | Sprint
+control.pass=Space | Pass
+control.shoot=KeyJ | Shoot (hold to charge)
+control.tackle=KeyK | Slide tackle / pressure

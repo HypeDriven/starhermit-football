@@ -271,6 +271,25 @@ Mobile:
 - Touch UI auto-activates on `pointer: coarse`; big tap targets, HUD scales
   with `rem`/`dvh`, game renders at capped devicePixelRatio for perf.
 
+Remappable desktop bindings:
+- The desktop bindings above are the game's **defaults**, declared in
+  `starhermit.txt` as `control.<action>=` lines (§8.8) so the platform knows
+  them. Players rebind them per game from the platform client's game-details
+  page; the game never hard-codes the player's keys.
+- At boot, when the environment is a non-touch browser (`isTouch === false`)
+  and a launch token is present, the client calls
+  `GET /api/v1/games/{slug}/controls` (api.js) and rebuilds input.js's
+  `code → action` KEYMAP from the returned effective bindings (player
+  override where present, manifest default otherwise). Fetch failure,
+  offline launch, and Practice-without-token fall back to the built-in
+  defaults; touch devices never fetch (the joystick/button UI is not
+  remappable).
+- Remapping only changes which `KeyboardEvent.code`s trigger each of the
+  eight actions (`up`/`down`/`left`/`right`/`sprint`/`pass`/`shoot`/
+  `tackle`); movement stays camera-relative and action semantics (edge
+  triggers, shoot charge-and-release) are unchanged. `preventDefault()`
+  applies exactly to the mapped codes, as today.
+
 ### 5.7 Performance budget
 
 60 fps on a mid laptop, 30+ fps on a mid phone: ≤ ~120 draw calls (instancing
@@ -452,6 +471,69 @@ scripted session instead of on a host client:
 - **Tick rate**: the session ticks at `GameDefinition.TickRateHz` (30 Hz for
   this game; 30 Hz platform default, clamped to 1–1000 Hz).
 
+### 8.8 Per-player control bindings (generalized)
+
+Games declare their default desktop-browser controls in the manifest;
+players tune them per game from the game-details page; the game fetches the
+player's effective bindings at launch (§5.6). Like the rooms API, nothing
+here is football-specific.
+
+**Manifest declaration** (`starhermit.txt`) — zero or more lines:
+
+```
+control.<action>=<code>[+<code>...][ | <label>]
+```
+
+- `<action>` — lowercase `[a-z0-9_]{1,32}` id, unique per manifest (manifest
+  keys are lowercased by the parser anyway). Declaration order is display
+  order.
+- `<code>` — a `KeyboardEvent.code` value (`[A-Za-z0-9]{1,32}`); `+`
+  separates alternates that all trigger the action (e.g. `KeyW+ArrowUp`).
+- `<label>` — optional human-readable name for the game-details page, after
+  a `|`; defaults to the action id.
+- Caps: ≤ 32 actions, ≤ 4 codes per action, no code bound to two actions.
+  Invalid `control.*` lines are ignored (same tolerance as the rest of the
+  parser); games with no `control.*` lines simply get no Controls UI.
+
+`GitHubGameValidation.ParseStarhermitTxtControls` parses this alongside the
+existing name/launch/owner/server readers. The result is stored as ordered
+JSON on `GitHubGame.DefaultControlsJson` (new column + migration) and
+refreshed wherever the manifest is re-read today (game add, redeploy).
+
+**Per-user overrides** — new entity `GameControlOverride`:
+`Id, UserId, GitHubGameId, BindingsJson, UpdatedAt`, unique index on
+`(UserId, GitHubGameId)`, rows deleted with the user (same lifecycle rule as
+other user-owned rows). `BindingsJson` is `{ "<action>": ["<code>", …] }` —
+a subset of the declared actions; omitted actions keep manifest defaults.
+
+**REST** (`/api/v1/games/{slug}/controls` — full JWT **or** game-scoped
+launch token whose `game_scope` matches `{slug}`, the same dual-auth rule as
+the rest of the games API):
+
+| Method | Purpose |
+|---|---|
+| GET | The caller's effective bindings, in manifest order: `{ actions: [{ action, label, defaultCodes, codes }] }` where `codes` = override ?? default. 404 when the game declares no controls. |
+| PUT | Replace the caller's overrides. Body `{ bindings: { "<action>": ["<code>", …] } }`. Validation: every action must be declared in the manifest, codes match the code regex, ≤ 4 codes per action ≥ 1, and the **effective** map (overrides merged over defaults) must bind each code to at most one action — 400 naming the conflicting pair otherwise. |
+| DELETE | Remove the caller's overrides (reset everything to manifest defaults). 204. |
+
+Launch-token write access is deliberate: it lets a game ship an in-game
+rebinding screen later with no new auth work (this game's v1 uses the
+platform UI only). Writes are rate-limited like other launch-token
+mutations.
+
+**Game-details UI** (platform client): the game-details page gains a
+**Controls** section, shown only when the game declares controls — one row
+per action (label + a keycap chip per code), click-to-capture rebinding
+(the client maps its captured key to the corresponding `KeyboardEvent.code`
+string, since bindings are stored in web form), duplicate-binding
+highlighting, per-row and page-wide **Reset to default**. Saves via PUT,
+reset via DELETE.
+
+**Tests & docs**: controller/service tests mirror §8.6 patterns (auth
+fencing, scope fencing, validation 400s, override merge, reset). Wiki docs
+per platform convention: the manifest key in `github-games.md`, the
+endpoints in `games.md`.
+
 ## 9. Audio (client, WebAudio — all synthesized, no assets)
 
 - **Ball contact**: layered thump (filtered noise burst + sine thud), pitch/
@@ -473,13 +555,14 @@ scripted session instead of on a host client:
 ## 10. Client code layout
 
 ```
-starhermit.txt          # manifest (slug=football, launch=index.html, server=server.js)
+starhermit.txt          # manifest (slug=football, launch=index.html, server=server.js,
+                        #   control.* default desktop bindings — §8.8)
 server.js               # authoritative match sim — platform Jint sandbox (30 Hz);
                         #   also loaded client-side as the shared sim core
 index.html              # shell: canvas, HUD, lobby screens, touch UI
 css/style.css
 js/main.js              # boot, screens state machine (menu→lobby→match)
-js/api.js               # REST client (launch token, friends, rooms, leaderboard)
+js/api.js               # REST client (launch token, friends, rooms, controls, leaderboard)
 js/net.js               # ws/v1/games client: cmd inputs up, snapshot buffer, interpolation
 js/lobby.js             # lobby UI: invites, seats, countdown, quick play
 js/match.js             # match controller: walkout→coin flip→halves→fulltime→ceremonies
@@ -490,7 +573,7 @@ js/world/nametags.js    # floating nickname sprites
 js/world/officials.js   # referee + stretcher carriers (injury ceremony actors)
 js/game/sim.js          # thin wrapper re-exporting FootballSim from server.js
 js/game/ai.js           # thin wrapper re-exporting the AI from server.js
-js/game/input.js        # keyboard + touch joystick/buttons
+js/game/input.js        # keyboard (remappable, §5.6) + touch joystick/buttons
 js/game/camera.js       # follow cam + off-screen ball arrow
 js/game/audio.js        # WebAudio SFX + crowd engine
 vendor/three/           # three.module.js (+ addons actually used)
@@ -524,6 +607,11 @@ matches render from server snapshots only.
    screens wired to Realtime Rooms API, invites, quick-join, backfill.
 10. **Polish & verification** — mobile QA pass, perf caps, README, final
     manual test matrix (desktop Chrome/Firefox, mobile Safari/Chrome).
+11. **Remappable desktop controls** (§5.6, §8.8) — manifest `control.*`
+    defaults; backend: manifest parsing, `DefaultControlsJson` +
+    `GameControlOverride` migration, `/controls` REST + validation + tests;
+    platform-client game-details Controls section; game client fetch/remap
+    in api.js + input.js; wiki docs (`github-games.md`, `games.md`).
 
 ## 12. Out of scope (v1)
 
