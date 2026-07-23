@@ -481,10 +481,18 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
       case 'woodwork': audio.crowd.gasp(); audio.crowd.ooh(); stadium.crowd.pulse(0.5); break;
       case 'goal': {
         const isHome = ev.team === 0;
-        audio.crowd.goal(isHome);
+        if (ev.ownGoal) {
+          // a gasp first, then a muted cheer — the stadium isn't sure how to feel
+          audio.crowd.gasp();
+          audio.crowd.cheer(0.5);
+          stadium.crowd.pulse(0.5);
+          hud.banner('OWN GOAL!', 2600);
+        } else {
+          audio.crowd.goal(isHome);
+          stadium.crowd.pulse(1);
+          hud.banner('GOAL!', 2600);
+        }
         audio.whistle('short');
-        stadium.crowd.pulse(1);
-        hud.banner('GOAL!', 2600);
         hud.setScore(sim.score[0], sim.score[1]);
         break;
       }

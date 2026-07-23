@@ -2,11 +2,15 @@
 // platform's Realtime Rooms API (spec.md §8). Pure DOM + api.js; main.js
 // drives the transitions.
 import * as api from './api.js';
+import { roleForSlot } from './game/sim.js';
+
+const ROLE_NAMES = { GK: 'Goalkeeper', DF: 'Defender', MF: 'Midfielder', FW: 'Forward' };
 
 export function createLobby({ onMatchReady, onLeave, setStatus }) {
   let room = null;
   let pollTimer = null;
   let countdownTimer = null;
+  let entered = false; // guards double enterMatch (poll + tryStart race)
 
   const rosterEl = document.getElementById('lobby-roster');
   const timerEl = document.getElementById('lobby-timer');
@@ -23,6 +27,7 @@ export function createLobby({ onMatchReady, onLeave, setStatus }) {
 
   async function create(teamSize) {
     stopPolling();
+    entered = false;
     room = await api.createRoom({
       teamCount: 2,
       seatsPerTeam: teamSize,
@@ -38,6 +43,7 @@ export function createLobby({ onMatchReady, onLeave, setStatus }) {
   // Quick play: join an open room; if none, create our own open room.
   async function quickPlay(teamSize) {
     setStatus('Searching for a match…');
+    entered = false;
     try {
       room = await api.quickJoin();
     } catch (e) {
@@ -110,6 +116,7 @@ export function createLobby({ onMatchReady, onLeave, setStatus }) {
 
   function startPolling() {
     stopPolling();
+    let playingPolls = 0;
     pollTimer = setInterval(async () => {
       if (!room) return;
       try {
@@ -117,7 +124,11 @@ export function createLobby({ onMatchReady, onLeave, setStatus }) {
         render();
         if (room.status === 'Playing' || room.status === 'playing') {
           clearInterval(countdownTimer);
-          enterMatch();
+          // The server binds gameSessionId in a separate step from flipping the
+          // room to Playing — give it a few polls to appear before entering
+          // (entering without it shows "match session unavailable").
+          if (room.gameSessionId || ++playingPolls >= 5) enterMatch();
+          else timerEl.textContent = 'Starting match…';
         } else if (room.status === 'Closed' || room.status === 'closed') {
           leave();
         }
@@ -143,6 +154,8 @@ export function createLobby({ onMatchReady, onLeave, setStatus }) {
       }
     }
     const me = api.getAuth();
+    const status = (room.status || '').toLowerCase();
+    const canMove = status === 'lobby' || status === 'open';
     for (let t = 0; t < 2; t++) {
       const head = document.createElement('div');
       head.className = 'team-head';
@@ -155,13 +168,29 @@ export function createLobby({ onMatchReady, onLeave, setStatus }) {
         const p = cols[t][s];
         const el = document.createElement('div');
         el.className = 'seat' + (p ? '' : ' empty');
+
+        // which position this slot plays (same slot→role rule as the sim)
+        const role = roleForSlot(s, teamSize);
+        const pos = document.createElement('span');
+        pos.className = 'pos';
+        pos.textContent = role;
+        pos.title = ROLE_NAMES[role] || role;
+        el.appendChild(pos);
+
+        const who = document.createElement('span');
         if (p) {
-          el.textContent = p.username + (p.isAi ? ' (AI)' : '');
+          who.textContent = p.username + (p.isAi ? ' (AI)' : '');
           if (p.isAi) el.classList.add('ai');
           if (p.userId === me.userId) el.classList.add('me');
         } else {
-          el.textContent = '— open —';
+          who.textContent = '— open —';
+          if (canMove) {
+            el.classList.add('clickable');
+            el.title = `Move here and play ${ROLE_NAMES[role] || role}`;
+            el.onclick = () => moveTo(t, s);
+          }
         }
+        el.appendChild(who);
         rosterEl.appendChild(el);
       }
     }
@@ -171,7 +200,23 @@ export function createLobby({ onMatchReady, onLeave, setStatus }) {
       : `${humans} player${humans === 1 ? '' : 's'} in lobby`;
   }
 
+  // Click an open seat → move my participant there (any player may move
+  // themself; the server rejects taken seats and post-start moves).
+  async function moveTo(team, slot) {
+    const me = api.getAuth();
+    const mine = (room?.participants || []).find((p) => p.userId === me.userId);
+    if (!mine) return;
+    try {
+      room = await api.setSeats(room.id, [{ participantId: mine.id, team, slot }]);
+      render();
+    } catch (e) {
+      setStatus(e.message);
+    }
+  }
+
   function enterMatch() {
+    if (entered) return;
+    entered = true;
     stopPolling();
     hide();
     onMatchReady(room);
@@ -188,6 +233,7 @@ export function createLobby({ onMatchReady, onLeave, setStatus }) {
   // Adopt a room we joined outside the lobby flow (e.g. accepted invite).
   function adopt(r) {
     room = r;
+    entered = false;
     findBtn.disabled = false;
     render();
     startPolling();

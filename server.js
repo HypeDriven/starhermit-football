@@ -248,7 +248,7 @@ function createMatch(opts) {
         x: 0, z: 0, vx: 0, vz: 0, facing: t === 0 ? 0 : Math.PI,
         anim: 'idle', animSpeed: 0, phase: rng() * 6.28,
         kickT: 0, tackleT: 0, stunT: 0, diveT: 0, diveDir: 0,
-        celebrateT: 0,
+        celebrateT: 0, dejectedT: 0,
       });
     }
   }
@@ -299,7 +299,7 @@ function resetKickoff(state, kickoffTeam) {
     }
     p.vx = p.vz = 0; p.stunT = 0; p.tackleT = 0; p.kickT = 0; p.diveT = 0;
     p.facing = attackSign(state, p.team) > 0 ? 0 : Math.PI;
-    p.anim = 'idle'; p.celebrateT = 0;
+    p.anim = 'idle'; p.celebrateT = 0; p.dejectedT = 0;
   }
   state.ball.x = 0; state.ball.y = BALL_R; state.ball.z = 0;
   state.ball.vx = 0; state.ball.vy = 0; state.ball.vz = 0;
@@ -330,10 +330,11 @@ function stepMatch(state, inputs, dt) {
 
   if (state.phase === 'goal' || state.phase === 'halftime') {
     state.phaseT -= dt;
-    // players celebrate / walk back
+    // players celebrate (or hang their head after an own goal) / walk back
     for (var gi = 0; gi < state.players.length; gi++) {
       var gp = state.players[gi];
-      if (gp.celebrateT > 0) { gp.celebrateT -= dt; gp.anim = 'celebrate'; }
+      if (gp.dejectedT > 0) { gp.dejectedT -= dt; gp.anim = 'dejected'; }
+      else if (gp.celebrateT > 0) { gp.celebrateT -= dt; gp.anim = 'celebrate'; }
       else gp.anim = Math.abs(gp.vx) + Math.abs(gp.vz) > 0.5 ? 'walk' : 'idle';
     }
     if (state.phase === 'goal' && state.phaseT <= 0) {
@@ -686,6 +687,8 @@ function goalScored(state) {
   // scoring team: the team attacking the goal the ball crossed
   var crossedSign = Math.sign(b.x);
   var scoringTeam = state.players.find(function (p) { return attackSign(state, p.team) === crossedSign; }).team;
+  var scorer = b.lastTouch != null ? state.players[b.lastTouch] : null;
+  var ownGoal = !!(scorer && scorer.team !== scoringTeam);
   state.score[scoringTeam]++;
   state.lastScoredTeam = scoringTeam;
   state.phase = 'goal';
@@ -698,7 +701,9 @@ function goalScored(state) {
     var p = state.players[i];
     if (p.team === scoringTeam) p.celebrateT = 3;
   }
-  push(state, { type: 'goal', team: scoringTeam, scorer: b.lastTouch, score: [state.score[0], state.score[1]] });
+  // putting it in your own net is no cause for a knees-up
+  if (ownGoal) scorer.dejectedT = 3;
+  push(state, { type: 'goal', team: scoringTeam, scorer: b.lastTouch, ownGoal: ownGoal, score: [state.score[0], state.score[1]] });
 }
 
 // Simplified restarts: throw-in / goal-kick / corner all become "nearest

@@ -7,17 +7,33 @@ export function createInput() {
   const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 
   // ── keyboard ──
-  const KEYMAP = {
+  // Actions the sim understands; the manifest declares the same ids (starhermit.txt
+  // control.* lines), so platform bindings map 1:1 onto these.
+  const ACTIONS = new Set(['up', 'down', 'left', 'right', 'sprint', 'pass', 'shoot', 'tackle']);
+  const DEFAULT_KEYMAP = {
     KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down',
     KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
     ShiftLeft: 'sprint', ShiftRight: 'sprint',
     Space: 'pass', KeyJ: 'shoot', KeyK: 'tackle',
   };
+  let keymap = { ...DEFAULT_KEYMAP };
+
+  // Rebuild the code→action map from the platform's effective bindings
+  // (GET /api/v1/games/<slug>/controls → actions: [{ action, codes }]).
+  function setBindings(actions) {
+    const map = {};
+    for (const a of actions || []) {
+      if (!ACTIONS.has(a.action)) continue;
+      for (const code of a.codes || []) map[code] = a.action;
+    }
+    if (Object.keys(map).length) keymap = map;
+  }
+
   let passEdge = false, tackleEdge = false;
   let shootHeld = false, shootCharge = 0, shootReleased = 0;
 
   addEventListener('keydown', (e) => {
-    const k = KEYMAP[e.code];
+    const k = keymap[e.code];
     if (!k) return;
     e.preventDefault();
     if (keys.has(k)) return;
@@ -27,7 +43,7 @@ export function createInput() {
     if (k === 'shoot') { shootHeld = true; shootCharge = 0; }
   });
   addEventListener('keyup', (e) => {
-    const k = KEYMAP[e.code];
+    const k = keymap[e.code];
     if (!k) return;
     keys.delete(k);
     if (k === 'shoot' && shootHeld) { shootHeld = false; shootReleased = Math.max(0.15, shootCharge); }
@@ -124,6 +140,7 @@ export function createInput() {
 
   return {
     isTouch,
+    setBindings,
     getState,
     showTouchUi(show) {
       if (!isTouch) return;

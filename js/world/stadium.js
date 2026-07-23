@@ -418,8 +418,10 @@ export function buildStadium(scene, opts) {
     scaleUVs(top, NET_DEPTH / 0.12, goalW / 0.12);
     netGeoms.push(top);
     for (const s of [-1, 1]) {
+      // XY-plane geometry already spans depth (X) × height (Y) with its normal
+      // along Z — the side-panel orientation. No rotation: a rotateY here swings
+      // the panel parallel to the back net, cutting across the goal mouth.
       const sideP = new THREE.PlaneGeometry(NET_DEPTH, goalH);
-      sideP.rotateY(Math.PI / 2);
       sideP.translate(gx + (sign * NET_DEPTH) / 2, goalH / 2, (s * goalW) / 2);
       scaleUVs(sideP, NET_DEPTH / 0.12, goalH / 0.12);
       netGeoms.push(sideP);

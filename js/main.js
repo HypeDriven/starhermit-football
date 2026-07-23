@@ -9,6 +9,7 @@ import { createLobby } from './lobby.js';
 import { createNetClient, createGameClient } from './net.js';
 import { createMenuScene } from './menuScene.js';
 import { createVoice } from './voice.js';
+import { createControlsScreen } from './controls.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -46,7 +47,7 @@ let activeRoom = null;   // room the server says we're still a participant of
 let matchRoom = null;    // room the current match is played in (for Esc-leave)
 
 // ── screens ──
-const screens = ['screen-menu', 'screen-lobby', 'screen-invite', 'screen-result'];
+const screens = ['screen-menu', 'screen-lobby', 'screen-invite', 'screen-controls', 'screen-result'];
 function showScreen(id) {
   for (const s of screens) $(s).classList.toggle('hidden', s !== id);
   if (!id) for (const s of screens) $(s).classList.add('hidden');
@@ -70,13 +71,34 @@ async function refreshActiveRoom() {
   }
 }
 
+// In-game modal confirm (replaces window.confirm — no browser chrome).
+function uiConfirm({ title, text, yes, no }) {
+  return new Promise((resolve) => {
+    $('confirm-title').textContent = title;
+    $('confirm-text').textContent = text;
+    const dlg = $('confirm-dialog');
+    const yesBtn = $('btn-confirm-yes');
+    const noBtn = $('btn-confirm-no');
+    yesBtn.textContent = yes;
+    noBtn.textContent = no;
+    const done = (v) => {
+      dlg.classList.add('hidden');
+      yesBtn.onclick = noBtn.onclick = null;
+      resolve(v);
+    };
+    yesBtn.onclick = () => { audio.ui(); done(true); };
+    noBtn.onclick = () => { audio.ui(); done(false); };
+    dlg.classList.remove('hidden');
+  });
+}
+
 // Guard for anything that starts a new game while the server still has us in a room.
 async function confirmLeaveActiveRoom() {
   if (!activeRoom) return true;
   const playing = activeRoom.status === 'Playing' || activeRoom.status === 'playing';
-  const ok = confirm(playing
-    ? 'You are in a match right now. Leave it? An AI player will take over your footballer.'
-    : 'You already have a lobby open. Leave it and continue?');
+  const ok = await uiConfirm(playing
+    ? { title: 'LEAVE MATCH?', text: 'You are in a match right now. An AI player will take over your footballer.', yes: 'LEAVE MATCH', no: 'CANCEL' }
+    : { title: 'LEAVE LOBBY?', text: 'You already have a lobby open. Leave it and continue?', yes: 'LEAVE LOBBY', no: 'CANCEL' });
   if (!ok) return false;
   try { await api.leaveRoom(activeRoom.id); } catch { /* already gone */ }
   activeRoom = null;
@@ -139,6 +161,12 @@ function setupMenu() {
       await lobby.quickPlay(teamSize);
     } catch (e) { showScreen('screen-menu'); setStatus(`Quick play failed: ${e.message}`); }
   };
+  // Remappable desktop controls (spec §5.6/§8.8): saved per user on the platform,
+  // so the button needs a launch token; touch layouts have nothing to remap.
+  const controlsBtn = $('btn-controls');
+  if (input.isTouch || !auth.online) controlsBtn.classList.add('hidden');
+  controlsBtn.onclick = () => { audio.ui(); showScreen('screen-controls'); controlsScreen.open(); };
+
   $('btn-rejoin').onclick = () => { audio.ui(); rejoinActiveRoom(); };
   $('btn-invite').onclick = () => { audio.ui(); lobby.inviteFriends(); };
   $('btn-invite-back').onclick = () => { audio.ui(); $('screen-invite').classList.add('hidden'); };
@@ -146,16 +174,29 @@ function setupMenu() {
   $('btn-leave').onclick = () => { audio.ui(); lobby.leave(); };
   $('btn-result-menu').onclick = () => { audio.ui(); backToMenu(); };
 
-  // pending room invites from friends (accept from the menu)
-  if (auth.online) refreshIncomingInvites();
+  // pending room invites from friends (accept from the menu). Invites are
+  // pull-only (no push channel, spec §8) — poll while the menu is showing so
+  // an invite sent after boot still appears.
+  if (auth.online) {
+    refreshIncomingInvites();
+    setInterval(() => {
+      if (!document.hidden && !$('screen-menu').classList.contains('hidden')) refreshIncomingInvites();
+    }, 5000);
+  }
 }
 
+let invitesSig = null;
 async function refreshIncomingInvites() {
   const box = $('menu-invites');
   try {
     const invites = await api.getRoomInvites();
+    const shown = (invites || []).slice(0, 4);
+    // don't rebuild the rows (and yank buttons out from under a click) unless changed
+    const sig = shown.map((inv) => inv.id ?? inv.inviteId).join(',');
+    if (sig === invitesSig) return;
+    invitesSig = sig;
     box.innerHTML = '';
-    for (const inv of (invites || []).slice(0, 4)) {
+    for (const inv of shown) {
       const row = document.createElement('div');
       row.className = 'invite-row';
       row.innerHTML = `<span>${esc(inv.fromUsername || 'A friend')} invited you to a match</span>`;
@@ -289,12 +330,19 @@ $('btn-leave-yes').onclick = async () => {
 
 // ── boot ──
 lobby = createLobby({ onMatchReady, onLeave: () => showScreen('screen-menu'), setStatus });
+const controlsScreen = createControlsScreen({ input, audio, onBack: () => showScreen('screen-menu') });
 showScreen('screen-menu');
 api.resolveUsername().finally(() => {
   setupMenu();
   refreshActiveRoom();
   $('loading').classList.add('hidden');
 });
+
+// apply the player's saved bindings at launch (spec §5.6); 404 = game declares
+// no controls, offline = defaults — either way the built-in keymap stands
+if (auth.online && !input.isTouch) {
+  api.getControls().then((c) => input.setBindings(c.actions)).catch(() => {});
+}
 
 // idle stadium backdrop behind the menu: an AI-vs-AI exhibition match with a
 // drifting cinematic camera (see menuScene.js). Runs whenever no match is live.

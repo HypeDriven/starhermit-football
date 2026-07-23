@@ -74,6 +74,11 @@ export const remintLaunchToken = () => req('POST', `/api/v1/games/${slug}/launch
   .then((d) => { if (d?.token) token = d.token; return d; });
 export const getFriends = () => req('GET', '/api/v1/me/friends');
 
+// ── per-player control bindings (spec.md §8.8) ──
+export const getControls = () => req('GET', `/api/v1/games/${slug}/controls`);
+export const putControls = (bindings) => req('PUT', `/api/v1/games/${slug}/controls`, { bindings });
+export const resetControls = () => req('DELETE', `/api/v1/games/${slug}/controls`);
+
 // ── realtime rooms (see spec.md §8) ──
 export const createRoom = (cfg) => req('POST', '/api/v1/realtime/rooms', cfg);
 export const getRoom = (id) => req('GET', `/api/v1/realtime/rooms/${id}`);
@@ -83,6 +88,7 @@ export const getRoomInvites = () => req('GET', '/api/v1/realtime/rooms/invites')
 export const acceptRoomInvite = (inviteId) => req('POST', `/api/v1/realtime/rooms/invites/${inviteId}/accept`);
 export const declineRoomInvite = (inviteId) => req('POST', `/api/v1/realtime/rooms/invites/${inviteId}/decline`);
 export const openRoom = (id) => req('POST', `/api/v1/realtime/rooms/${id}/open`);
+export const setSeats = (id, seats) => req('POST', `/api/v1/realtime/rooms/${id}/seats`, { seats });
 export const quickJoin = () => req('POST', '/api/v1/realtime/rooms/quick-join', {});
 export const startRoom = (id) => req('POST', `/api/v1/realtime/rooms/${id}/start`);
 export const leaveRoom = (id) => req('POST', `/api/v1/realtime/rooms/${id}/leave`);

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>StarHermit Football</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="stylesheet" href="css/style.css">
 <script type="importmap">
 { "imports": { "three": "./vendor/three/three.module.min.js" } }
@@ -45,6 +46,7 @@
       <button id="btn-quick" class="mbtn primary">QUICK PLAY</button>
       <button id="btn-lobby" class="mbtn">CREATE LOBBY</button>
       <button id="btn-practice" class="mbtn">PRACTICE vs AI</button>
+      <button id="btn-controls" class="mbtn">CONTROLS</button>
     </div>
     <div id="menu-team-size">Team size
       <select id="team-size"></select> per side
@@ -73,6 +75,17 @@
     <div class="menu-buttons"><button id="btn-invite-back" class="mbtn">BACK</button></div>
   </div>
 
+  <div id="screen-controls" class="screen hidden">
+    <h2>CONTROLS</h2>
+    <div id="controls-list"></div>
+    <div class="muted small" id="controls-hint"></div>
+    <div class="menu-buttons">
+      <button id="btn-controls-save" class="mbtn primary">SAVE</button>
+      <button id="btn-controls-reset" class="mbtn">RESET ALL</button>
+      <button id="btn-controls-back" class="mbtn">BACK</button>
+    </div>
+  </div>
+
   <div id="screen-result" class="screen hidden">
     <h2 id="result-title">FULL TIME</h2>
     <div id="result-score"></div>
@@ -90,6 +103,16 @@
   <div class="menu-buttons">
     <button id="btn-leave-yes" class="mbtn danger">LEAVE MATCH</button>
     <button id="btn-leave-no" class="mbtn primary">KEEP PLAYING</button>
+  </div>
+</div>
+
+<!-- Generic confirm (e.g. starting a new game while still in a room) -->
+<div id="confirm-dialog" class="screen hidden">
+  <h2 id="confirm-title"></h2>
+  <div id="confirm-text" class="muted"></div>
+  <div class="menu-buttons">
+    <button id="btn-confirm-yes" class="mbtn danger"></button>
+    <button id="btn-confirm-no" class="mbtn primary"></button>
   </div>
 </div>
 
