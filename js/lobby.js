@@ -6,7 +6,7 @@ import { roleForSlot } from './game/sim.js';
 
 const ROLE_NAMES = { GK: 'Goalkeeper', DF: 'Defender', MF: 'Midfielder', FW: 'Forward' };
 
-export function createLobby({ onMatchReady, onLeave, setStatus }) {
+export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
   let room = null;
   let pollTimer = null;
   let countdownTimer = null;
@@ -55,8 +55,9 @@ export function createLobby({ onMatchReady, onLeave, setStatus }) {
       room = await api.openRoom(room.id);
     }
     render();
-    startPolling();
     show();
+    if (room.status === 'Playing' || room.status === 'playing') enterMatch();
+    else startPolling();
     setStatus('');
   }
 
@@ -90,6 +91,10 @@ export function createLobby({ onMatchReady, onLeave, setStatus }) {
     findBtn.disabled = true;
     inviteBtn.disabled = true;
     room = await api.openRoom(room.id);
+    if (room.status === 'Playing' || room.status === 'playing') {
+      enterMatch();
+      return;
+    }
     timerEl.textContent = 'Finding players… 30s';
     startCountdown();
   }
@@ -234,6 +239,7 @@ export function createLobby({ onMatchReady, onLeave, setStatus }) {
     if (entered) return;
     entered = true;
     stopPolling();
+    onStarting?.(room);
     hide();
     onMatchReady(room);
   }
@@ -252,8 +258,9 @@ export function createLobby({ onMatchReady, onLeave, setStatus }) {
     entered = false;
     findBtn.disabled = false;
     render();
-    startPolling();
     show();
+    if (room.status === 'Playing' || room.status === 'playing') enterMatch();
+    else startPolling();
   }
 
   return { create, quickPlay, inviteFriends, findMatch, leave, show, hide, adopt, get room() { return room; } };

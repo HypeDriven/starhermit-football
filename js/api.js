@@ -116,6 +116,7 @@ export const getSession = (sessionId) => req('GET', `/api/v1/games/${slug}/sessi
 
 // ── voice rooms (platform voice relay; used for WebRTC signaling) ──
 export const listVoiceRooms = (conversationId) => req('GET', `/api/v1/voice/rooms?conversationId=${encodeURIComponent(conversationId)}`);
-export const createVoiceRoom = (conversationId) => req('POST', '/api/v1/voice/rooms', { conversationId });
+export const createVoiceRoom = (conversationId, maxParticipants = 22) =>
+  req('POST', '/api/v1/voice/rooms', { conversationId, maxParticipants });
 export const joinVoiceRoom = (roomId) => req('POST', `/api/v1/voice/rooms/${roomId}/join`);
 export const leaveVoiceRoom = (roomId) => req('POST', `/api/v1/voice/rooms/${roomId}/leave`);

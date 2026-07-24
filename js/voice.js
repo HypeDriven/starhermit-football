@@ -215,10 +215,23 @@ export function createVoice() {
       if (!live(s)) return;
       const convId = detail?.chatConversationId;
       if (!convId) return void hangup(); // session has no conversation (not bridged)
-      const rooms = await api.listVoiceRooms(convId);
+      let rooms = await api.listVoiceRooms(convId);
       if (!live(s)) return;
-      const room = (rooms && rooms[0]) || await api.createVoiceRoom(convId);
+      if (!rooms?.length) await api.createVoiceRoom(convId, 22);
       if (!live(s)) return;
+
+      // Every client can reach this point together. Give concurrent creators a
+      // brief settle window, then all choose the same oldest active room rather
+      // than ending up alone in parallel voice rooms.
+      await new Promise((resolve) => setTimeout(resolve, 180));
+      if (!live(s)) return;
+      rooms = await api.listVoiceRooms(convId);
+      if (!live(s)) return;
+      const room = [...(rooms || [])]
+        .filter((r) => !r.status || String(r.status).toLowerCase() === 'active')
+        .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
+          || String(a.id).localeCompare(String(b.id)))[0];
+      if (!room) return void hangup();
       voiceRoomId = room.id;
       await connectWs(s);
       console.info('voice: joined room', voiceRoomId);

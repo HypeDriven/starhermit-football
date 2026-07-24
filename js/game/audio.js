@@ -467,6 +467,31 @@ export function createAudio() {
         if (ready()) applyExcitement(ctx.currentTime);
       },
 
+      // A full-stadium roar for the instant matchmaking flips a lobby into a
+      // match. Deliberately broader, louder and longer than a normal cheer.
+      matchStart() {
+        if (!ready()) return;
+        const t = ctx.currentTime + 0.001;
+        noiseBurst(crowdBus, t, {
+          freq: rand(420, 620), freqEnd: rand(1050, 1450), q: 0.45,
+          gain: rand(0.9, 1.08), dur: rand(3.2, 3.8), attack: 0.06,
+          rate: rand(0.78, 0.96), pan: rand(-0.1, 0.1),
+        });
+        noiseBurst(crowdBus, t + 0.08, {
+          freq: rand(850, 1100), freqEnd: rand(1500, 2000), q: 0.7,
+          gain: rand(0.42, 0.58), dur: rand(2.4, 3.1), attack: 0.12,
+          rate: rand(0.9, 1.12), pan: rand(-0.25, 0.25),
+        });
+        for (let i = 0; i < 9; i++) {
+          tone(crowdBus, t + rand(0.05, 1.6), {
+            wave: i % 3 === 0 ? 'square' : 'sine',
+            freq: rand(1250, 2600), freqEnd: rand(1500, 2850),
+            gain: rand(0.018, 0.045), dur: rand(0.25, 0.75), attack: 0.035,
+            pan: rand(-0.75, 0.75),
+          });
+        }
+      },
+
       cheer(strength) {
         if (!ready()) return;
         const s = clamp01(strength);

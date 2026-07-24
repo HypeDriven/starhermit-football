@@ -337,7 +337,12 @@ $('btn-leave-yes').onclick = async () => {
 };
 
 // ── boot ──
-lobby = createLobby({ onMatchReady, onLeave: () => showScreen('screen-menu'), setStatus });
+lobby = createLobby({
+  onMatchReady,
+  onStarting: () => { audio.resume(); audio.crowd.matchStart(); },
+  onLeave: () => showScreen('screen-menu'),
+  setStatus,
+});
 const controlsScreen = createControlsScreen({ input, audio, onBack: () => showScreen('screen-menu') });
 showScreen('screen-menu');
 api.resolveUsername().finally(() => {
