@@ -222,6 +222,36 @@ export function applyPose(joints, params) {
     P.lFtZ = mix(P.lFtZ, 0, wDej); P.rFtZ = mix(P.rFtZ, 0, wDej);
   }
 
+  // ---------------- stretcher carry + crouch (injury-ceremony medics) ----------------
+  const wCF = params.wCarryF !== undefined ? params.wCarryF : (anim === 'carryF' ? 1 : 0);
+  const wCB = params.wCarryB !== undefined ? params.wCarryB : (anim === 'carryB' ? 1 : 0);
+  const wCro = params.wCrouch !== undefined ? params.wCrouch : (anim === 'crouch' ? 1 : 0);
+
+  if (wCF + wCB > 0.001) {
+    const wC = Math.min(1, wCF + wCB);
+    // rear carrier (carryB) reaches forward to the rails; front carrier
+    // (carryF) reaches back — both grip the poles at hip height
+    const reach = (wCB - wCF) / Math.max(wC, 1e-4); // +1 fwd, -1 back
+    P.lUAZ = mix(P.lUAZ, 0.58 * reach, wC); P.rUAZ = mix(P.rUAZ, 0.58 * reach, wC);
+    P.lUAX = mix(P.lUAX, -0.16, wC); P.rUAX = mix(P.rUAX, 0.16, wC);
+    P.lLAZ = mix(P.lLAZ, 0.28, wC); P.rLAZ = mix(P.rLAZ, 0.28, wC);
+    P.tRZ = mix(P.tRZ, -0.09, wC); // slight hunch under the load
+  }
+
+  if (wCro > 0.001) {
+    // kneel down / rise with the stretcher: hips low, knees folded, bent
+    // over, hands reaching to the rails
+    P.pelY = mix(P.pelY, 0.52, wCro);
+    P.tRZ = mix(P.tRZ, -0.38, wCro);
+    P.hRZ = mix(P.hRZ, -0.22, wCro);
+    P.lThZ = mix(P.lThZ, 1.05, wCro); P.rThZ = mix(P.rThZ, 1.05, wCro);
+    P.lShZ = mix(P.lShZ, -1.75, wCro); P.rShZ = mix(P.rShZ, -1.75, wCro);
+    P.lFtZ = mix(P.lFtZ, 0.7, wCro); P.rFtZ = mix(P.rFtZ, 0.7, wCro);
+    P.lUAZ = mix(P.lUAZ, 0.55, wCro); P.rUAZ = mix(P.rUAZ, 0.55, wCro);
+    P.lUAX = mix(P.lUAX, -0.14, wCro); P.rUAX = mix(P.rUAX, 0.14, wCro);
+    P.lLAZ = mix(P.lLAZ, 0.15, wCro); P.rLAZ = mix(P.rLAZ, 0.15, wCro);
+  }
+
   // ---------------- write pose to the rig ----------------
   const J = joints;
   J.root.position.set(P.px, P.py, P.pz);

@@ -112,25 +112,31 @@
 //   rn: replacementName, sp: [x, z] (injury spot),
 //   ref: [x, z, facing, anim, animSpeed, phase],      // virtual referee
 //   ca:  [[...], [...]],                              // two carriers, same layout
-//   st:  [x, z, angle, carrying(0|1)],                // stretcher
+//   st:  [x, z, angle, bedHeight],                    // stretcher
 // }
 // Virtual entities use the same anim conventions as players (walk/run with
-// animSpeed + accumulating phase so legs animate).
+// animSpeed + accumulating phase so legs animate). Carriers additionally use
+// 'carryB'/'carryF' (rear/front rail grip) and 'crouch' (set-down / lift).
 //
-// Timeline (t in seconds; entities move at walk 2.1 / run 5.4 m/s, sped up
-// as needed to hit their deadline on large pitches):
-//   0        victim falls at the spot ('injury-start'), ball owner cleared
-//   0.5–2.5  referee runs in from the +z touchline -> 'referee-whistle'
-//   2.5–4    carriers + stretcher walk in from the near touchline ->
-//            'stretcher-load' (victim slaves to the stretcher)
-//   4–7      stretcher carried to the west tunnel (x = -L/2 - 6, z = 0,
-//            the walkout tunnel) -> 'stretcher-off'; victim entity teleports
-//            to the tunnel mouth and takes the replacement identity (name)
-//   7–9.5    replacement runs from the tunnel to its formation anchor;
-//            'substitution' fires when it crosses onto the pitch
-//   8.5–10   referee jogs back off
-//   10       ceremony ends: dropped-ball restart at the spot (ball
-//            stationary, no owner, both teams may play it), phase 'play'.
+// Timeline (t in seconds; the referee runs at 5.4 m/s, the crew hustles at
+// 6.0 m/s with an empty stretcher and 5.5 m/s loaded — carry deadlines scale
+// with the actual distance so the crew never sprints absurdly):
+//   0           victim falls at the spot ('injury-start'), ball owner cleared
+//   0.5–2.5     referee runs in from the +z touchline -> 'referee-whistle'
+//   2.5–…       carriers walk in from the near touchline carrying the
+//               stretcher (arrival = distance / 6.0)
+//   +1.4        crouch + set down, 'stretcher-load' (victim slaves to the
+//               stretcher at bed height), crouch + lift back to carry height
+//   …           stretcher carried to the west tunnel (x = -L/2 - 6, z = 0,
+//               the walkout tunnel) at 5.5 m/s
+//   +2.1        crouch + set down -> 'stretcher-off'; victim entity teleports
+//               to the tunnel mouth and takes the replacement identity (name);
+//               crew lifts the empty stretcher and carries it into the tunnel
+//   meanwhile   replacement runs from the tunnel to its formation anchor;
+//               'substitution' fires when it crosses onto the pitch; the
+//               referee jogs back off from t=8.5
+//   end         ceremony ends: dropped-ball restart at the spot (ball
+//               stationary, no owner, both teams may play it), phase 'play'.
 // During the ceremony the match clock is paused, the ball decelerates to a
 // stop (no pickups), and all other players ease to idle — nobody chases.
 // =============================================================================
@@ -961,12 +967,15 @@ var CER = {
   REF_IN: 0.5,     // referee starts running in
   REF_BY: 2.5,     // referee arrives / whistles
   CREW_IN: 2.5,    // carriers + stretcher start walking in
-  CREW_BY: 4,      // victim loaded
-  CARRY_BY: 7,     // stretcher reaches the tunnel
-  SUB_BY: 9.5,     // replacement reaches its formation anchor
   REF_OUT: 8.5,    // referee jogs back off
-  END: 10,         // drop-ball restart, phase back to 'play'
+  SPEED_IN: 6.0,   // crew hustle with an empty stretcher (m/s)
+  SPEED_OUT: 5.5,  // crew hustle with a loaded stretcher (m/s)
 };
+var ST_GROUND = 0.34;  // stretcher bed height resting on its legs
+var ST_CARRY = 0.72;   // bed height while carried (medic hip/hand level)
+var CREW_HALF = 1.0;   // carrier offset from the stretcher center along its axis
+
+function ease01(u) { u = clamp(u, 0, 1); return u * u * (3 - 2 * u); }
 
 // rec: { kind:'leave'|'rejoin', playerId, outName, inName }
 function startCeremony(state, rec) {
@@ -983,13 +992,31 @@ function startCeremony(state, rec) {
     ref: { x: 0, z: W / 2 + 1.2, facing: -Math.PI / 2, anim: 'idle', animSpeed: 0, phase: 0 },
     refHome: { x: 0, z: W / 2 + 1.2 },
     carriers: [
-      { x: p.x - 0.6, z: entryZ, facing: faceIn, anim: 'idle', animSpeed: 0, phase: 0 },
-      { x: p.x + 0.6, z: entryZ, facing: faceIn, anim: 'idle', animSpeed: 0, phase: 0 },
+      { x: p.x, z: entryZ, facing: faceIn, anim: 'idle', animSpeed: 0, phase: 0 },
+      { x: p.x, z: entryZ, facing: faceIn, anim: 'idle', animSpeed: 0, phase: 0 },
     ],
-    stretcher: { x: p.x, z: entryZ + side * 0.7, angle: faceIn, carrying: false },
+    // The crew center is the single source of truth for crew motion: both
+    // carriers and the stretcher are placed relative to it every frame, so
+    // they can never drift apart or move at different speeds.
+    crew: { x: p.x, z: entryZ, angle: faceIn },
+    stretcher: { x: p.x, z: entryZ, angle: faceIn, y: ST_CARRY },
+    // Distance-scaled deadlines so the crew moves at a constant plausible
+    // speed instead of teleport-fast sprinting to hit fixed times.
+    tCrewBy: CER.CREW_IN + Math.max(1.2, Math.abs(entryZ - p.z) / CER.SPEED_IN),
+    tLoadBy: 0, tCarryBy: 0, tAwayBy: 0, tSubBy: 0, tEnd: 0,
     subPushed: false,
     stage: 0, // 0 ref inbound · 1 whistled · 2 loaded/carrying · 3 off · 5 sub done
   };
+  {
+    var c0 = state.ceremony;
+    var tunnelX0 = -L / 2 - 6;
+    var dOut = Math.hypot(p.x - tunnelX0, p.z);
+    c0.tLoadBy = c0.tCrewBy + 1.4;                       // set down + load + lift
+    c0.tCarryBy = c0.tLoadBy + Math.max(1.5, dOut / CER.SPEED_OUT);
+    c0.tAwayBy = c0.tCarryBy + 2.1;                      // set down + unload + lift empty
+    c0.tSubBy = c0.tCarryBy + 1.8;
+    c0.tEnd = c0.tAwayBy + 1.0;
+  }
   p.vx = 0; p.vz = 0; p.stunT = 0; p.tackleT = 0; p.kickT = 0; p.diveT = 0;
   p.anim = 'fallen'; p.animSpeed = 0;
   state.phase = 'injury';
@@ -1057,11 +1084,14 @@ function stepCeremony(state, dt) {
   }
 
   // victim: fallen at the spot until loaded, then slaved to the stretcher
+  // (riding at bed height, body aligned with the stretcher's long axis)
   if (c.stage < 2) {
-    p.x = c.spot.x; p.z = c.spot.z;
+    p.x = c.spot.x; p.z = c.spot.z; p.y = 0;
     p.vx = 0; p.vz = 0; p.anim = 'fallen'; p.animSpeed = 0;
   } else if (c.stage === 2) {
     p.x = c.stretcher.x; p.z = c.stretcher.z;
+    p.y = c.stretcher.y + 0.06;
+    p.facing = c.stretcher.angle - Math.PI / 2;
     p.vx = 0; p.vz = 0; p.anim = 'fallen'; p.animSpeed = 0;
   }
 
@@ -1076,36 +1106,67 @@ function stepCeremony(state, dt) {
     }
   }
   if (c.t >= CER.REF_OUT) {
-    approach(ref, c.refHome.x, c.refHome.z, WALK_SPEED * 1.4, CER.END - c.t, dt);
+    approach(ref, c.refHome.x, c.refHome.z, WALK_SPEED * 1.4, c.tEnd - c.t, dt);
   }
 
   // ── carriers + stretcher ──
+  // The crew moves as one unit. The stretcher rides at the crew center and
+  // the carriers stand at its two ends (rear/front along the direction of
+  // travel), so stretcher speed always matches the carriers' speed. Carriers
+  // hold the rails ('carryB' arms forward / 'carryF' arms back) and crouch
+  // for the set-down / lift windows.
+  var crew = c.crew;
   var st = c.stretcher;
-  if (c.t >= CER.CREW_IN && c.stage < 2) {
-    approach(st, c.spot.x, c.spot.z, WALK_SPEED, CER.CREW_BY - c.t, dt);
-    approach(c.carriers[0], c.spot.x - 0.95, c.spot.z, WALK_SPEED, CER.CREW_BY - c.t, dt);
-    approach(c.carriers[1], c.spot.x + 0.95, c.spot.z, WALK_SPEED, CER.CREW_BY - c.t, dt);
-    if (c.t >= CER.CREW_BY) {
-      c.stage = 2; st.carrying = true;
-      push(state, { type: 'stretcher-load', player: c.victimId });
-    }
-  } else if (c.stage === 2) {
-    approach(st, tunnelX, 0, WALK_SPEED, CER.CARRY_BY - c.t, dt);
-    approach(c.carriers[0], st.x - 0.95, st.z, WALK_SPEED * 1.2, CER.CARRY_BY - c.t, dt);
-    approach(c.carriers[1], st.x + 0.95, st.z, WALK_SPEED * 1.2, CER.CARRY_BY - c.t, dt);
-    if (c.t >= CER.CARRY_BY) {
-      c.stage = 3; st.carrying = false;
-      push(state, { type: 'stretcher-off', player: c.victimId, name: c.victimName });
-      // one entity per seat: the carried-off player re-enters from the tunnel
-      // as the replacement — swap the visible identity now
-      p.name = c.replacementName;
-      p.x = tunnelX; p.z = 0;
-    }
-  } else if (c.stage >= 3) {
-    // crew drifts off into the tunnel
-    approach(st, tunnelX - 2, 0, WALK_SPEED, 1e9, dt);
-    approach(c.carriers[0], st.x - 0.95, st.z, WALK_SPEED, 1e9, dt);
-    approach(c.carriers[1], st.x + 0.95, st.z, WALK_SPEED, 1e9, dt);
+  var prevX = crew.x, prevZ = crew.z;
+
+  if (c.t >= CER.CREW_IN && c.t < c.tCrewBy) {
+    approach(crew, c.spot.x, c.spot.z, WALK_SPEED, c.tCrewBy - c.t, dt);
+  } else if (c.stage === 2 && c.t >= c.tLoadBy && c.t < c.tCarryBy) {
+    approach(crew, tunnelX, 0, WALK_SPEED, c.tCarryBy - c.t, dt);
+  } else if (c.stage >= 3 && c.t >= c.tAwayBy) {
+    approach(crew, tunnelX - 2, 0, WALK_SPEED, 1e9, dt);
+  }
+  var crewSpeed = Math.hypot(crew.x - prevX, crew.z - prevZ) / Math.max(dt, 1e-4);
+
+  // victim loaded once the stretcher is on the ground beside them
+  if (c.stage < 2 && c.t >= c.tCrewBy + 0.6) {
+    c.stage = 2;
+    push(state, { type: 'stretcher-load', player: c.victimId });
+  }
+  // victim taken off at the tunnel; the same entity re-enters as the
+  // replacement — swap the visible identity now
+  if (c.stage === 2 && c.t >= c.tCarryBy + 0.6) {
+    c.stage = 3;
+    push(state, { type: 'stretcher-off', player: c.victimId, name: c.victimName });
+    p.name = c.replacementName;
+    p.x = tunnelX; p.z = 0; p.y = 0;
+  }
+
+  // stretcher height + carrier poses over the load / unload windows
+  var stY = ST_CARRY, pose = 'carry';
+  if (c.t >= c.tCrewBy && c.t < c.tLoadBy) {
+    var lt = c.t - c.tCrewBy;
+    if (lt < 0.6)      { pose = 'crouch'; stY = ST_CARRY + (ST_GROUND - ST_CARRY) * ease01(lt / 0.6); }
+    else if (lt < 0.9) { pose = 'crouch'; stY = ST_GROUND; }
+    else               { stY = ST_GROUND + (ST_CARRY - ST_GROUND) * ease01((lt - 0.9) / 0.5); }
+  } else if (c.t >= c.tCarryBy && c.t < c.tEnd) {
+    var ot = c.t - c.tCarryBy;
+    if (ot < 0.6)      { pose = 'crouch'; stY = ST_CARRY + (ST_GROUND - ST_CARRY) * ease01(ot / 0.6); }
+    else if (ot < 1.6) { pose = 'crouch'; stY = ST_GROUND; }
+    else               { stY = ST_GROUND + (ST_CARRY - ST_GROUND) * ease01((ot - 1.6) / 0.5); }
+  }
+
+  st.x = crew.x; st.z = crew.z; st.angle = crew.angle; st.y = stY;
+  var ux = Math.cos(crew.angle), uz = Math.sin(crew.angle);
+  for (var ci = 0; ci < 2; ci++) {
+    var car = c.carriers[ci];
+    var sgn = ci === 0 ? -1 : 1; // carrier 0 = rear (arms fwd), 1 = front (arms back)
+    car.x = crew.x + ux * CREW_HALF * sgn;
+    car.z = crew.z + uz * CREW_HALF * sgn;
+    car.facing = crew.angle;
+    car.animSpeed = crewSpeed;
+    car.phase += dt * (2.2 + crewSpeed * 1.55);
+    car.anim = pose === 'crouch' ? 'crouch' : (ci === 0 ? 'carryB' : 'carryF');
   }
 
   // ── replacement runs on to its formation anchor ──
@@ -1113,19 +1174,19 @@ function stepCeremony(state, dt) {
     var a = formationAnchor(p.slot, state.teamSize);
     var ax = a.u * L * -attackSign(state, p.team);
     var az = a.v * W;
-    approach(p, ax, az, RUN_SPEED, CER.SUB_BY - c.t, dt);
-    if (!c.subPushed && (p.x > -L / 2 || c.t >= CER.SUB_BY)) {
+    approach(p, ax, az, RUN_SPEED, c.tSubBy - c.t, dt);
+    if (!c.subPushed && (p.x > -L / 2 || c.t >= c.tSubBy)) {
       c.subPushed = true;
       push(state, { type: 'substitution', player: p.id, outName: c.victimName, inName: c.replacementName, kind: c.kind });
     }
-    if (c.t >= CER.SUB_BY) {
+    if (c.t >= c.tSubBy) {
       p.x = ax; p.z = az; p.vx = 0; p.vz = 0; p.anim = 'idle'; p.animSpeed = 0;
       c.stage = 5;
     }
   }
 
   // ── done: dropped-ball restart ──
-  if (c.t >= CER.END) {
+  if (c.t >= c.tEnd) {
     state.ceremony = null;
     state.phase = 'play';
     b.x = clamp(c.spot.x, -L / 2 + 1, L / 2 - 1);
@@ -1292,7 +1353,8 @@ function buildSnapshot(state) {
     var p = m.players[i];
     pl.push([p.id, p.team, r2(p.x), r2(p.z), r2(p.vx), r2(p.vz), r2(p.facing),
       p.anim, r2(p.animSpeed), r2(p.phase), r2(p.kickT), r2(p.tackleT), r2(p.stunT),
-      r2(p.diveT), r2(p.diveDir), r2(p.celebrateT), p.isAi ? 1 : 0, p.name]);
+      r2(p.diveT), r2(p.diveDir), r2(p.celebrateT), p.isAi ? 1 : 0, p.name,
+      r2(p.y || 0)]);
   }
   var b = m.ball;
   var ack = [];
@@ -1317,7 +1379,7 @@ function serializeCeremony(c) {
     sp: [r2(c.spot.x), r2(c.spot.z)],
     ref: ent(c.ref),
     ca: [ent(c.carriers[0]), ent(c.carriers[1])],
-    st: [r2(c.stretcher.x), r2(c.stretcher.z), r2(c.stretcher.angle), c.stretcher.carrying ? 1 : 0],
+    st: [r2(c.stretcher.x), r2(c.stretcher.z), r2(c.stretcher.angle), r2(c.stretcher.y)],
   };
 }
 

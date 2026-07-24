@@ -413,6 +413,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
       const p = sim.players[i];
       p.x = pa.x + (pb.x - pa.x) * k + pb.vx * extrap;
       p.z = pa.z + (pb.z - pa.z) * k + pb.vz * extrap;
+      p.y = (pa.y || 0) + ((pb.y || 0) - (pa.y || 0)) * k;
       p.vx = pb.vx; p.vz = pb.vz;
       const turn = Math.atan2(Math.sin(pb.facing - pa.facing), Math.cos(pb.facing - pa.facing));
       p.facing = pa.facing + turn * k;
@@ -457,7 +458,8 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
       st: [
         ca.st[0] + (cb.st[0] - ca.st[0]) * k,
         ca.st[1] + (cb.st[1] - ca.st[1]) * k,
-        cb.st[2], cb.st[3],
+        cb.st[2],
+        ca.st[3] + (cb.st[3] - ca.st[3]) * k,
       ],
     };
   }
@@ -532,7 +534,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
       id: e[0], team: e[1], x: e[2], z: e[3], vx: e[4], vz: e[5], facing: e[6],
       anim: e[7], animSpeed: e[8], phase: e[9], kickT: e[10], tackleT: e[11],
       stunT: e[12], diveT: e[13], diveDir: e[14], celebrateT: e[15],
-      isAi: e[16], name: e[17],
+      isAi: e[16], name: e[17], y: e[18] || 0,
     }));
     const b = snap.b;
     return {
@@ -671,7 +673,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
       const p = sim.players[i];
       const v = views[i];
       if (!v) continue;
-      v.group.position.set(p.x, 0, p.z);
+      v.group.position.set(p.x, p.y || 0, p.z);
       v.group.rotation.y = -p.facing; // model faces +x at rotation 0; yaw is CCW around +y
       v.update(dt, p);
     }

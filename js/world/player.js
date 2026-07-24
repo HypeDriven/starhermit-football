@@ -237,12 +237,13 @@ export function createPlayerMesh(opts = {}) {
   const params = {
     anim: 'idle', phase: 0, speed: 0, dt: 0, t: 0,
     kickT: 0, tackleT: 0, diveT: 0, diveDir: 0, diveRel: 0, celebrateT: 0,
-    wCelebrate: 0, wDejected: 0, wFallen: 0,
+    wCelebrate: 0, wDejected: 0, wFallen: 0, wCarryF: 0, wCarryB: 0, wCrouch: 0,
   };
 
   let t = 0;
   let curSpeed = 0;
   let wCel = 0, wDej = 0, wFal = 0;
+  let wCarF = 0, wCarB = 0, wCro = 0;
 
   function update(dt, ent) {
     t += dt;
@@ -252,6 +253,9 @@ export function createPlayerMesh(opts = {}) {
     wCel += ((ent.anim === 'celebrate' ? 1 : 0) - wCel) * k;
     wDej += ((ent.anim === 'dejected' ? 1 : 0) - wDej) * k;
     wFal += ((ent.anim === 'fallen' ? 1 : 0) - wFal) * k;
+    wCarF += ((ent.anim === 'carryF' ? 1 : 0) - wCarF) * k;
+    wCarB += ((ent.anim === 'carryB' ? 1 : 0) - wCarB) * k;
+    wCro += ((ent.anim === 'crouch' ? 1 : 0) - wCro) * k;
 
     params.anim = ent.anim || 'idle';
     params.phase = ent.phase || 0;
@@ -267,6 +271,9 @@ export function createPlayerMesh(opts = {}) {
     params.wCelebrate = wCel;
     params.wDejected = wDej;
     params.wFallen = wFal;
+    params.wCarryF = wCarF;
+    params.wCarryB = wCarB;
+    params.wCrouch = wCro;
     applyPose(joints, params);
   }
 

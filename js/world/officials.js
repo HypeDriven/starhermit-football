@@ -76,7 +76,7 @@ export function createCeremonyViews(scene) {
         driveHumanoid(carriers[i], carEnts[i], cer.ca[i]);
         carriers[i].update(dt, carEnts[i]);
       }
-      stretcher.position.set(cer.st[0], cer.st[3] ? 0.7 : 0.2, cer.st[1]);
+      stretcher.position.set(cer.st[0], cer.st[3], cer.st[1]);
       stretcher.rotation.y = -cer.st[2];
     },
     dispose() {
