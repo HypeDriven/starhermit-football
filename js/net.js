@@ -6,9 +6,9 @@
 //
 // createGameClient: games socket (ws/v1/games?sessionId=…) carrying the
 // server-authoritative match. Client -> server: {type:'cmd', data:{...}}
-// ('sync' on open/reconnect, 'input' at ~20 Hz). Server -> client:
+// ('sync' on open/reconnect, 'input' at ~30 Hz). Server -> client:
 // {type:'game', data:{type:'snap'|'ev', ...}} and {type:'presence', ...}.
-// Reconnects with exponential backoff (1s → 2s → 4s … cap 15s) until closed.
+// Reconnects with exponential backoff (250ms → 500ms → 1s … cap 15s) until closed.
 
 export function createNetClient({ roomId, getToken }) {
   let ws = null;
@@ -145,7 +145,7 @@ export function createGameClient({ sessionId, getToken }) {
 
   function scheduleReconnect() {
     if (disposed) return;
-    const delay = Math.min(15000, 1000 * Math.pow(2, attempts++));
+    const delay = Math.min(15000, 250 * Math.pow(2, attempts++));
     handlers.onReconnecting?.(delay);
     reconnectTimer = setTimeout(() => openOnce(handlers.onResync), delay);
   }
@@ -171,8 +171,13 @@ export function createGameClient({ sessionId, getToken }) {
 
   return {
     connect,
-    // input: {seq, mx, mz, sprint, pass, shoot, tackle} — caller throttles
-    sendInput: (input) => sendCmd({ type: 'input', ...input }),
+    // input: {seq, mx, mz, sprint, pass, shoot, tackle} — caller throttles.
+    // Drop stale movement under backpressure, but never discard an action edge.
+    sendInput: (input) => {
+      const action = input.pass || input.shoot > 0 || input.tackle;
+      if (!action && ws?.bufferedAmount > 32768) return;
+      sendCmd({ type: 'input', realtime: true, ...input });
+    },
     close: () => {
       disposed = true;
       clearTimeout(reconnectTimer);

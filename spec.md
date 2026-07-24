@@ -87,19 +87,22 @@ What we reuse as-is from the platform:
 **Server-authoritative model.** The platform runs `server.js` — the match
 simulation (physics, AI, score, injury/substitution ceremonies) — inside the
 Jint sandbox, ticked at the game's configured rate (30 Hz). Clients send only
-their *inputs* (move vector, sprint, action buttons; ~20 Hz `cmd` frames over
-`ws/v1/games`) and render the script's broadcast snapshots (~15 Hz) with 100 ms
-interpolation. No client has any authority: the script validates every input,
+their *inputs* (move vector, sprint, action buttons; ~30 Hz `cmd` frames over
+`ws/v1/games`) and render the script's server-timed broadcast snapshots (up to 30 Hz)
+with adaptive interpolation, short bounded extrapolation, and render-only local
+player prediction. No client has any authority: the script validates every input,
 owns the score and clock, and ends the match by returning `result`. Realtime
 Rooms still handle the pre-match world — lobby, invites, matchmaking, AI-seat
 backfill, roster — and the room⇄script bridge (§8) creates the bound session
 at room start and closes the room when the script returns `result`.
 
-Trade-offs (accepted): per-invocation statelessness means all sim state
-round-trips through the JSON `sessionState` document (the sim keeps this small
-— quantized snapshots, RNG stored as data, rehydrated each invocation). The
-~250 ms per-invocation CPU budget is comfortable at 30 Hz for a 22-seat sim.
-Leaving, rejoining, and the all-humans-gone rule are covered in §4.5.
+Trade-offs (accepted): each simulation tick remains a stateless script
+invocation, so sim state round-trips through the JSON `sessionState` document
+(the sim keeps this small — quantized snapshots, RNG stored as data, rehydrated
+per tick). High-rate player inputs do not invoke or persist the script: the
+platform buffers one latest frame per sender and supplies the batch as
+`ctx.inputs` on the next 30 Hz tick. Leaving, rejoining, and the
+all-humans-gone rule are covered in §4.5.
 
 ## 4. Game flow
 
@@ -300,24 +303,26 @@ ratio, crowd LOD, no post-processing on mobile.
 - Gameplay transport: `ws/v1/games?sessionId=…` (the scripted-games socket) —
   JSON **text frames** only, ≤ 16 KB. The realtime-rooms WS
   (`ws/v1/realtime?roomId=…`) remains connected for lobby/roster/presence only.
-- **Client → server**: input cmds at ~20–30 Hz inside the platform `cmd`
-  envelope: `{type:'input', seq, mx, mz, sprint, pass, shoot, tackle}`
+- **Client → server**: input cmds at 30 Hz inside the platform `cmd`
+  envelope: `{type:'input', realtime:true, seq, mx, mz, sprint, pass, shoot, tackle}`
   (`mx`/`mz` normalized world-space move vector, `shoot` = release power,
   one-shot flags on the triggering frame). `{type:'sync'}` requests a full
   snapshot (sent on connect/reconnect).
-- **Server → client**: the script broadcasts `{type:'snap', …}` at ~15 Hz —
+- **Server → client**: the script broadcasts `{type:'snap', …}` at up to 30 Hz —
   full state as compact quantized arrays (floats rounded to 2 decimals): match
   clock/half/phase/score, ball `[x,y,z,vx,vy,vz,owner]`, one flat array per
   player (pos, vel, facing, anim state + speed, kick/tackle/stun/dive timers,
   isAi, name), plus `cer` ceremony state. ~0.5–3 KB per snap depending on
   phase. Discrete moments (kick, goal, whistle, ceremony beats) go out as
   `{type:'ev', ev}` broadcasts, one per sim event, in order.
-- **Clients** interpolate all entities 100 ms behind the newest snapshot
-  (snapshot interpolation buffer), extrapolate ball on kicks. There is **no
-  host prediction authority**: nothing a client computes is authoritative —
-  even your own footballer is rendered from server snapshots.
-- Clock: the server stamps snapshots (`ts`); clients estimate offset from
-  arrival jitter.
+- **Clients** place snapshots on the stamped server timeline and select an
+  adaptive 55–140 ms interpolation delay from measured arrival jitter. Short
+  underruns extrapolate players and ball for at most 120 ms. The controlled
+  footballer uses render-only local prediction with smooth reconciliation, and
+  local kick feedback plays immediately. There is **no prediction authority**:
+  the server snapshot can correct every locally rendered value.
+- Clock: snapshots carry `ts`, monotonic `tick`, and per-seat acknowledged input
+  sequence (`ack`); clients use server spacing rather than packet arrival time.
 - Match results: the script ends the match by returning `result`
   (`{score, winner, draw}`); the platform stores it, finishes the session, and
   closes the room (§8). Clients show stats from the final snapshot/result.

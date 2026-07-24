@@ -4,13 +4,13 @@
 // Modes:
 //   'practice' — local authoritative sim (offline vs AI).
 //   'online'   — server-authoritative: the platform runs server.js; we send
-//                inputs at 20 Hz over the games socket and interpolate the
-//                15 Hz snapshots 100 ms behind. Leave/rejoin/AI stand-ins and
+//                inputs at 30 Hz over the games socket and adaptively interpolate
+//                server-timed snapshots. Leave/rejoin/AI stand-ins and
 //                the stretcher ceremony are owned by the server.
 import * as THREE from 'three';
 import {
   createMatch, stepMatch, takeAiName, makeRng, resetKickoff,
-  WALK_SPEED, BALL_R,
+  WALK_SPEED, RUN_SPEED, SPRINT_SPEED, BALL_SLOWDOWN, BALL_R, GRAVITY,
 } from './game/sim.js';
 import { computeAiInput, clearAiPlans } from './game/ai.js';
 import { buildStadium } from './world/stadium.js';
@@ -23,8 +23,10 @@ const TEAM_KITS = [
   { shirt: '#c0392b', shorts: '#232323', socks: '#c0392b', gk: '#8e44ad', plate: '#c0392b', label: 'RED' },
 ];
 const HAIRS = ['#1a1a1a', '#3b2314', '#6e4a21', '#b99256', '#545454', '#8a3b12'];
-const INPUT_HZ = 20, FIXED_DT = 1 / 60;
-const INTERP_DELAY = 0.1;   // render this far behind the newest snapshot
+const INPUT_HZ = 30, FIXED_DT = 1 / 60;
+const MIN_INTERP_DELAY = 0.055;
+const MAX_INTERP_DELAY = 0.14;
+const MAX_EXTRAPOLATION = 0.12;
 const SNAP_BUF = 1.5;       // seconds of snapshots to keep
 
 export function createMatchController({ renderer, scene, camera, audio, input, hud }) {
@@ -45,6 +47,12 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
   let lobbyNet = null;          // realtime-rooms client (roster pushes)
   let inputTimer = 0, inputSeq = 0;
   let snaps = [];               // parsed snapshot buffer, oldest first
+  let interpDelay = 0.075;
+  let arrivalJitter = 0;
+  let lastSnapArrival = 0;
+  let lastSnapServerAt = 0;
+  let localKickFeedbackAt = -Infinity;
+  let localPrediction = null;    // responsive render-only transform; server remains authoritative
   let cerViews = null;          // referee + carriers + stretcher (lazy)
   let curCer = null;            // interpolated ceremony for views/camera
   let timers = [];              // {at, fn} on the match-local clock
@@ -328,25 +336,71 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
   // ── online: input upstream, snapshot interpolation downstream ─────────────
 
   function updateOnline(dt) {
-    // send inputs (20 Hz, immediately on action edges)
+    // Send movement at 30 Hz and action edges immediately. Local contact feedback
+    // does not wait for the round trip; authority still decides the actual result.
     inputTimer -= dt;
     const raw = input.getState(followCam.yaw, dt);
     hud.setPower(raw.shootHeld ? raw.shootCharge : 0);
+    if (raw.pass || raw.shoot > 0) {
+      localKickFeedbackAt = performance.now() / 1000;
+      audio.kick(raw.shoot > 0 ? 0.4 + raw.shoot * 0.6 : 0.35);
+    }
     if (inputTimer <= 0 || raw.pass || raw.shoot > 0 || raw.tackle) {
       inputTimer = 1 / INPUT_HZ;
       net?.sendInput({ seq: ++inputSeq, ...toSimInput(raw) });
     }
+    stepLocalPrediction(raw, dt);
     applyInterp();
+    const me = sim.players[myPlayerId];
+    if (me && localPrediction) {
+      me.x = localPrediction.x; me.z = localPrediction.z;
+      me.vx = localPrediction.vx; me.vz = localPrediction.vz;
+      if (Math.hypot(me.vx, me.vz) > 0.35) me.facing = Math.atan2(me.vz, me.vx);
+    }
+    if (me && performance.now() / 1000 - localKickFeedbackAt < 0.35)
+      me.kickT = Math.max(me.kickT || 0, 0.2);
+  }
+
+  function stepLocalPrediction(raw, dt) {
+    if (!localPrediction) return;
+    const mag = Math.hypot(raw.mx, raw.mz);
+    let speed = 0, nx = 0, nz = 0;
+    if (mag > 0.01) {
+      speed = raw.sprint ? SPRINT_SPEED : (mag > 0.45 ? RUN_SPEED : WALK_SPEED);
+      speed *= Math.min(1, mag * 1.6);
+      if (sim.ball.owner === myPlayerId) speed *= BALL_SLOWDOWN;
+      nx = raw.mx / mag; nz = raw.mz / mag;
+    }
+    const accel = 22;
+    localPrediction.vx += Math.max(-accel * dt,
+      Math.min(accel * dt, nx * speed - localPrediction.vx));
+    localPrediction.vz += Math.max(-accel * dt,
+      Math.min(accel * dt, nz * speed - localPrediction.vz));
+    localPrediction.x += localPrediction.vx * dt;
+    localPrediction.z += localPrediction.vz * dt;
+    const margin = 1.5;
+    localPrediction.x = Math.max(-sim.pitch.L / 2 - margin,
+      Math.min(sim.pitch.L / 2 + margin, localPrediction.x));
+    localPrediction.z = Math.max(-sim.pitch.W / 2 - margin,
+      Math.min(sim.pitch.W / 2 + margin, localPrediction.z));
   }
 
   function applyInterp() {
     const n = snaps.length;
     if (!n) return;
-    const rt = performance.now() / 1000 - INTERP_DELAY;
-    let a = snaps[0], b = snaps[n - 1], k = 1;
-    if (rt <= a.at) { a = b; }
-    else if (rt >= b.at) { a = b; }
-    else {
+    const now = performance.now() / 1000;
+    const newest = snaps[n - 1];
+    // Advance the server timeline between packets. Unlike arrival-time stamping,
+    // this preserves smooth simulation spacing when network delivery jitters.
+    const estimatedServerNow = newest.at + Math.min(0.25, Math.max(0, now - newest.arrived));
+    const rt = estimatedServerNow - interpDelay;
+    let a = snaps[0], b = newest, k = 1, extrap = 0;
+    if (rt <= a.at) {
+      b = a;
+    } else if (rt >= b.at) {
+      a = b;
+      extrap = Math.min(MAX_EXTRAPOLATION, rt - b.at);
+    } else {
       for (let i = n - 1; i > 0; i--) {
         if (snaps[i - 1].at <= rt) { a = snaps[i - 1]; b = snaps[i]; break; }
       }
@@ -357,22 +411,26 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
       const pa = a.pl[i], pb = b.pl[i];
       if (!pa || !pb) continue;
       const p = sim.players[i];
-      p.x = pa.x + (pb.x - pa.x) * k;
-      p.z = pa.z + (pb.z - pa.z) * k;
+      p.x = pa.x + (pb.x - pa.x) * k + pb.vx * extrap;
+      p.z = pa.z + (pb.z - pa.z) * k + pb.vz * extrap;
       p.vx = pb.vx; p.vz = pb.vz;
-      p.facing = pb.facing; p.anim = pb.anim; p.animSpeed = pb.animSpeed;
-      p.phase = pa.phase + (pb.phase - pa.phase) * k;
+      const turn = Math.atan2(Math.sin(pb.facing - pa.facing), Math.cos(pb.facing - pa.facing));
+      p.facing = pa.facing + turn * k;
+      p.anim = pb.anim; p.animSpeed = pb.animSpeed;
+      p.phase = pa.phase + (pb.phase - pa.phase) * k + pb.animSpeed * extrap;
       p.kickT = pb.kickT; p.tackleT = pb.tackleT; p.stunT = pb.stunT;
       p.diveT = pb.diveT; p.diveDir = pb.diveDir; p.celebrateT = pb.celebrateT;
     }
     const ba = a.b, bb = b.b;
-    sim.ball.x = ba.x + (bb.x - ba.x) * k;
-    sim.ball.y = ba.y + (bb.y - ba.y) * k;
-    sim.ball.z = ba.z + (bb.z - ba.z) * k;
-    sim.ball.vx = bb.vx; sim.ball.vz = bb.vz;
+    sim.ball.x = ba.x + (bb.x - ba.x) * k + bb.vx * extrap;
+    sim.ball.y = Math.max(BALL_R, ba.y + (bb.y - ba.y) * k
+      + bb.vy * extrap + 0.5 * GRAVITY * extrap * extrap);
+    sim.ball.z = ba.z + (bb.z - ba.z) * k + bb.vz * extrap;
+    sim.ball.vx = bb.vx; sim.ball.vy = bb.vy + GRAVITY * extrap; sim.ball.vz = bb.vz;
     sim.ball.owner = bb.owner;
 
-    // ceremony: interpolate when both snapshots carry the same one
+    // ceremony: interpolate when both snapshots carry the same one. Ceremonies
+    // deliberately do not extrapolate beyond their authoritative timeline.
     if (!b.cer) {
       curCer = null;
     } else if (a.cer && a.cer.k === b.cer.k && a.cer.v === b.cer.v) {
@@ -407,7 +465,43 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
   function onSnapshot(snap) {
     if (mode !== 'online' || !sim) return;
     const parsed = parseSnap(snap);
-    parsed.at = performance.now() / 1000;
+    const arrived = performance.now() / 1000;
+    parsed.arrived = arrived;
+    parsed.at = Number(snap.ts) > 1000000 ? Number(snap.ts) / 1000 : arrived;
+
+    if (lastSnapArrival && parsed.at > lastSnapServerAt) {
+      const arrivalGap = arrived - lastSnapArrival;
+      const serverGap = parsed.at - lastSnapServerAt;
+      const sample = Math.abs(arrivalGap - serverGap);
+      arrivalJitter += (sample - arrivalJitter) * 0.12;
+      interpDelay = Math.min(MAX_INTERP_DELAY,
+        Math.max(MIN_INTERP_DELAY, MIN_INTERP_DELAY + arrivalJitter * 2.5));
+    }
+    lastSnapArrival = arrived;
+    lastSnapServerAt = parsed.at;
+
+    const authoritativeMe = parsed.pl[myPlayerId];
+    if (authoritativeMe) {
+      // Project the newest authoritative transform to approximately "now" and
+      // gently reconcile the render-only local predictor. Large corrections
+      // still snap, preserving collision and anti-cheat authority.
+      const lead = interpDelay + 0.03;
+      const tx = authoritativeMe.x + authoritativeMe.vx * lead;
+      const tz = authoritativeMe.z + authoritativeMe.vz * lead;
+      if (!localPrediction) {
+        localPrediction = { x: tx, z: tz, vx: authoritativeMe.vx, vz: authoritativeMe.vz };
+      } else {
+        const error = Math.hypot(tx - localPrediction.x, tz - localPrediction.z);
+        const ack = Number(parsed.ack?.[myPlayerId]);
+        const hasUnacknowledgedInput = Number.isFinite(ack) && ack >= 0 && ack < inputSeq;
+        const blend = error > 3 ? 1 : (hasUnacknowledgedInput ? 0.06 : 0.18);
+        localPrediction.x += (tx - localPrediction.x) * blend;
+        localPrediction.z += (tz - localPrediction.z) * blend;
+        localPrediction.vx += (authoritativeMe.vx - localPrediction.vx) * 0.25;
+        localPrediction.vz += (authoritativeMe.vz - localPrediction.vz) * 0.25;
+      }
+    }
+
     snaps.push(parsed);
     while (snaps.length > 2 && snaps[0].at < parsed.at - SNAP_BUF) snaps.shift();
 
@@ -442,7 +536,8 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     }));
     const b = snap.b;
     return {
-      at: 0, t: snap.t, h: snap.h, ph: snap.ph, sc: snap.sc, kt: snap.kt,
+      at: 0, arrived: 0, tick: snap.tick || 0, ack: snap.ack || [],
+      t: snap.t, h: snap.h, ph: snap.ph, sc: snap.sc, kt: snap.kt,
       b: { x: b[0], y: b[1], z: b[2], vx: b[3], vy: b[4], vz: b[5], owner: b[6] >= 0 ? b[6] : null },
       pl, cer: snap.cer || null,
     };
@@ -476,7 +571,11 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
 
   function handleSimEvent(ev) {
     switch (ev.type) {
-      case 'kick': audio.kick(ev.power); break;
+      case 'kick':
+        // Our own contact already played immediately on input; avoid a delayed echo.
+        if (!(mode === 'online' && ev.player === myPlayerId
+          && performance.now() / 1000 - localKickFeedbackAt < 1)) audio.kick(ev.power);
+        break;
       case 'bounce': if (ev.power > 0.25) audio.bounce(ev.power); break;
       case 'steal': case 'tackle': audio.tackle(); break;
       case 'dive': audio.tackle(); audio.crowd.anticipation(); break;
@@ -636,6 +735,10 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     if (cerViews) { cerViews.dispose(); cerViews = null; }
     curCer = null;
     snaps = [];
+    interpDelay = 0.075; arrivalJitter = 0;
+    lastSnapArrival = 0; lastSnapServerAt = 0;
+    localKickFeedbackAt = -Infinity;
+    localPrediction = null;
     timers = [];
     elapsed = 0;
     inputTimer = 0; inputSeq = 0;

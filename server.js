@@ -46,22 +46,25 @@
 //   match:  <createMatch state; plus ceremony, aiPlans, rngState — see below>,
 //   inputs: { "<playerId>": { seq, mx, mz, sprint, pass, shoot, tackle, at } },
 //   seats:  { "<playerId>": { userId, name, standin, gone } },
-//   lastTickNow, lastSnapAt,            // ms
+//   lastTickNow, lastSnapAt, serverNow, // ms
+//   tick,                               // authoritative simulation tick
 //   offlineSince: { "<userId>": now },  // ms, offline-grace tracking
 //   pendingCeremonies: [{ kind, playerId, inName }],
 //   ended: bool,
 // }
 //
 // ── Client -> server messages ───────────────────────────────────────────────
-// { type:'input', seq, mx, mz, sprint, pass, shoot, tackle }  — send ~30 Hz.
+// { type:'input', realtime:true, seq, mx, mz, sprint, pass, shoot, tackle }
+//   — send ~30 Hz; realtime:true opts into platform tick batching.
 //   mx/mz: desired move direction, normalized (|m| <= 1), world space.
 //   sprint: bool. pass/tackle: true on the triggering frame only.
 //   shoot: 0, or release power in (0,1]. Inputs older than 1 s are zeroed.
 // { type:'sync' } — a full snapshot is broadcast back to the sender only.
 //
 // ── Server -> client broadcasts ─────────────────────────────────────────────
-// { type:'snap', ... } — full state snapshot, ~15 Hz (>= 66 ms apart):
-//   ts  teamSize              t   match clock (s)      h   half (1|2)
+// { type:'snap', ... } — full state snapshot, up to 30 Hz (>= 30 ms apart):
+//   ts  server epoch ms       tick authoritative tick   ack input seqs by seat
+//   t   match clock (s)       h   half (1|2)
 //   ph  phase: 'play' | 'goal' | 'halftime' | 'injury' | 'end'
 //   sc  [score0, score1]      kt  kickoffTeam
 //   b   [x, y, z, vx, vy, vz, owner]       owner -1 = loose ball
@@ -1138,7 +1141,7 @@ function stepCeremony(state, dt) {
 
 var INPUT_STALE_MS = 1000;    // zero inputs older than this
 var OFFLINE_GRACE_MS = 5000;  // offline this long -> seat goes away
-var SNAP_INTERVAL_MS = 66;    // ~15 Hz snapshots (every other 30 Hz tick)
+var SNAP_INTERVAL_MS = 30;    // one snapshot per 30 Hz tick when on schedule
 var MAX_TICK_DT = 0.25;       // clamp tick delta (seconds)
 
 function r2(v) { return Math.round(v * 100) / 100; }
@@ -1292,9 +1295,12 @@ function buildSnapshot(state) {
       r2(p.diveT), r2(p.diveDir), r2(p.celebrateT), p.isAi ? 1 : 0, p.name]);
   }
   var b = m.ball;
+  var ack = [];
+  for (var ai = 0; ai < m.players.length; ai++)
+    ack.push(state.inputs[ai] ? state.inputs[ai].seq : -1);
   return {
     type: 'snap',
-    ts: m.teamSize,
+    ts: state.serverNow || 0, tick: state.tick || 0, ack: ack,
     t: r2(m.time), h: m.half, ph: m.phase,
     sc: [m.score[0], m.score[1]], kt: m.kickoffTeam,
     b: [r2(b.x), r2(b.y), r2(b.z), r2(b.vx), r2(b.vy), r2(b.vz), b.owner == null ? -1 : b.owner],
@@ -1318,6 +1324,25 @@ function serializeCeremony(c) {
 function rehydrate(state) {
   attachRng(state.match);
   if (!state.match.aiPlans) state.match.aiPlans = {};
+  if (state.tick == null) state.tick = 0;
+  if (state.serverNow == null) state.serverNow = 0;
+}
+
+function storeRealtimeInput(state, from, data, now) {
+  var pid = state.ended ? -1 : playerIdForUser(state, from);
+  if (pid < 0) return;
+  var seat = state.seats[pid];
+  if (seat.gone || seat.standin) return;
+  state.inputs[pid] = {
+    seq: data.seq | 0,
+    mx: clamp(Number(data.mx) || 0, -1, 1),
+    mz: clamp(Number(data.mz) || 0, -1, 1),
+    sprint: !!data.sprint,
+    pass: !!data.pass,
+    shoot: clamp(Number(data.shoot) || 0, 0, 1),
+    tackle: !!data.tackle,
+    at: now,
+  };
 }
 
 globalThis.game = {
@@ -1357,6 +1382,8 @@ globalThis.game = {
       seats: seats,
       lastTickNow: null,
       lastSnapAt: 0,
+      serverNow: ctx.now,
+      tick: 0,
       offlineSince: {},
       pendingCeremonies: [],
       ended: false,
@@ -1374,22 +1401,9 @@ globalThis.game = {
     var data = msg.data || {};
 
     if (data.type === 'input') {
-      var pid = state.ended ? -1 : playerIdForUser(state, msg.from);
-      if (pid >= 0) {
-        var seat = state.seats[pid];
-        if (!seat.gone && !seat.standin) {
-          state.inputs[pid] = {
-            seq: data.seq | 0,
-            mx: clamp(Number(data.mx) || 0, -1, 1),
-            mz: clamp(Number(data.mz) || 0, -1, 1),
-            sprint: !!data.sprint,
-            pass: !!data.pass,
-            shoot: clamp(Number(data.shoot) || 0, 0, 1),
-            tackle: !!data.tackle,
-            at: ctx.now,
-          };
-        }
-      }
+      // Compatibility path for hosts that do not batch realtime input into
+      // ctx.inputs. The StarHermit realtime runtime normally applies it onTick.
+      storeRealtimeInput(state, msg.from, data, ctx.now);
       return { ok: true, sessionState: state, broadcast: [] };
     }
 
@@ -1413,6 +1427,17 @@ globalThis.game = {
     if (state.lastTickNow == null) dt = 1 / 30;
     else dt = clamp((ctx.now - state.lastTickNow) / 1000, 0, MAX_TICK_DT);
     state.lastTickNow = ctx.now;
+    state.serverNow = ctx.now;
+    state.tick++;
+
+    // The platform mailbox supplies at most one latest input per authenticated
+    // sender each tick, avoiding a complete script/DB transaction per frame.
+    var realtimeInputs = ctx.inputs || [];
+    for (var ri = 0; ri < realtimeInputs.length; ri++) {
+      var frame = realtimeInputs[ri];
+      if (frame && frame.data && frame.data.type === 'input')
+        storeRealtimeInput(state, frame.from, frame.data, ctx.now);
+    }
 
     if (!state.ended) {
       reconcilePresence(ctx, state);
@@ -1435,6 +1460,9 @@ globalThis.game = {
               mx: stored.mx, mz: stored.mz, sprint: stored.sprint,
               pass: stored.pass, shoot: stored.shoot, tackle: stored.tackle,
             } : emptyInput());
+            // Movement remains latest-wins; action edges are consumed exactly
+            // once even if no newer movement frame arrives before another tick.
+            if (stored) { stored.pass = false; stored.shoot = 0; stored.tackle = false; }
           } else {
             inputs.set(p.id, computeAiInput(match, p, dt, 1));
           }
