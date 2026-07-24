@@ -4,10 +4,10 @@
 // the same stadium/player builders as a real match, stepped locally with AI
 // inputs on every seat. No audio, no HUD — pure spectacle behind the DOM menu.
 import * as THREE from 'three';
-import { createMatch, stepMatch, takeAiName, pitchFor, resetKickoff, BALL_R } from './game/sim.js';
-import { computeAiInput, clearAiPlans } from './game/ai.js';
-import { buildStadium } from './world/stadium.js';
-import { createPlayerMesh } from './world/player.js';
+import { createMatch, stepMatch, takeAiName, pitchFor, resetKickoff, BALL_R } from './game/sim.js?v=3';
+import { computeAiInput, clearAiPlans } from './game/ai.js?v=3';
+import { buildStadium } from './world/stadium.js?v=3';
+import { createPlayerMesh } from './world/player.js?v=3';
 
 const TEAM_KITS = [
   { shirt: '#1f5fb4', shorts: '#f2f2f2', socks: '#1f5fb4', gk: '#e67e22', plate: '#1f5fb4' },

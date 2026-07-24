@@ -1,15 +1,15 @@
 // main.js — boot, screens state machine, renderer, match lifecycle.
 import * as THREE from 'three';
-import * as api from './api.js';
-import { createAudio } from './game/audio.js';
-import { createInput } from './game/input.js';
-import { createHud } from './hud.js';
-import { createMatchController } from './match.js';
-import { createLobby } from './lobby.js';
-import { createNetClient, createGameClient } from './net.js';
-import { createMenuScene } from './menuScene.js';
-import { createVoice } from './voice.js';
-import { createControlsScreen } from './controls.js';
+import * as api from './api.js?v=3';
+import { createAudio } from './game/audio.js?v=3';
+import { createInput } from './game/input.js?v=3';
+import { createHud } from './hud.js?v=3';
+import { createMatchController } from './match.js?v=3';
+import { createLobby } from './lobby.js?v=3';
+import { createNetClient, createGameClient } from './net.js?v=3';
+import { createMenuScene } from './menuScene.js?v=3';
+import { createVoice } from './voice.js?v=3';
+import { createControlsScreen } from './controls.js?v=3';
 
 const $ = (id) => document.getElementById(id);
 

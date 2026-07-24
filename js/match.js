@@ -11,12 +11,12 @@ import * as THREE from 'three';
 import {
   createMatch, stepMatch, takeAiName, makeRng, resetKickoff,
   WALK_SPEED, RUN_SPEED, SPRINT_SPEED, BALL_SLOWDOWN, BALL_R, GRAVITY,
-} from './game/sim.js';
-import { computeAiInput, clearAiPlans } from './game/ai.js';
-import { buildStadium } from './world/stadium.js';
-import { createPlayerMesh } from './world/player.js';
-import { createCeremonyViews } from './world/officials.js';
-import { createFollowCamera } from './game/camera.js';
+} from './game/sim.js?v=3';
+import { computeAiInput, clearAiPlans } from './game/ai.js?v=3';
+import { buildStadium } from './world/stadium.js?v=3';
+import { createPlayerMesh } from './world/player.js?v=3';
+import { createCeremonyViews } from './world/officials.js?v=3';
+import { createFollowCamera } from './game/camera.js?v=3';
 
 const TEAM_KITS = [
   { shirt: '#1f5fb4', shorts: '#f2f2f2', socks: '#1f5fb4', gk: '#e67e22', plate: '#1f5fb4', label: 'BLUE' },

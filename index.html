@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>StarHermit Football</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
-<link rel="stylesheet" href="css/style.css">
+<!-- Keep this version in sync with local ES-module imports when deploying. -->
+<link rel="stylesheet" href="css/style.css?v=3">
 <script type="importmap">
 { "imports": { "three": "./vendor/three/three.module.min.js" } }
 </script>
@@ -118,7 +119,7 @@
 </div>
 
 <!-- Shared sim core + server script: classic script, must load before modules -->
-<script src="server.js"></script>
-<script type="module" src="js/main.js"></script>
+<script src="server.js?v=3"></script>
+<script type="module" src="js/main.js?v=3"></script>
 </body>
 </html>
