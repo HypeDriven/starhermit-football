@@ -13,6 +13,7 @@ if (!S) throw new Error('FootballSim missing: load /server.js before the module 
 export const WALK_SPEED = S.WALK_SPEED;
 export const RUN_SPEED = S.RUN_SPEED;
 export const SPRINT_SPEED = S.SPRINT_SPEED;
+export const TURN_RATE = S.TURN_RATE;
 export const BALL_SLOWDOWN = S.BALL_SLOWDOWN;
 export const CONTROL_RADIUS = S.CONTROL_RADIUS;
 export const STEAL_RADIUS = S.STEAL_RADIUS;

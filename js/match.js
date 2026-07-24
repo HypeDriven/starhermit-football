@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import {
   createMatch, stepMatch, takeAiName, makeRng, resetKickoff,
-  WALK_SPEED, RUN_SPEED, SPRINT_SPEED, BALL_SLOWDOWN, BALL_R, GRAVITY,
+  WALK_SPEED, RUN_SPEED, SPRINT_SPEED, TURN_RATE, BALL_SLOWDOWN, BALL_R, GRAVITY,
 } from './game/sim.js?v=3';
 import { computeAiInput, clearAiPlans } from './game/ai.js?v=3';
 import { buildStadium } from './world/stadium.js?v=3';
@@ -327,10 +327,13 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
   }
 
   function toSimInput(raw) {
-    return {
+    const out = {
       mx: raw.mx, mz: raw.mz, sprint: raw.sprint,
       pass: raw.pass, shoot: raw.shoot, tackle: raw.tackle,
     };
+    // Desktop steering (tank controls); touch omits these and stays on mx/mz.
+    if (raw.turn != null) { out.turn = raw.turn; out.fwd = raw.fwd; }
+    return out;
   }
 
   // ── online: input upstream, snapshot interpolation downstream ─────────────
@@ -355,7 +358,8 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     if (me && localPrediction) {
       me.x = localPrediction.x; me.z = localPrediction.z;
       me.vx = localPrediction.vx; me.vz = localPrediction.vz;
-      if (Math.hypot(me.vx, me.vz) > 0.35) me.facing = Math.atan2(me.vz, me.vx);
+      if (raw.turn != null) me.facing = localPrediction.facing;
+      else if (Math.hypot(me.vx, me.vz) > 0.35) me.facing = Math.atan2(me.vz, me.vx);
     }
     if (me && performance.now() / 1000 - localKickFeedbackAt < 0.35)
       me.kickT = Math.max(me.kickT || 0, 0.2);
@@ -375,13 +379,27 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
 
   function stepLocalPrediction(raw, dt) {
     if (!localPrediction) return;
-    const mag = Math.hypot(raw.mx, raw.mz);
     let speed = 0, nx = 0, nz = 0;
-    if (mag > 0.01) {
-      speed = raw.sprint ? SPRINT_SPEED : (mag > 0.45 ? RUN_SPEED : WALK_SPEED);
-      speed *= Math.min(1, mag * 1.6);
-      if (sim.ball.owner === myPlayerId) speed *= BALL_SLOWDOWN;
-      nx = raw.mx / mag; nz = raw.mz / mag;
+    if (raw.turn != null) {
+      // steering (desktop tank controls): mirror the server's stepPlayer math
+      localPrediction.facing += raw.turn * TURN_RATE * dt;
+      const f = raw.fwd || 0;
+      if (Math.abs(f) > 0.01) {
+        speed = f < 0 ? WALK_SPEED * 0.9 : (raw.sprint ? SPRINT_SPEED : RUN_SPEED);
+        speed *= Math.min(1, Math.abs(f) * 1.6);
+        if (sim.ball.owner === myPlayerId) speed *= BALL_SLOWDOWN;
+        const sgn = f < 0 ? -1 : 1;
+        nx = Math.cos(localPrediction.facing) * sgn;
+        nz = Math.sin(localPrediction.facing) * sgn;
+      }
+    } else {
+      const mag = Math.hypot(raw.mx, raw.mz);
+      if (mag > 0.01) {
+        speed = raw.sprint ? SPRINT_SPEED : (mag > 0.45 ? RUN_SPEED : WALK_SPEED);
+        speed *= Math.min(1, mag * 1.6);
+        if (sim.ball.owner === myPlayerId) speed *= BALL_SLOWDOWN;
+        nx = raw.mx / mag; nz = raw.mz / mag;
+      }
     }
     const accel = 22;
     localPrediction.vx += Math.max(-accel * dt,
@@ -507,7 +525,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
       const tx = authoritativeMe.x + authoritativeMe.vx * lead;
       const tz = authoritativeMe.z + authoritativeMe.vz * lead;
       if (!localPrediction) {
-        localPrediction = { x: tx, z: tz, vx: authoritativeMe.vx, vz: authoritativeMe.vz };
+        localPrediction = { x: tx, z: tz, vx: authoritativeMe.vx, vz: authoritativeMe.vz, facing: authoritativeMe.facing || 0 };
       } else {
         const error = Math.hypot(tx - localPrediction.x, tz - localPrediction.z);
         const ack = Number(parsed.ack?.[myPlayerId]);
@@ -517,6 +535,10 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
         localPrediction.z += (tz - localPrediction.z) * blend;
         localPrediction.vx += (authoritativeMe.vx - localPrediction.vx) * 0.25;
         localPrediction.vz += (authoritativeMe.vz - localPrediction.vz) * 0.25;
+        const fErr = Math.atan2(
+          Math.sin(authoritativeMe.facing - localPrediction.facing),
+          Math.cos(authoritativeMe.facing - localPrediction.facing));
+        localPrediction.facing += fErr * (error > 3 ? 1 : blend);
       }
     }
 

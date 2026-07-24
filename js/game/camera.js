@@ -19,16 +19,15 @@ export function createFollowCamera(camera) {
 
   function update(dt, target, ball, lookDelta = null) {
     if (!target) return;
-    // Look direction: mostly toward the ball, biased by player movement so the
-    // camera swings naturally when you turn.
+    // Look direction: the way the player faces. Steering controls (left/right
+    // turn the player) make this the player's own heading, and the camera
+    // smoothly swings behind it; the ball arrow HUD covers off-screen balls.
     const mvSpd = Math.hypot(target.vx || 0, target.vz || 0);
-    let dirX = ball.x - target.x, dirZ = ball.z - target.z;
-    const bd = Math.hypot(dirX, dirZ);
-    if (bd > 0.5) { dirX /= bd; dirZ /= bd; }
-    if (mvSpd > 2) {
-      const w = Math.min(0.45, mvSpd * 0.05);
-      dirX = dirX * (1 - w) + (target.vx / mvSpd) * w;
-      dirZ = dirZ * (1 - w) + (target.vz / mvSpd) * w;
+    let dirX = Math.cos(target.facing || 0), dirZ = Math.sin(target.facing || 0);
+    if (!Number.isFinite(target.facing)) {
+      dirX = ball.x - target.x; dirZ = ball.z - target.z;
+      const bd = Math.hypot(dirX, dirZ);
+      if (bd > 0.5) { dirX /= bd; dirZ /= bd; }
     }
     const targetYaw = Math.atan2(dirZ, dirX);
     if (lookDelta && (lookDelta.x || lookDelta.y)) {

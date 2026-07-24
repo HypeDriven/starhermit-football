@@ -25,11 +25,13 @@ server=server.js
 # rebind these per game from the platform client's game-details page; on launch
 # in a non-mobile browser the game fetches the player's effective bindings via
 # GET /api/v1/games/<slug>/controls and remaps its keyboard handling to them.
+# Tank-style steering: up/down run forward/back, left/right rotate the player.
+# The shoot key is contextual: a quick tap passes, holding charges a shot.
 # Format: control.<action>=<KeyboardEvent.code>[+<code>...] | <label>
-control.up=KeyW+ArrowUp | Move up
-control.down=KeyS+ArrowDown | Move down
-control.left=KeyA+ArrowLeft | Move left
-control.right=KeyD+ArrowRight | Move right
-control.pass=Space | Pass
-control.shoot=KeyJ | Shoot (hold to charge)
+control.up=KeyW+ArrowUp | Run forward
+control.down=KeyS+ArrowDown | Backpedal
+control.left=KeyA+ArrowLeft | Turn left
+control.right=KeyD+ArrowRight | Turn right
+control.shoot=Space+KeyJ | Shoot (hold) / tap to pass
+control.pass=KeyL | Pass
 control.tackle=KeyK | Slide tackle / pressure

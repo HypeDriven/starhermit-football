@@ -1,6 +1,8 @@
 // input.js — unified desktop keyboard + mobile touch controls.
-// Produces the sim input shape each frame. Movement is camera-relative:
-// call getState(camYaw) with the follow camera's yaw each frame.
+// Produces the sim input shape each frame. Desktop keyboard is tank-style:
+// left/right rotate the player, up/down run forward/back (steering input
+// { turn, fwd }); the touch joystick stays camera-relative ({ mx, mz }).
+// Space is contextual: tap = pass, hold = charge a shot.
 
 export function createInput() {
   const keys = new Set();
@@ -14,10 +16,12 @@ export function createInput() {
   // Actions the sim understands; the manifest declares the same ids (starhermit.txt
   // control.* lines), so platform bindings map 1:1 onto these.
   const ACTIONS = new Set(['up', 'down', 'left', 'right', 'pass', 'shoot', 'tackle']);
+  // Tank-style desktop steering: up/down run forward/back, left/right turn.
+  // Space (shoot) is contextual: tap = pass, hold = charge a shot.
   const DEFAULT_KEYMAP = {
     KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down',
     KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
-    Space: 'pass', KeyJ: 'shoot', KeyK: 'tackle',
+    Space: 'shoot', KeyJ: 'shoot', KeyL: 'pass', KeyK: 'tackle',
   };
   let keymap = { ...DEFAULT_KEYMAP };
 
@@ -33,19 +37,29 @@ export function createInput() {
   }
 
   let passEdge = false, tackleEdge = false;
-  let shootHeld = false, shootCharge = 0, shootReleased = 0;
-  let keyboardX = 0, keyboardY = 0, keyboardMoveYaw = null, needsMoveYaw = true;
-  let keyboardMoveTime = 0;
+  let shootHeld = false, shootCharge = 0, shootReleased = 0, shootHoldTime = 0;
+  let turnAxis = 0, fwdAxis = 0, keyboardMoveTime = 0;
 
-  function releaseShoot() {
+  const SHOOT_TAP_S = 0.22; // shorter press = pass, longer = charged shot
+
+  // tapToPass: keyboard shoot is contextual (tap = pass). Mouse/touch buttons
+  // are dedicated shoot controls and always fire on release.
+  function releaseShoot(tapToPass) {
     if (!shootHeld) return;
     shootHeld = false;
-    shootReleased = Math.max(0.15, shootCharge);
+    if (tapToPass && shootHoldTime < SHOOT_TAP_S) {
+      passEdge = true;
+      shootCharge = 0;
+    } else {
+      shootReleased = Math.max(0.15, shootCharge);
+    }
+    shootHoldTime = 0;
   }
   function cancelShoot() {
     shootHeld = false;
     shootCharge = 0;
     shootReleased = 0;
+    shootHoldTime = 0;
   }
 
   addEventListener('keydown', (e) => {
@@ -57,7 +71,7 @@ export function createInput() {
     keys.add(k);
     if (k === 'pass') passEdge = true;
     if (k === 'tackle') tackleEdge = true;
-    if (k === 'shoot') { shootHeld = true; shootCharge = 0; }
+    if (k === 'shoot') { shootHeld = true; shootCharge = 0; shootHoldTime = 0; }
   });
   addEventListener('keyup', (e) => {
     const k = keymap[e.code];
@@ -67,15 +81,13 @@ export function createInput() {
     // An action can have alternate bindings; keep it down until all of its
     // physical keys are released.
     if (![...downCodes].some((code) => keymap[code] === k)) keys.delete(k);
-    if (k === 'shoot' && !keys.has('shoot')) releaseShoot();
+    if (k === 'shoot' && !keys.has('shoot')) releaseShoot(true);
   });
 
   function clearDesktopInput() {
     keys.clear();
     downCodes.clear();
-    keyboardX = keyboardY = 0;
-    keyboardMoveYaw = null;
-    needsMoveYaw = true;
+    turnAxis = fwdAxis = 0;
     keyboardMoveTime = 0;
     passEdge = tackleEdge = false;
     cancelShoot();
@@ -123,8 +135,8 @@ export function createInput() {
     bindButton('btn-pass', () => { passEdge = true; }, null);
     bindButton('btn-tackle', () => { tackleEdge = true; }, null);
     bindButton('btn-shoot',
-      () => { shootHeld = true; shootCharge = 0; },
-      () => { if (shootHeld) { shootHeld = false; shootReleased = Math.max(0.15, shootCharge); } });
+      () => { shootHeld = true; shootCharge = 0; shootHoldTime = 0; },
+      () => releaseShoot(false));
   }
 
   function setupMouse() {
@@ -140,12 +152,12 @@ export function createInput() {
         canvas.requestPointerLock?.();
         return; // the capture click must not also fire a shot
       }
-      if (e.button === 0) { shootHeld = true; shootCharge = 0; }
+      if (e.button === 0) { shootHeld = true; shootCharge = 0; shootHoldTime = 0; }
       else if (e.button === 1) tackleEdge = true;
       else if (e.button === 2) passEdge = true;
     });
     addEventListener('mouseup', (e) => {
-      if (document.pointerLockElement === canvas && e.button === 0) releaseShoot();
+      if (document.pointerLockElement === canvas && e.button === 0) releaseShoot(false);
     });
     addEventListener('mousemove', (e) => {
       if (gameplayActive && document.pointerLockElement === canvas) {
@@ -177,50 +189,38 @@ export function createInput() {
   // ── frame state ──
   function getState(camYaw, dt) {
     // shoot charge builds while held
-    if (shootHeld) shootCharge = Math.min(1, shootCharge + dt * 1.4);
+    if (shootHeld) { shootCharge = Math.min(1, shootCharge + dt * 1.4); shootHoldTime += dt; }
 
-    // Touch is naturally analog. Smooth keyboard axes so starts, stops and
-    // diagonal changes do not hammer the simulation with instantaneous turns.
-    const targetX = (keys.has('right') ? 1 : 0) - (keys.has('left') ? 1 : 0);
-    const targetY = (keys.has('down') ? 1 : 0) - (keys.has('up') ? 1 : 0);
-    const hasKeyboardMove = targetX !== 0 || targetY !== 0;
-    if (hasKeyboardMove && needsMoveYaw) {
-      keyboardMoveYaw = camYaw;
-      needsMoveYaw = false;
-    }
-    if (!hasKeyboardMove) {
-      needsMoveYaw = true;
-      keyboardMoveTime = 0;
-    } else {
-      keyboardMoveTime += Math.max(0, dt);
-    }
+    // Desktop steering: left/right rotate the player, up/down run forward or
+    // back along the facing. Smooth the axes so starts, stops and turn
+    // reversals do not hammer the simulation with instantaneous changes.
+    const targetTurn = (keys.has('right') ? 1 : 0) - (keys.has('left') ? 1 : 0);
+    const targetFwd = (keys.has('up') ? 1 : 0) - (keys.has('down') ? 1 : 0);
     const steerK = 1 - Math.exp(-16 * Math.max(0, dt));
-    keyboardX += (targetX - keyboardX) * steerK;
-    keyboardY += (targetY - keyboardY) * steerK;
-    if (!hasKeyboardMove && Math.hypot(keyboardX, keyboardY) < 0.03) {
-      keyboardX = keyboardY = 0;
-      keyboardMoveYaw = null;
+    turnAxis += (targetTurn - turnAxis) * steerK;
+    fwdAxis += (targetFwd - fwdAxis) * steerK;
+    if (!targetTurn && Math.abs(turnAxis) < 0.03) turnAxis = 0;
+    if (!targetFwd && Math.abs(fwdAxis) < 0.03) fwdAxis = 0;
+    keyboardMoveTime = targetFwd > 0 ? keyboardMoveTime + Math.max(0, dt) : 0;
+
+    // Touch is naturally analog and stays world-directed (camera-relative).
+    let mx = 0, mz = 0;
+    if (joy.active) {
+      const fx = Math.cos(camYaw), fz = Math.sin(camYaw);
+      const sx = -fz, sz = fx;
+      mx = fx * -joy.y + sx * joy.x;
+      mz = fz * -joy.y + sz * joy.x;
+      const m = Math.hypot(mx, mz);
+      if (m > 1) { mx /= m; mz /= m; }
     }
-
-    let rx = keyboardX, ry = keyboardY;
-    let movementYaw = keyboardMoveYaw ?? camYaw;
-    if (joy.active) { rx = joy.x; ry = joy.y; movementYaw = camYaw; }
-
-    // Keyboard movement keeps the camera basis captured from the beginning of
-    // the key hold. The autonomous ball camera can no longer bend a held W/A/S/D
-    // direction underneath the player; release and press again to re-align it.
-    const fx = Math.cos(movementYaw), fz = Math.sin(movementYaw);
-    const sx = -fz, sz = fx;                                   // camera right (screen right)
-    let mx = fx * -ry + sx * rx;
-    let mz = fz * -ry + sz * rx;
-    const m = Math.hypot(mx, mz);
-    if (m > 1) { mx /= m; mz /= m; }
 
     const state = {
       mx, mz,
+      turn: joy.active || isTouch ? null : turnAxis,
+      fwd: joy.active || isTouch ? null : fwdAxis,
       // Desktop movement naturally ramps from a run to sprint; no modifier or
       // sticky toggle is needed. The sim's acceleration smooths the speed rise.
-      sprint: (!isTouch && hasKeyboardMove && keyboardMoveTime >= 0.2) || touch.sprint,
+      sprint: (!isTouch && targetFwd > 0 && keyboardMoveTime >= 0.2) || touch.sprint,
       pass: passEdge,
       tackle: tackleEdge,
       shoot: shootReleased,

@@ -326,6 +326,10 @@ function attackSign(state, team) {
 
 // ── Input shape ──────────────────────────────────────────────────────────────
 // { mx, mz }  desired move direction, normalized, world space (≤ 1 magnitude)
+//             — legacy mode (AI, touch joystick)
+// turn, fwd   steering mode (desktop): turn ∈ [-1,1] rotates the player,
+//             fwd ∈ [-1,1] runs forward/back along the facing; both null in
+//             legacy mode
 // sprint      bool
 // pass        true on the frame a pass is triggered
 // shoot       0, or release power in (0,1]
@@ -427,6 +431,8 @@ function push(state, ev) { state.events.push(ev); }
 
 // ── Players ──────────────────────────────────────────────────────────────────
 
+var TURN_RATE = 3.2; // rad/s for steering-mode inputs (turn/fwd)
+
 function stepPlayer(state, p, input, dt) {
   var b = state.ball;
   var hasBall = b.owner === p.id;
@@ -442,16 +448,32 @@ function stepPlayer(state, p, input, dt) {
     return;
   }
 
+  // Two input modes: legacy { mx, mz } world-space direction (AI, touch), and
+  // steering { turn, fwd } (desktop keyboard) where left/right rotate the
+  // player in place and up/down run forward/back along the facing.
+  var steer = input.turn != null;
+  var mag, nx, nz;
+  if (steer) {
+    var nf = p.facing + clamp(input.turn, -1, 1) * TURN_RATE * dt;
+    p.facing = Math.atan2(Math.sin(nf), Math.cos(nf));
+    var f = clamp(Number(input.fwd) || 0, -1, 1);
+    mag = Math.abs(f);
+    nx = Math.cos(p.facing) * (f < 0 ? -1 : 1);
+    nz = Math.sin(p.facing) * (f < 0 ? -1 : 1);
+  } else {
+    mag = Math.hypot(input.mx, input.mz);
+    nx = mag > 0.01 ? input.mx / mag : 0;
+    nz = mag > 0.01 ? input.mz / mag : 0;
+  }
+
   // target speed
-  var mag = Math.hypot(input.mx, input.mz);
   var speed = 0;
   if (mag > 0.01) {
     speed = input.sprint ? SPRINT_SPEED : (mag > 0.45 ? RUN_SPEED : WALK_SPEED);
+    if (steer && input.fwd < 0) speed = WALK_SPEED * 0.9; // backpedal
     speed *= Math.min(1, mag * 1.6);
     if (hasBall) speed *= BALL_SLOWDOWN;
   }
-  var nx = mag > 0.01 ? input.mx / mag : 0;
-  var nz = mag > 0.01 ? input.mz / mag : 0;
 
   // acceleration
   var accel = 22;
@@ -462,7 +484,7 @@ function stepPlayer(state, p, input, dt) {
   // tackle lunge
   if (input.tackle && p.tackleT <= 0 && p.kickT <= 0) {
     p.tackleT = 0.45;
-    var face = mag > 0.01 ? Math.atan2(nz, nx) : p.facing;
+    var face = steer ? p.facing : (mag > 0.01 ? Math.atan2(nz, nx) : p.facing);
     if (p.role === 'GK' && nearOwnGoal(state, p)) {
       p.diveT = 0.6; p.diveDir = face;
       p.stunT = 0.6;
@@ -491,10 +513,13 @@ function stepPlayer(state, p, input, dt) {
   p.z += p.vz * dt;
   clampToPitch(state, p);
 
-  // facing: toward movement, else toward ball
+  // facing: steering inputs own the facing directly; legacy inputs face
+  // toward movement, else toward the ball
   var spd = Math.hypot(p.vx, p.vz);
-  if (spd > 0.4) p.facing = Math.atan2(p.vz, p.vx);
-  else p.facing = turnToward(p.facing, Math.atan2(b.z - p.z, b.x - p.x), 6 * dt);
+  if (!steer) {
+    if (spd > 0.4) p.facing = Math.atan2(p.vz, p.vx);
+    else p.facing = turnToward(p.facing, Math.atan2(b.z - p.z, b.x - p.x), 6 * dt);
+  }
 
   // kicking
   if (hasBall && p.kickT <= 0) {
@@ -562,39 +587,64 @@ function doShoot(state, p, power) {
   push(state, { type: 'kick', player: p.id, power: 0.4 + power * 0.6, kind: 'shoot' });
 }
 
+// No opponent within `lane` meters of the pass segment from p to q.
+function laneClear(state, p, q, lane) {
+  var vx = q.x - p.x, vz = q.z - p.z;
+  var len2 = vx * vx + vz * vz;
+  for (var i = 0; i < state.players.length; i++) {
+    var o = state.players[i];
+    if (o.team === p.team || o.id === q.id) continue;
+    var t = len2 > 0 ? clamp(((o.x - p.x) * vx + (o.z - p.z) * vz) / len2, 0, 1) : 0;
+    var cx = p.x + vx * t, cz = p.z + vz * t;
+    if (Math.hypot(o.x - cx, o.z - cz) < lane) return false;
+  }
+  return true;
+}
+
 function doPass(state, p) {
   var b = state.ball;
-  // best teammate: within a forward cone, prefer open + forward
-  var best = null, bestScore = -1;
+  var gx = attackSign(state, p.team) * state.pitch.L / 2;
+  // Best option: a teammate in the facing cone with a clear line to the ball;
+  // among those, the one nearest the opponent's goal.
+  var best = null, bestGoalDist = Infinity;
   for (var qi = 0; qi < state.players.length; qi++) {
     var q = state.players[qi];
     if (q.team !== p.team || q.id === p.id) continue;
     var dx = q.x - p.x, dz = q.z - p.z;
     var d = Math.hypot(dx, dz);
     if (d < 2 || d > 45) continue;
-    var angTo = Math.atan2(dz, dx);
-    var da = Math.abs(angDiff(angTo, p.facing));
-    if (da > 1.9) continue;
-    var fwd = attackSign(state, p.team) * dx / d;      // forward-ness
-    var open = openness(state, q);
-    var score = fwd * 0.9 + open * 0.8 - da * 0.25 + (state.rng() * 0.15);
-    if (score > bestScore) { bestScore = score; best = q; }
+    var da = Math.abs(angDiff(Math.atan2(dz, dx), p.facing));
+    if (da > 1.25) continue;                          // must be roughly ahead
+    if (!laneClear(state, p, q, 1.1)) continue;       // must have line of sight
+    var gd = Math.hypot(q.x - gx, q.z);               // nearest to their goal
+    if (gd < bestGoalDist) { bestGoalDist = gd; best = q; }
   }
-  var dir = best ? Math.atan2(best.z - p.z, best.x - p.x) : p.facing;
-  var dd = best ? Math.hypot(best.x - p.x, best.z - p.z) : 10;
-  var spd = clamp(9 + dd * 0.42, 10, 24);
   b.owner = null; b.lastTouch = p.id;
+  p.kickT = 0.35;
+  if (!best) {
+    // No good option: knock it into space ahead and burst after it — a
+    // self-pass to beat a pressing defender.
+    var fx = Math.cos(p.facing), fz = Math.sin(p.facing);
+    b.vx = fx * 7.5; b.vz = fz * 7.5; b.vy = 0;
+    b.x = p.x + fx * 0.7; b.z = p.z + fz * 0.7;
+    b.y = Math.max(b.y, 0.15);
+    p.vx += fx * 3.4; p.vz += fz * 3.4;
+    push(state, { type: 'kick', player: p.id, power: 0.4, kind: 'pass' });
+    return;
+  }
+  var dir = Math.atan2(best.z - p.z, best.x - p.x);
+  var dd = Math.hypot(best.x - p.x, best.z - p.z);
+  var spd = clamp(9 + dd * 0.42, 10, 24);
   // lead the receiver slightly
-  var lead = best ? 0.35 : 0;
-  var tx2 = best ? best.x + best.vx * lead : p.x + Math.cos(dir) * 12;
-  var tz2 = best ? best.z + best.vz * lead : p.z + Math.sin(dir) * 12;
+  var lead = 0.35;
+  var tx2 = best.x + best.vx * lead;
+  var tz2 = best.z + best.vz * lead;
   var tdx = tx2 - p.x, tdz = tz2 - p.z;
   var td = Math.hypot(tdx, tdz) || 1;
   b.vx = (tdx / td) * spd; b.vz = (tdz / td) * spd;
   b.vy = dd > 18 ? spd * 0.16 : 0;   // lofted only for long balls
   b.x = p.x + Math.cos(dir) * 0.6; b.z = p.z + Math.sin(dir) * 0.6;
   b.y = Math.max(b.y, 0.15);
-  p.kickT = 0.35;
   push(state, { type: 'kick', player: p.id, power: 0.45, kind: 'pass' });
 }
 
@@ -1399,6 +1449,8 @@ function storeRealtimeInput(state, from, data, now) {
     seq: data.seq | 0,
     mx: clamp(Number(data.mx) || 0, -1, 1),
     mz: clamp(Number(data.mz) || 0, -1, 1),
+    turn: data.turn == null ? null : clamp(Number(data.turn) || 0, -1, 1),
+    fwd: data.fwd == null ? null : clamp(Number(data.fwd) || 0, -1, 1),
     sprint: !!data.sprint,
     pass: !!data.pass,
     shoot: clamp(Number(data.shoot) || 0, 0, 1),
@@ -1519,7 +1571,8 @@ globalThis.game = {
           if (seat && seat.userId && !p.isAi) {
             var stored = state.inputs[p.id];
             inputs.set(p.id, stored ? {
-              mx: stored.mx, mz: stored.mz, sprint: stored.sprint,
+              mx: stored.mx, mz: stored.mz, turn: stored.turn, fwd: stored.fwd,
+              sprint: stored.sprint,
               pass: stored.pass, shoot: stored.shoot, tackle: stored.tackle,
             } : emptyInput());
             // Movement remains latest-wins; action edges are consumed exactly
@@ -1581,6 +1634,7 @@ globalThis.FootballSim = {
   WALK_SPEED: WALK_SPEED,
   RUN_SPEED: RUN_SPEED,
   SPRINT_SPEED: SPRINT_SPEED,
+  TURN_RATE: TURN_RATE,
   BALL_SLOWDOWN: BALL_SLOWDOWN,
   CONTROL_RADIUS: CONTROL_RADIUS,
   STEAL_RADIUS: STEAL_RADIUS,

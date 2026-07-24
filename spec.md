@@ -251,8 +251,9 @@ come from the server-assigned roster. Tags fade beyond ~40 m.
 ### 5.5 Camera & ball indicator
 
 - Third-person follow camera: positioned behind/above your player, damped
-  spring follow, gentle look-ahead toward the ball, FOV widens slightly at
-  sprint. Camera collision-free (stadium is open above pitch).
+  spring follow, smoothly swings behind the direction your player faces, FOV
+  widens slightly at sprint. Camera collision-free (stadium is open above
+  pitch).
 - **Off-screen ball arrow**: when the ball projects outside the viewport, an
   edge-clamped arrow (HUD div) points toward it, colored by possession team;
   distance readout in meters.
@@ -260,10 +261,13 @@ come from the server-assigned roster. Tags fade beyond ~40 m.
 ### 5.6 Controls
 
 Desktop:
-- **WASD / arrows** move (camera-relative) and quickly accelerate into a sprint;
-  no sprint modifier or toggle is required. **Space** passes, **J** shoots (hold
-  to charge, release to strike; power bar), and **K** slide tackles / pressures.
-  You always control your own footballer.
+- Tank-style steering: **W/↑** runs forward (quickly accelerating into a
+  sprint; no sprint modifier or toggle), **S/↓** backpedals, **A/←** and
+  **D/→** rotate your footballer left/right. **Space** is contextual: tap to
+  pass (best teammate ahead with a clear lane, otherwise a knock-on into
+  space with a chase burst), hold to charge a shot (power bar, release to
+  strike). **J** is an alternate shoot key, **L** a dedicated pass key, and
+  **K** slide tackles / pressures. You always control your own footballer.
 
 Mobile:
 - Left virtual **joystick** (dynamic origin, analog move + sprint at full
@@ -288,8 +292,8 @@ Remappable desktop bindings:
   remappable).
 - Remapping only changes which `KeyboardEvent.code`s trigger each of the
   seven actions (`up`/`down`/`left`/`right`/`pass`/`shoot`/`tackle`);
-  movement stays camera-relative and action semantics (edge
-  triggers, shoot charge-and-release) are unchanged. `preventDefault()`
+  steering semantics (turn/forward axes, tap-to-pass vs hold-to-shoot) are
+  unchanged. `preventDefault()`
   applies exactly to the mapped codes, as today.
 
 ### 5.7 Performance budget
@@ -304,8 +308,9 @@ ratio, crowd LOD, no post-processing on mobile.
   JSON **text frames** only, ≤ 16 KB. The realtime-rooms WS
   (`ws/v1/realtime?roomId=…`) remains connected for lobby/roster/presence only.
 - **Client → server**: input cmds at 30 Hz inside the platform `cmd`
-  envelope: `{type:'input', realtime:true, seq, mx, mz, sprint, pass, shoot, tackle}`
-  (`mx`/`mz` normalized world-space move vector, `shoot` = release power,
+  envelope: `{type:'input', realtime:true, seq, mx, mz, turn, fwd, sprint, pass, shoot, tackle}`
+  (`mx`/`mz` normalized world-space move vector for touch; `turn`/`fwd` (or
+  null) steering axes for desktop tank controls; `shoot` = release power,
   one-shot flags on the triggering frame). `{type:'sync'}` requests a full
   snapshot (sent on connect/reconnect).
 - **Server → client**: the script broadcasts `{type:'snap', …}` at up to 30 Hz —
