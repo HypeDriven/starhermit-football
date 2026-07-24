@@ -13,9 +13,11 @@ export function createFollowCamera(camera) {
   const ndc = new THREE.Vector3();
   let yaw = 0;              // smoothed camera yaw (world angle in x/z plane)
   let dist = 13, height = 7;
+  let heightOffset = 0;
+  let manualCamera = false;
   let sprintFov = 0;
 
-  function update(dt, target, ball) {
+  function update(dt, target, ball, lookDelta = null) {
     if (!target) return;
     // Look direction: mostly toward the ball, biased by player movement so the
     // camera swings naturally when you turn.
@@ -29,12 +31,21 @@ export function createFollowCamera(camera) {
       dirZ = dirZ * (1 - w) + (target.vz / mvSpd) * w;
     }
     const targetYaw = Math.atan2(dirZ, dirX);
-    yaw += angDelta(targetYaw, yaw) * Math.min(1, dt * 3.2);
+    if (lookDelta && (lookDelta.x || lookDelta.y)) {
+      yaw += lookDelta.x * 0.0025;
+      heightOffset = THREE.MathUtils.clamp(heightOffset - lookDelta.y * 0.018, -2.2, 5.5);
+      manualCamera = true;
+    }
+    // Before the mouse is used, retain the mobile-friendly automatic ball
+    // camera. Afterwards it becomes only a gentle assist and never wrestles
+    // immediate control away from desktop mouse movement.
+    const yawAssist = manualCamera ? 0.42 : 3.2;
+    yaw += angDelta(targetYaw, yaw) * Math.min(1, dt * yawAssist);
 
     // camera sits behind & above the player
     const sprinting = mvSpd > 6;
     dist += ((sprinting ? 15 : 13) - dist) * Math.min(1, dt * 2);
-    height += ((sprinting ? 7.5 : 7) - height) * Math.min(1, dt * 2);
+    height += ((sprinting ? 7.5 : 7) + heightOffset - height) * Math.min(1, dt * 2);
     desired.set(
       target.x - Math.cos(yaw) * dist,
       height,
@@ -44,10 +55,12 @@ export function createFollowCamera(camera) {
     pos.lerp(desired, k);
     camera.position.copy(pos);
 
+    const viewDirX = manualCamera ? Math.cos(yaw) : dirX;
+    const viewDirZ = manualCamera ? Math.sin(yaw) : dirZ;
     desiredLook.set(
-      target.x + dirX * 6,
+      target.x + viewDirX * 6,
       1.2,
-      target.z + dirZ * 6,
+      target.z + viewDirZ * 6,
     );
     look.lerp(desiredLook, k);
     camera.lookAt(look);
@@ -91,7 +104,7 @@ export function createFollowCamera(camera) {
   return {
     update,
     get yaw() { return yaw; },
-    setYaw(y) { yaw = y; },
+    setYaw(y) { yaw = y; heightOffset = 0; manualCamera = false; },
     // cinematic helper: smoothly frame an arbitrary point (walkout, coin flip)
     frame(point, from, dt, speed = 2.5) {
       desired.set(from.x, from.y, from.z);

@@ -4,7 +4,11 @@
 
 export function createInput() {
   const keys = new Set();
-  const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+  const downCodes = new Set();
+  // Use the primary pointer, not mere touch capability: hybrid laptops expose
+  // ontouchstart but should retain desktop mouse/keyboard controls.
+  const isTouch = matchMedia('(pointer: coarse)').matches;
+  let gameplayActive = false;
 
   // ── keyboard ──
   // Actions the sim understands; the manifest declares the same ids (starhermit.txt
@@ -31,28 +35,63 @@ export function createInput() {
 
   let passEdge = false, tackleEdge = false;
   let shootHeld = false, shootCharge = 0, shootReleased = 0;
+  let keyboardX = 0, keyboardY = 0, keyboardMoveYaw = null, needsMoveYaw = true;
+  let sprintToggle = localStorage.getItem('starhermit-football-toggle-sprint') === 'true';
+  let sprintLatched = false;
+
+  function releaseShoot() {
+    if (!shootHeld) return;
+    shootHeld = false;
+    shootReleased = Math.max(0.15, shootCharge);
+  }
+  function cancelShoot() {
+    shootHeld = false;
+    shootCharge = 0;
+    shootReleased = 0;
+  }
 
   addEventListener('keydown', (e) => {
     const k = keymap[e.code];
     if (!k) return;
     e.preventDefault();
-    if (keys.has(k)) return;
+    if (downCodes.has(e.code)) return;
+    downCodes.add(e.code);
     keys.add(k);
     if (k === 'pass') passEdge = true;
     if (k === 'tackle') tackleEdge = true;
     if (k === 'shoot') { shootHeld = true; shootCharge = 0; }
+    if (k === 'sprint' && sprintToggle) sprintLatched = !sprintLatched;
   });
   addEventListener('keyup', (e) => {
     const k = keymap[e.code];
     if (!k) return;
-    keys.delete(k);
-    if (k === 'shoot' && shootHeld) { shootHeld = false; shootReleased = Math.max(0.15, shootCharge); }
+    e.preventDefault();
+    downCodes.delete(e.code);
+    // An action can have alternate bindings; keep it down until all of its
+    // physical keys are released.
+    if (![...downCodes].some((code) => keymap[code] === k)) keys.delete(k);
+    if (k === 'shoot' && !keys.has('shoot')) releaseShoot();
   });
+
+  function clearDesktopInput() {
+    keys.clear();
+    downCodes.clear();
+    keyboardX = keyboardY = 0;
+    keyboardMoveYaw = null;
+    needsMoveYaw = true;
+    sprintLatched = false;
+    passEdge = tackleEdge = false;
+    cancelShoot();
+  }
+  addEventListener('blur', clearDesktopInput);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) clearDesktopInput(); });
 
   // ── touch ──
   const joy = { active: false, id: -1, x: 0, y: 0, cx: 0, cy: 0 };
   const touch = { sprint: false };
+  let lookDX = 0, lookDY = 0;
   if (isTouch) setupTouch();
+  else setupMouse();
 
   function setupTouch() {
     const joyEl = document.getElementById('joystick');
@@ -91,6 +130,43 @@ export function createInput() {
       () => { if (shootHeld) { shootHeld = false; shootReleased = Math.max(0.15, shootCharge); } });
   }
 
+  function setupMouse() {
+    const canvas = document.getElementById('gl');
+    const hint = document.getElementById('mouse-hint');
+
+    // First click captures the mouse for a conventional desktop third-person
+    // camera. Once captured: mouse aims, left shoots, right passes, middle tackles.
+    canvas.addEventListener('mousedown', (e) => {
+      if (!gameplayActive) return;
+      e.preventDefault();
+      if (document.pointerLockElement !== canvas) {
+        canvas.requestPointerLock?.();
+        return; // the capture click must not also fire a shot
+      }
+      if (e.button === 0) { shootHeld = true; shootCharge = 0; }
+      else if (e.button === 1) tackleEdge = true;
+      else if (e.button === 2) passEdge = true;
+    });
+    addEventListener('mouseup', (e) => {
+      if (document.pointerLockElement === canvas && e.button === 0) releaseShoot();
+    });
+    addEventListener('mousemove', (e) => {
+      if (gameplayActive && document.pointerLockElement === canvas) {
+        lookDX += e.movementX || 0;
+        lookDY += e.movementY || 0;
+      }
+    });
+    canvas.addEventListener('contextmenu', (e) => { if (gameplayActive) e.preventDefault(); });
+    document.addEventListener('pointerlockchange', () => {
+      const locked = document.pointerLockElement === canvas;
+      hint.classList.toggle('hidden', locked || !gameplayActive);
+      if (!locked) {
+        lookDX = lookDY = 0;
+        cancelShoot();
+      }
+    });
+  }
+
   function bindButton(id, onDown, onUp) {
     const el = document.getElementById(id);
     el.addEventListener('pointerdown', (e) => { e.preventDefault(); onDown(); });
@@ -106,17 +182,35 @@ export function createInput() {
     // shoot charge builds while held
     if (shootHeld) shootCharge = Math.min(1, shootCharge + dt * 1.4);
 
-    // raw stick: keyboard digital or touch analog
-    let rx = 0, ry = 0;
-    if (keys.has('left')) rx -= 1;
-    if (keys.has('right')) rx += 1;
-    if (keys.has('up')) ry -= 1;
-    if (keys.has('down')) ry += 1;
-    if (joy.active) { rx = joy.x; ry = joy.y; }
+    // Touch is naturally analog. Smooth keyboard axes so starts, stops and
+    // diagonal changes do not hammer the simulation with instantaneous turns.
+    const targetX = (keys.has('right') ? 1 : 0) - (keys.has('left') ? 1 : 0);
+    const targetY = (keys.has('down') ? 1 : 0) - (keys.has('up') ? 1 : 0);
+    const hasKeyboardMove = targetX !== 0 || targetY !== 0;
+    if (hasKeyboardMove && needsMoveYaw) {
+      keyboardMoveYaw = camYaw;
+      needsMoveYaw = false;
+    }
+    if (!hasKeyboardMove) {
+      needsMoveYaw = true;
+      sprintLatched = false;
+    }
+    const steerK = 1 - Math.exp(-16 * Math.max(0, dt));
+    keyboardX += (targetX - keyboardX) * steerK;
+    keyboardY += (targetY - keyboardY) * steerK;
+    if (!hasKeyboardMove && Math.hypot(keyboardX, keyboardY) < 0.03) {
+      keyboardX = keyboardY = 0;
+      keyboardMoveYaw = null;
+    }
 
-    // rotate screen-space stick into world space by camera yaw
-    // camera yaw: world direction the camera faces (x,z). Screen up = camera forward.
-    const fx = Math.cos(camYaw), fz = Math.sin(camYaw);       // camera forward
+    let rx = keyboardX, ry = keyboardY;
+    let movementYaw = keyboardMoveYaw ?? camYaw;
+    if (joy.active) { rx = joy.x; ry = joy.y; movementYaw = camYaw; }
+
+    // Keyboard movement keeps the camera basis captured from the beginning of
+    // the key hold. The autonomous ball camera can no longer bend a held W/A/S/D
+    // direction underneath the player; release and press again to re-align it.
+    const fx = Math.cos(movementYaw), fz = Math.sin(movementYaw);
     const sx = -fz, sz = fx;                                   // camera right (screen right)
     let mx = fx * -ry + sx * rx;
     let mz = fz * -ry + sz * rx;
@@ -125,7 +219,7 @@ export function createInput() {
 
     const state = {
       mx, mz,
-      sprint: keys.has('sprint') || touch.sprint,
+      sprint: (sprintToggle ? sprintLatched : keys.has('sprint')) || touch.sprint,
       pass: passEdge,
       tackle: tackleEdge,
       shoot: shootReleased,
@@ -142,9 +236,27 @@ export function createInput() {
     isTouch,
     setBindings,
     getState,
+    consumeLookDelta() {
+      const delta = { x: lookDX, y: lookDY };
+      lookDX = lookDY = 0;
+      return delta;
+    },
+    get sprintToggle() { return sprintToggle; },
+    setSprintToggle(enabled) {
+      sprintToggle = !!enabled;
+      sprintLatched = false;
+      localStorage.setItem('starhermit-football-toggle-sprint', String(sprintToggle));
+    },
     showTouchUi(show) {
-      if (!isTouch) return;
-      document.getElementById('touch-ui').classList.toggle('hidden', !show);
+      gameplayActive = show;
+      if (isTouch) {
+        document.getElementById('touch-ui').classList.toggle('hidden', !show);
+      } else {
+        const canvas = document.getElementById('gl');
+        document.getElementById('mouse-hint').classList.toggle(
+          'hidden', !show || document.pointerLockElement === canvas);
+        if (!show && document.pointerLockElement === canvas) document.exitPointerLock?.();
+      }
     },
   };
 }

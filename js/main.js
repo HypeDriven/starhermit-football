@@ -140,6 +140,12 @@ function setupMenu() {
   optVoice.checked = voice.isEnabled();
   optVoice.onchange = () => voice.setEnabled(optVoice.checked);
 
+  const sprintToggleRow = $('menu-sprint-toggle');
+  const optSprintToggle = $('opt-sprint-toggle');
+  if (input.isTouch) sprintToggleRow.classList.add('hidden');
+  optSprintToggle.checked = input.sprintToggle;
+  optSprintToggle.onchange = () => input.setSprintToggle(optSprintToggle.checked);
+
   $('btn-practice').onclick = async () => {
     audio.ui(); audio.resume();
     if (!(await confirmLeaveActiveRoom())) return;
@@ -315,6 +321,8 @@ function disposeMatch() {
 // ── in-match leave (Esc) ──
 addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  // First Escape releases desktop mouse-look. A second Escape opens leave.
+  if (document.pointerLockElement === canvas) return;
   if (!match || match.phase === 'done' || !matchRoom) return;
   $('leave-confirm').classList.toggle('hidden');
 });

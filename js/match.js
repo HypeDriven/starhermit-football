@@ -565,6 +565,9 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
   // ── view sync + HUD ───────────────────────────────────────────────────────
 
   function syncViews(dt) {
+    // Consume mouse look once per rendered frame (not once per fixed simulation
+    // step), so camera sensitivity is independent of frame rate.
+    const lookDelta = input.consumeLookDelta();
     for (let i = 0; i < sim.players.length; i++) {
       const p = sim.players[i];
       const v = views[i];
@@ -596,7 +599,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
           dt, 2.5,
         );
       } else {
-        followCam.update(dt, sim.players[myPlayerId], sim.ball);
+        followCam.update(dt, sim.players[myPlayerId], sim.ball, lookDelta);
       }
     }
   }

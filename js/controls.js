@@ -39,7 +39,7 @@ export function createControlsScreen({ input, audio, onBack }) {
       const dto = await api.getControls();
       actions = (dto.actions || []).map((a) => ({ ...a, codes: [...a.codes] }));
       render();
-      hintEl.textContent = 'Click a key to rebind it. Esc cancels a capture.';
+      hintEl.textContent = 'Click a key to rebind it. Esc cancels. In a match, click the pitch for mouse camera; left mouse shoots, right passes, middle tackles.';
     } catch (e) {
       listEl.innerHTML = '';
       hintEl.textContent = e.status === 404
@@ -122,7 +122,7 @@ export function createControlsScreen({ input, audio, onBack }) {
     a.codes = [e.code];
     capturing = null;
     render();
-    hintEl.textContent = 'Click a key to rebind it. Esc cancels a capture.';
+    hintEl.textContent = 'Click a key to rebind it. Esc cancels. Mouse: left shoots, right passes, middle tackles.';
   }, true); // capture phase: runs before input.js's gameplay listener
 
   saveBtn.onclick = async () => {

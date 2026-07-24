@@ -85,9 +85,29 @@ function box(list, w, h, d, x, y, z) {
   list.push(g);
 }
 
-function scaleUVs(g, sx, sy) {
-  const uv = g.attributes.uv;
-  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * sx, uv.getY(i) * sy);
+// A net panel with explicit world-space corners. Building the goal panels as
+// quads avoids relying on PlaneGeometry rotations, which made the two ends
+// easy to mirror incorrectly and could put a side panel across the mouth.
+function netQuad(a, b, c, d, uMeters, vMeters) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute([
+    a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z, d.x, d.y, d.z,
+  ], 3));
+  const cell = 0.14;
+  g.setAttribute('uv', new THREE.Float32BufferAttribute([
+    0, 0, uMeters / cell, 0, uMeters / cell, vMeters / cell, 0, vMeters / cell,
+  ], 2));
+  g.setIndex([0, 1, 2, 0, 2, 3]);
+  g.computeVertexNormals();
+  return g;
+}
+
+function cylinderBetween(list, a, b, radius = 0.04, segments = 8) {
+  const delta = new THREE.Vector3().subVectors(b, a);
+  const g = new THREE.CylinderGeometry(radius, radius, delta.length(), segments);
+  g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(Y_AXIS, delta.normalize()));
+  g.translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+  list.push(g);
 }
 
 // ── procedural textures ─────────────────────────────────────────────────────
@@ -375,64 +395,85 @@ export function buildStadium(scene, opts) {
   lines.renderOrder = 1;
   root.add(lines);
 
-  // ── goals (frames + box nets, both ends merged into two meshes) ──
-  const frameGeoms = [];
+  // ── goals (mirrored trapezoid nets, wholly behind each goal line) ──
+  // Team 0 begins at the west (-x) goal and team 1 at the east (+x) goal.
+  // Keep their frame geometry separate so each end can carry its kit tint.
+  const frameGeoms = [[], []];
   const netGeoms = [];
-  const NET_DEPTH = 1.6;
-  for (const sign of [1, -1]) {
-    const gx = (sign * L) / 2;
-    const bx = gx + sign * NET_DEPTH;
-    // posts + crossbar
-    for (const s of [-1, 1]) {
-      const post = new THREE.CylinderGeometry(0.06, 0.06, goalH + 0.06, 12);
-      post.translate(gx, (goalH + 0.06) / 2, (s * goalW) / 2);
-      frameGeoms.push(post);
+  const netDepth = Math.min(2.4, Math.max(1.6, goalH * 0.9));
+  const rearH = goalH * 0.82;
+  const halfW = goalW / 2;
+  const groundY = 0.045;
+  for (const sign of [-1, 1]) {
+    const team = sign < 0 ? 0 : 1;
+    const teamFrameGeoms = frameGeoms[team];
+    const goalX = sign * L / 2;                 // posts sit on the goal line
+    const netFrontX = goalX + sign * 0.07;      // net begins behind the frame
+    const rearX = goalX + sign * netDepth;      // never projects onto the pitch
+
+    // Regulation-style front frame.
+    for (const zSign of [-1, 1]) {
+      cylinderBetween(teamFrameGeoms,
+        new THREE.Vector3(goalX, 0.03, zSign * halfW),
+        new THREE.Vector3(goalX, goalH, zSign * halfW), 0.06, 12);
     }
-    const bar = new THREE.CylinderGeometry(0.06, 0.06, goalW + 0.12, 12);
-    bar.rotateX(Math.PI / 2);
-    bar.translate(gx, goalH, 0);
-    frameGeoms.push(bar);
-    // box-frame net supports (back poles + top/bottom back bars)
-    for (const s of [-1, 1]) {
-      const pole = new THREE.CylinderGeometry(0.04, 0.04, goalH, 8);
-      pole.translate(bx, goalH / 2, (s * goalW) / 2);
-      frameGeoms.push(pole);
+    cylinderBetween(teamFrameGeoms,
+      new THREE.Vector3(goalX, goalH, -halfW),
+      new THREE.Vector3(goalX, goalH, halfW), 0.06, 12);
+
+    // Rear support and the two depth rails make the cage read correctly from
+    // side-on cameras. Its lower rear roof gives the net a natural sag rather
+    // than the old rectangular box profile.
+    for (const zSign of [-1, 1]) {
+      cylinderBetween(teamFrameGeoms,
+        new THREE.Vector3(rearX, groundY, zSign * halfW),
+        new THREE.Vector3(rearX, rearH, zSign * halfW));
+      cylinderBetween(teamFrameGeoms,
+        new THREE.Vector3(goalX, groundY, zSign * halfW),
+        new THREE.Vector3(rearX, groundY, zSign * halfW));
+      cylinderBetween(teamFrameGeoms,
+        new THREE.Vector3(goalX, goalH, zSign * halfW),
+        new THREE.Vector3(rearX, rearH, zSign * halfW));
     }
-    const backTop = new THREE.CylinderGeometry(0.04, 0.04, goalW, 8);
-    backTop.rotateX(Math.PI / 2);
-    backTop.translate(bx, goalH - 0.02, 0);
-    frameGeoms.push(backTop);
-    const backBot = new THREE.CylinderGeometry(0.04, 0.04, goalW, 8);
-    backBot.rotateX(Math.PI / 2);
-    backBot.translate(bx, 0.05, 0);
-    frameGeoms.push(backBot);
-    // net planes: back, top, two sides
-    const back = new THREE.PlaneGeometry(goalW, goalH);
-    back.rotateY(sign > 0 ? -Math.PI / 2 : Math.PI / 2);
-    back.translate(bx, goalH / 2, 0);
-    scaleUVs(back, goalW / 0.12, goalH / 0.12);
-    netGeoms.push(back);
-    const top = new THREE.PlaneGeometry(NET_DEPTH, goalW);
-    top.rotateX(-Math.PI / 2);
-    top.translate(gx + (sign * NET_DEPTH) / 2, goalH, 0);
-    scaleUVs(top, NET_DEPTH / 0.12, goalW / 0.12);
-    netGeoms.push(top);
-    for (const s of [-1, 1]) {
-      // XY-plane geometry already spans depth (X) × height (Y) with its normal
-      // along Z — the side-panel orientation. No rotation: a rotateY here swings
-      // the panel parallel to the back net, cutting across the goal mouth.
-      const sideP = new THREE.PlaneGeometry(NET_DEPTH, goalH);
-      sideP.translate(gx + (sign * NET_DEPTH) / 2, goalH / 2, (s * goalW) / 2);
-      scaleUVs(sideP, NET_DEPTH / 0.12, goalH / 0.12);
-      netGeoms.push(sideP);
+    cylinderBetween(teamFrameGeoms,
+      new THREE.Vector3(rearX, rearH, -halfW),
+      new THREE.Vector3(rearX, rearH, halfW));
+    cylinderBetween(teamFrameGeoms,
+      new THREE.Vector3(rearX, groundY, -halfW),
+      new THREE.Vector3(rearX, groundY, halfW));
+
+    // Back, roof and side panels use explicit coordinates so +x and -x goals
+    // are true mirrors. Every point is on or outside its own goal line.
+    netGeoms.push(netQuad(
+      new THREE.Vector3(rearX, groundY, -halfW),
+      new THREE.Vector3(rearX, groundY, halfW),
+      new THREE.Vector3(rearX, rearH, halfW),
+      new THREE.Vector3(rearX, rearH, -halfW), goalW, rearH));
+    netGeoms.push(netQuad(
+      new THREE.Vector3(netFrontX, goalH, -halfW),
+      new THREE.Vector3(netFrontX, goalH, halfW),
+      new THREE.Vector3(rearX, rearH, halfW),
+      new THREE.Vector3(rearX, rearH, -halfW), goalW, netDepth));
+    for (const zSign of [-1, 1]) {
+      netGeoms.push(netQuad(
+        new THREE.Vector3(netFrontX, groundY, zSign * halfW),
+        new THREE.Vector3(rearX, groundY, zSign * halfW),
+        new THREE.Vector3(rearX, rearH, zSign * halfW),
+        new THREE.Vector3(netFrontX, goalH, zSign * halfW), netDepth, goalH));
     }
   }
-  const goalFrames = new THREE.Mesh(
-    mergeGeoms(frameGeoms),
-    new THREE.MeshStandardMaterial({ color: 0xf2f4f6, roughness: 0.4, metalness: 0.15 })
-  );
-  goalFrames.castShadow = true;
-  root.add(goalFrames);
+  const goalTints = [0x76a9df, 0xe98278]; // blue west goal, red east goal
+  for (let team = 0; team < frameGeoms.length; team++) {
+    const goalFrames = new THREE.Mesh(
+      mergeGeoms(frameGeoms[team]),
+      new THREE.MeshStandardMaterial({
+        color: goalTints[team], roughness: 0.4, metalness: 0.15,
+      })
+    );
+    goalFrames.name = team === 0 ? 'blue-goal-frame' : 'red-goal-frame';
+    goalFrames.castShadow = true;
+    root.add(goalFrames);
+  }
 
   const netMesh = new THREE.Mesh(
     mergeGeoms(netGeoms),
