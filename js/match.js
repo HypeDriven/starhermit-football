@@ -359,6 +359,18 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     }
     if (me && performance.now() / 1000 - localKickFeedbackAt < 0.35)
       me.kickT = Math.max(me.kickT || 0, 0.2);
+    // Own-ball render: the predicted local transform runs ~interpDelay ahead
+    // of the snapshot timeline the interpolated ball follows, which makes the
+    // ball trail visibly behind while dribbling. Glue it to the prediction
+    // with the server's dribble formula instead (server stays authoritative;
+    // this only affects the local render until ownership changes).
+    if (me && localPrediction && sim.ball.owner === myPlayerId) {
+      const lead = 0.5 + Math.hypot(me.vx, me.vz) * 0.045;
+      sim.ball.x = me.x + Math.cos(me.facing) * lead;
+      sim.ball.z = me.z + Math.sin(me.facing) * lead;
+      sim.ball.y = BALL_R;
+      sim.ball.vx = me.vx; sim.ball.vy = 0; sim.ball.vz = me.vz;
+    }
   }
 
   function stepLocalPrediction(raw, dt) {
@@ -423,11 +435,15 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
       p.diveT = pb.diveT; p.diveDir = pb.diveDir; p.celebrateT = pb.celebrateT;
     }
     const ba = a.b, bb = b.b;
-    sim.ball.x = ba.x + (bb.x - ba.x) * k + bb.vx * extrap;
+    // An owned ball is glued to its carrier server-side; its snapshot velocity
+    // is the per-tick snap to the dribble point, not real motion — never
+    // extrapolate with it (the carrier's own interpolation carries the ball).
+    const bExt = bb.owner == null ? extrap : 0;
+    sim.ball.x = ba.x + (bb.x - ba.x) * k + bb.vx * bExt;
     sim.ball.y = Math.max(BALL_R, ba.y + (bb.y - ba.y) * k
-      + bb.vy * extrap + 0.5 * GRAVITY * extrap * extrap);
-    sim.ball.z = ba.z + (bb.z - ba.z) * k + bb.vz * extrap;
-    sim.ball.vx = bb.vx; sim.ball.vy = bb.vy + GRAVITY * extrap; sim.ball.vz = bb.vz;
+      + bb.vy * bExt + 0.5 * GRAVITY * bExt * bExt);
+    sim.ball.z = ba.z + (bb.z - ba.z) * k + bb.vz * bExt;
+    sim.ball.vx = bb.vx; sim.ball.vy = bb.vy + GRAVITY * bExt; sim.ball.vz = bb.vz;
     sim.ball.owner = bb.owner;
 
     // ceremony: interpolate when both snapshots carry the same one. Ceremonies
