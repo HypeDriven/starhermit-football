@@ -30,7 +30,6 @@ control.up=KeyW+ArrowUp | Move up
 control.down=KeyS+ArrowDown | Move down
 control.left=KeyA+ArrowLeft | Move left
 control.right=KeyD+ArrowRight | Move right
-control.sprint=ShiftLeft+ShiftRight | Sprint
 control.pass=Space | Pass
 control.shoot=KeyJ | Shoot (hold to charge)
 control.tackle=KeyK | Slide tackle / pressure

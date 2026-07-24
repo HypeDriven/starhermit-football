@@ -527,21 +527,27 @@ function nearBall(state, p, r) {
 function doShoot(state, p, power) {
   var b = state.ball;
   var gx = attackSign(state, p.team) * state.pitch.L / 2;
-  // aim at goal mouth; spread grows with distance and weaker technique
-  var dx0 = gx - p.x;
-  var distGoal = Math.hypot(dx0, p.z);
-  var spread = (1 - (p.personality ? p.personality.dribbling : 0.5)) * 0.35
-    + (distGoal / state.pitch.L) * 0.9;
-  var aimZ = clamp((state.rng() - 0.5) * state.pitch.goalW * (0.6 + spread * 2),
-    -state.pitch.goalW * 1.4, state.pitch.goalW * 1.4);
-  var dx = gx - p.x, dz = aimZ - p.z;
+
+  // A shot primarily follows the footballer's facing. Add only a 10% assist
+  // toward a random point inside the goal, so players must actually line up
+  // their body instead of every release being magnetised onto the goal mouth.
+  var aimZ = (state.rng() - 0.5) * state.pitch.goalW * 0.9;
+  var aimY = BALL_R + state.rng() * Math.max(0, state.pitch.goalH - BALL_R) * 0.9;
+  var goalDx = gx - p.x, goalDz = aimZ - p.z;
+  var goalDist = Math.hypot(goalDx, goalDz) || 1;
+  var dx = Math.cos(p.facing) * 0.9 + (goalDx / goalDist) * 0.1;
+  var dz = Math.sin(p.facing) * 0.9 + (goalDz / goalDist) * 0.1;
   var d = Math.hypot(dx, dz) || 1;
+  dx /= d; dz /= d;
+
   var spd = 15 + power * 11;
-  var elev = 0.12 + power * 0.3 * state.rng() + (d / state.pitch.L) * 0.3;
+  var naturalElev = 0.12 + power * 0.3 * state.rng() + (goalDist / state.pitch.L) * 0.3;
+  var goalElev = clamp((aimY - b.y) / goalDist, -0.2, 0.65);
+  var elev = naturalElev * 0.9 + goalElev * 0.1;
   b.owner = null; b.lastTouch = p.id;
-  b.vx = (dx / d) * spd; b.vz = (dz / d) * spd;
+  b.vx = dx * spd; b.vz = dz * spd;
   b.vy = spd * elev * 0.55;
-  b.x = p.x + (dx / d) * 0.6; b.z = p.z + (dz / d) * 0.6; b.y = Math.max(b.y, 0.15);
+  b.x = p.x + dx * 0.6; b.z = p.z + dz * 0.6; b.y = Math.max(b.y, 0.15);
   p.kickT = 0.4;
   state.stats.shots[p.team]++;
   push(state, { type: 'kick', player: p.id, power: 0.4 + power * 0.6, kind: 'shoot' });

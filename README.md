@@ -39,7 +39,7 @@ The game is served as a static site — there is no build step.
 |---|---|---|
 | Move | WASD / arrows | left joystick (full tilt = sprint) |
 | Camera | Click pitch, then move mouse | automatic ball-follow camera |
-| Sprint | Shift (hold, or enable Toggle sprint) | joystick to the edge |
+| Sprint | automatic after a brief acceleration | joystick to the edge |
 | Pass | Space / right mouse | PASS button |
 | Shoot | J / left mouse (hold to charge) | SHOOT (hold to charge) |
 | Tackle / GK dive | K / middle mouse | TACKLE button |

@@ -13,11 +13,10 @@ export function createInput() {
   // ── keyboard ──
   // Actions the sim understands; the manifest declares the same ids (starhermit.txt
   // control.* lines), so platform bindings map 1:1 onto these.
-  const ACTIONS = new Set(['up', 'down', 'left', 'right', 'sprint', 'pass', 'shoot', 'tackle']);
+  const ACTIONS = new Set(['up', 'down', 'left', 'right', 'pass', 'shoot', 'tackle']);
   const DEFAULT_KEYMAP = {
     KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down',
     KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
-    ShiftLeft: 'sprint', ShiftRight: 'sprint',
     Space: 'pass', KeyJ: 'shoot', KeyK: 'tackle',
   };
   let keymap = { ...DEFAULT_KEYMAP };
@@ -36,8 +35,7 @@ export function createInput() {
   let passEdge = false, tackleEdge = false;
   let shootHeld = false, shootCharge = 0, shootReleased = 0;
   let keyboardX = 0, keyboardY = 0, keyboardMoveYaw = null, needsMoveYaw = true;
-  let sprintToggle = localStorage.getItem('starhermit-football-toggle-sprint') === 'true';
-  let sprintLatched = false;
+  let keyboardMoveTime = 0;
 
   function releaseShoot() {
     if (!shootHeld) return;
@@ -60,7 +58,6 @@ export function createInput() {
     if (k === 'pass') passEdge = true;
     if (k === 'tackle') tackleEdge = true;
     if (k === 'shoot') { shootHeld = true; shootCharge = 0; }
-    if (k === 'sprint' && sprintToggle) sprintLatched = !sprintLatched;
   });
   addEventListener('keyup', (e) => {
     const k = keymap[e.code];
@@ -79,7 +76,7 @@ export function createInput() {
     keyboardX = keyboardY = 0;
     keyboardMoveYaw = null;
     needsMoveYaw = true;
-    sprintLatched = false;
+    keyboardMoveTime = 0;
     passEdge = tackleEdge = false;
     cancelShoot();
   }
@@ -193,7 +190,9 @@ export function createInput() {
     }
     if (!hasKeyboardMove) {
       needsMoveYaw = true;
-      sprintLatched = false;
+      keyboardMoveTime = 0;
+    } else {
+      keyboardMoveTime += Math.max(0, dt);
     }
     const steerK = 1 - Math.exp(-16 * Math.max(0, dt));
     keyboardX += (targetX - keyboardX) * steerK;
@@ -219,7 +218,9 @@ export function createInput() {
 
     const state = {
       mx, mz,
-      sprint: (sprintToggle ? sprintLatched : keys.has('sprint')) || touch.sprint,
+      // Desktop movement naturally ramps from a run to sprint; no modifier or
+      // sticky toggle is needed. The sim's acceleration smooths the speed rise.
+      sprint: (!isTouch && hasKeyboardMove && keyboardMoveTime >= 0.2) || touch.sprint,
       pass: passEdge,
       tackle: tackleEdge,
       shoot: shootReleased,
@@ -240,12 +241,6 @@ export function createInput() {
       const delta = { x: lookDX, y: lookDY };
       lookDX = lookDY = 0;
       return delta;
-    },
-    get sprintToggle() { return sprintToggle; },
-    setSprintToggle(enabled) {
-      sprintToggle = !!enabled;
-      sprintLatched = false;
-      localStorage.setItem('starhermit-football-toggle-sprint', String(sprintToggle));
     },
     showTouchUi(show) {
       gameplayActive = show;

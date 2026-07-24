@@ -37,7 +37,11 @@ export function createControlsScreen({ input, audio, onBack }) {
     listEl.innerHTML = '<div class="muted">Loading controls…</div>';
     try {
       const dto = await api.getControls();
-      actions = (dto.actions || []).map((a) => ({ ...a, codes: [...a.codes] }));
+      // Sprint is automatic on desktop. Hide a stale server-side declaration
+      // too, so older deployment metadata cannot put Shift back in this UI.
+      actions = (dto.actions || [])
+        .filter((a) => a.action !== 'sprint')
+        .map((a) => ({ ...a, codes: [...a.codes] }));
       render();
       hintEl.textContent = 'Click a key to rebind it. Esc cancels. In a match, click the pitch for mouse camera; left mouse shoots, right passes, middle tackles.';
     } catch (e) {
@@ -137,7 +141,9 @@ export function createControlsScreen({ input, audio, onBack }) {
       const bindings = {};
       for (const a of actions) if (!isDefault(a)) bindings[a.action] = a.codes;
       const dto = await api.putControls(bindings);
-      actions = (dto.actions || []).map((a) => ({ ...a, codes: [...a.codes] }));
+      actions = (dto.actions || [])
+        .filter((a) => a.action !== 'sprint')
+        .map((a) => ({ ...a, codes: [...a.codes] }));
       input.setBindings(actions);
       hintEl.textContent = 'Saved.';
     } catch (e) {

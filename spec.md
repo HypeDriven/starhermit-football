@@ -257,11 +257,10 @@ come from the server-assigned roster. Tags fade beyond ~40 m.
 ### 5.6 Controls
 
 Desktop:
-- **WASD / arrows** move (camera-relative), **Shift** sprint, **Space**
-  pass / **J** shoot (hold to charge, release to strike; power bar),
-  **K** slide tackle / pressure, **E** switch... (call for ball as AI teammate
-  passes to you automatically — no switching: you always control your own
-  footballer).
+- **WASD / arrows** move (camera-relative) and quickly accelerate into a sprint;
+  no sprint modifier or toggle is required. **Space** passes, **J** shoots (hold
+  to charge, release to strike; power bar), and **K** slide tackles / pressures.
+  You always control your own footballer.
 
 Mobile:
 - Left virtual **joystick** (dynamic origin, analog move + sprint at full
@@ -285,8 +284,8 @@ Remappable desktop bindings:
   defaults; touch devices never fetch (the joystick/button UI is not
   remappable).
 - Remapping only changes which `KeyboardEvent.code`s trigger each of the
-  eight actions (`up`/`down`/`left`/`right`/`sprint`/`pass`/`shoot`/
-  `tackle`); movement stays camera-relative and action semantics (edge
+  seven actions (`up`/`down`/`left`/`right`/`pass`/`shoot`/`tackle`);
+  movement stays camera-relative and action semantics (edge
   triggers, shoot charge-and-release) are unchanged. `preventDefault()`
   applies exactly to the mapped codes, as today.
 
