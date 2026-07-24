@@ -171,8 +171,11 @@ function takeAiName(rng) {
 function pitchFor(teamSize) {
   var L = 40 + (teamSize - 1) * 7.2;            // 40 m (1v1) … 112 m (11v11)
   var W = L * 0.62;
-  var goalW = Math.min(7.32, Math.max(2.0, W * 0.10));
-  var goalH = goalW * 0.33;
+  // Goals scale with pitch width but never below futsal size (3 x 2 m) so a
+  // ~1.85 m player always fits under the bar; full-size pitches get the
+  // regulation 7.32 x 2.44 m frame.
+  var goalW = Math.min(7.32, Math.max(3.0, 7.32 * (W / 68)));
+  var goalH = Math.min(2.44, Math.max(2.0, goalW / 3));
   var boxD = L * 0.14, boxW = W * 0.55;         // penalty box depth/width
   return { L: L, W: W, goalW: goalW, goalH: goalH, boxD: boxD, boxW: boxW };
 }
