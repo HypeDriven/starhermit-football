@@ -63,6 +63,8 @@ export function createInput() {
   }
 
   addEventListener('keydown', (e) => {
+    // Typing in a form field (match chat) must not move the player.
+    if (document.activeElement?.matches?.('input, textarea')) return;
     const k = keymap[e.code];
     if (!k) return;
     e.preventDefault();
@@ -94,6 +96,10 @@ export function createInput() {
   }
   addEventListener('blur', clearDesktopInput);
   document.addEventListener('visibilitychange', () => { if (document.hidden) clearDesktopInput(); });
+  // A field taking focus (match chat) drops held keys so a run doesn't stick.
+  document.addEventListener('focusin', (e) => {
+    if (e.target?.matches?.('input, textarea')) clearDesktopInput();
+  });
 
   // ── touch ──
   const joy = { active: false, id: -1, x: 0, y: 0, cx: 0, cy: 0 };

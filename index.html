@@ -6,7 +6,7 @@
 <title>StarHermit Football</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <!-- Keep this version in sync with local ES-module imports when deploying. -->
-<link rel="stylesheet" href="css/style.css?v=3">
+<link rel="stylesheet" href="css/style.css?v=4">
 <script type="importmap">
 { "imports": { "three": "./vendor/three/three.module.min.js" } }
 </script>
@@ -26,6 +26,17 @@
   <div id="power-bar" class="hidden"><div id="power-fill"></div></div>
   <div id="event-banner" class="hidden"></div>
   <div id="mouse-hint" class="hidden">CLICK THE PITCH FOR MOUSE CAMERA · LEFT SHOOT · RIGHT PASS · MIDDLE TACKLE</div>
+</div>
+
+<!-- ══ Replay viewer controls ══ -->
+<div id="replay-ui" class="hidden">
+  <div id="replay-msg" class="hidden"></div>
+  <div id="replay-bar">
+    <button id="btn-replay-play" class="mbtn">PAUSE</button>
+    <input type="range" id="replay-seek" min="0" max="1" value="0">
+    <span id="replay-note" class="muted small"></span>
+    <button id="btn-replay-exit" class="mbtn">EXIT</button>
+  </div>
 </div>
 
 <!-- ══ Touch controls ══ -->
@@ -49,6 +60,8 @@
       <button id="btn-lobby" class="mbtn">CREATE LOBBY</button>
       <button id="btn-practice" class="mbtn">PRACTICE vs AI</button>
       <button id="btn-controls" class="mbtn">CONTROLS</button>
+      <button id="btn-leaderboard" class="mbtn">LEADERBOARD</button>
+      <button id="btn-replays" class="mbtn">REPLAYS</button>
     </div>
     <div id="menu-team-size">Team size
       <select id="team-size"></select> per side
@@ -65,6 +78,7 @@
     <div id="lobby-roster"></div>
     <div class="menu-buttons">
       <button id="btn-invite" class="mbtn">INVITE FRIENDS</button>
+      <button id="btn-share" class="mbtn">COPY INVITE LINK</button>
       <button id="btn-find" class="mbtn primary">FIND MATCH</button>
       <button id="btn-leave" class="mbtn danger">LEAVE</button>
     </div>
@@ -86,6 +100,28 @@
       <button id="btn-controls-reset" class="mbtn">RESET ALL</button>
       <button id="btn-controls-back" class="mbtn">BACK</button>
     </div>
+  </div>
+
+  <div id="screen-leaderboard" class="screen hidden">
+    <h2>LEADERBOARD</h2>
+    <div id="lb-rating"></div>
+    <label class="menu-check">
+      <input type="checkbox" id="lb-friends-only"> Friends only
+    </label>
+    <div id="lb-list"></div>
+    <div class="muted small" id="lb-hint"></div>
+    <div id="lb-pager">
+      <button id="btn-lb-prev" class="mbtn">PREV</button>
+      <button id="btn-lb-next" class="mbtn">NEXT</button>
+    </div>
+    <div class="menu-buttons"><button id="btn-lb-back" class="mbtn">BACK</button></div>
+  </div>
+
+  <div id="screen-replays" class="screen hidden">
+    <h2>REPLAYS</h2>
+    <div id="replays-list"></div>
+    <div class="muted small" id="replays-hint"></div>
+    <div class="menu-buttons"><button id="btn-replays-back" class="mbtn">BACK</button></div>
   </div>
 
   <div id="screen-result" class="screen hidden">
@@ -119,7 +155,7 @@
 </div>
 
 <!-- Shared sim core + server script: classic script, must load before modules -->
-<script src="server.js?v=3"></script>
-<script type="module" src="js/main.js?v=3"></script>
+<script src="server.js?v=4"></script>
+<script type="module" src="js/main.js?v=4"></script>
 </body>
 </html>

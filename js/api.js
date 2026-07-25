@@ -108,11 +108,31 @@ export const setSeats = (id, seats) => req('POST', `/api/v1/realtime/rooms/${id}
 export const quickJoin = () => req('POST', '/api/v1/realtime/rooms/quick-join', {});
 export const startRoom = (id) => req('POST', `/api/v1/realtime/rooms/${id}/start`);
 export const leaveRoom = (id) => req('POST', `/api/v1/realtime/rooms/${id}/leave`);
-export const submitResult = (id, result) => req('POST', `/api/v1/realtime/rooms/${id}/result`, result);
 
 // ── game sessions ──
 // Detail includes chatConversationId — the bridge from a match to its voice room.
 export const getSession = (sessionId) => req('GET', `/api/v1/games/${slug}/sessions/${sessionId}`);
+
+// ── leaderboards ──
+// Only set params are sent; `score` on an entry is the player's rating (elo).
+export const getLeaderboardEntries = (id, { friendsOnly, page, pageSize } = {}) => {
+  const q = new URLSearchParams();
+  if (friendsOnly !== undefined) q.set('friendsOnly', friendsOnly);
+  if (page !== undefined) q.set('page', page);
+  if (pageSize !== undefined) q.set('pageSize', pageSize);
+  const s = q.toString();
+  return req('GET', `/api/v1/leaderboards/${id}/entries${s ? `?${s}` : ''}`);
+};
+
+// ── replays ──
+export const getMyReplays = (limit = 20) => req('GET', `/api/v1/games/${slug}/replays/mine?limit=${limit}`);
+export const getReplay = (sessionId) => req('GET', `/api/v1/games/${slug}/replays/${sessionId}`);
+
+// ── chat ──
+export const getChatMessages = (conversationId, page = 1, pageSize = 50) =>
+  req('GET', `/api/v1/chat/conversations/${conversationId}/messages?page=${page}&pageSize=${pageSize}`);
+export const sendChatMessage = (conversationId, content) =>
+  req('POST', `/api/v1/chat/conversations/${conversationId}/messages`, { content });
 
 // ── voice rooms (platform voice relay; used for WebRTC signaling) ──
 export const listVoiceRooms = (conversationId) => req('GET', `/api/v1/voice/rooms?conversationId=${encodeURIComponent(conversationId)}`);

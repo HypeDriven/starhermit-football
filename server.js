@@ -40,6 +40,12 @@
 // Returning `result` ends the session:
 //   full time:        { score: [a, b], winner: -1|0|1, draw: bool }
 //   abandoned (all humans gone): { draw: true, score: [a, b] }
+// A full-time return also carries ratings (skipped when either team has no
+// humans, and never for an abandoned draw):
+//   playerStates: { "<userId>": { elo, wins, losses, draws } }  // full docs
+//   eloUpdates:   { "<userId>": newAbsoluteElo }  // platform leaderboard
+// Ratings are standard Elo, K=32, on team averages over each team's humans;
+// the same delta applies to every human on a team (min elo 100).
 //
 // sessionState = {
 //   v: 1,
@@ -51,6 +57,16 @@
 //   offlineSince: { "<userId>": now },  // ms, offline-grace tracking
 //   pendingCeremonies: [{ kind, playerId, inName }],
 //   ended: bool,
+//   playerDocs: { "<userId>": { elo, wins, losses, draws } },  // human seats
+//   summary: { status: 'active'|'finished', moveCount },  // sessions/mine
+//   replay: {                            // archived with the session as replay
+//     v: 1, every: 15,                   // frame cadence (ticks; 2 fps @30 Hz)
+//     teamSize, halfLength,
+//     roster: [{ pid, team, name, ai }], // one entry per seat, pid order
+//     frames: [{ t, sc, ph, b, pl }],    // b/pl mirror the snap layout exactly
+//     evs: [{ t, ev }],                  // goal/halftime/kickoff/fulltime only
+//     truncated: bool,                   // true once frames hit the 900 cap
+//   },
 // }
 //
 // ── Client -> server messages ───────────────────────────────────────────────
@@ -1272,11 +1288,90 @@ function rosterNameFor(ctx, userId) {
   return null;
 }
 
-function drainEvents(match, out) {
+function drainEvents(match, out, state) {
   for (var i = 0; i < match.events.length; i++) {
     out.push({ to: 'all', data: { type: 'ev', ev: match.events[i] } });
+    if (state) recordReplayEv(state, match.events[i]);
   }
   match.events.length = 0;
+}
+
+// ── Replay recording (stored in sessionState, never broadcast) ──────────────
+
+var REPLAY_FRAME_EVERY = 15;   // 2 frames/sec at 30 Hz
+var REPLAY_MAX_FRAMES = 900;   // ~2x3 min match at 2 fps is ~720 frames
+var REPLAY_EV_TYPES = { goal: 1, halftime: 1, kickoff: 1, fulltime: 1 };
+
+function recordReplayEv(state, ev) {
+  var r = state.replay;
+  if (!r || !ev || !REPLAY_EV_TYPES[ev.type]) return;
+  r.evs.push({ t: state.tick, ev: ev });
+}
+
+function recordReplayFrame(state) {
+  var r = state.replay;
+  if (!r || state.tick % r.every !== 0) return;
+  if (r.frames.length >= REPLAY_MAX_FRAMES) { r.truncated = true; return; }
+  var m = state.match;
+  // b/pl mirror buildSnapshot's layout (and r2 rounding) exactly, so the
+  // replay viewer can reuse the client's snapshot parsing.
+  var pl = [];
+  for (var i = 0; i < m.players.length; i++) {
+    var p = m.players[i];
+    pl.push([p.id, p.team, r2(p.x), r2(p.z), r2(p.vx), r2(p.vz), r2(p.facing),
+      p.anim, r2(p.animSpeed), r2(p.phase), r2(p.kickT), r2(p.tackleT), r2(p.stunT),
+      r2(p.diveT), r2(p.diveDir), r2(p.celebrateT), p.isAi ? 1 : 0, p.name,
+      r2(p.y || 0)]);
+  }
+  var b = m.ball;
+  r.frames.push({
+    t: state.tick,
+    sc: [m.score[0], m.score[1]],
+    ph: m.phase,
+    b: [r2(b.x), r2(b.y), r2(b.z), r2(b.vx), r2(b.vy), r2(b.vz), b.owner == null ? -1 : b.owner],
+    pl: pl,
+  });
+}
+
+// ── Elo ratings ─────────────────────────────────────────────────────────────
+
+var ELO_DEFAULT = 1200;
+var ELO_K = 32;
+var ELO_MIN = 100;
+
+// Standard Elo on team averages over each team's HUMANS; the same delta
+// applies to every human on a team. Returns null when either team has no
+// humans (match is unrated).
+function computeRatings(state, winner) {
+  var docs = state.playerDocs;
+  if (!docs) return null;
+  var teamSize = state.match.teamSize;
+  var sums = [0, 0], counts = [0, 0], uids = [[], []];
+  for (var pid in state.seats) {
+    var uid = state.seats[pid].userId;
+    if (!uid || !docs[uid]) continue;
+    var team = (+pid) < teamSize ? 0 : 1;
+    sums[team] += docs[uid].elo;
+    counts[team]++;
+    uids[team].push(uid);
+  }
+  if (!counts[0] || !counts[1]) return null;
+  var avg = [sums[0] / counts[0], sums[1] / counts[1]];
+  var e0 = 1 / (1 + Math.pow(10, (avg[1] - avg[0]) / 400));
+  var s0 = winner === -1 ? 0.5 : (winner === 0 ? 1 : 0);
+  var deltas = [Math.round(ELO_K * (s0 - e0)), Math.round(ELO_K * ((1 - s0) - (1 - e0)))];
+  var eloUpdates = {};
+  for (var t = 0; t < 2; t++) {
+    for (var i = 0; i < uids[t].length; i++) {
+      var d = docs[uids[t][i]];
+      d.elo = Math.max(ELO_MIN, d.elo + deltas[t]);
+      if (winner === -1) d.draws++;
+      else if (winner === t) d.wins++;
+      else d.losses++;
+      eloUpdates[uids[t][i]] = d.elo;
+    }
+  }
+  return { playerStates: docs, eloUpdates: eloUpdates };
 }
 
 function pendingForSeat(state, pid, kind) {
@@ -1438,6 +1533,7 @@ function rehydrate(state) {
   if (!state.match.aiPlans) state.match.aiPlans = {};
   if (state.tick == null) state.tick = 0;
   if (state.serverNow == null) state.serverNow = 0;
+  if (!state.summary) state.summary = { status: state.ended ? 'finished' : 'active', moveCount: state.tick };
 }
 
 function storeRealtimeInput(state, from, data, now) {
@@ -1489,6 +1585,23 @@ globalThis.game = {
       }
     }
     var match = createMatch({ teamSize: teamSize, roster: simRoster, seed: seed });
+    var stored = ctx.playerStates || {};
+    var playerDocs = {};
+    var replayRoster = [];
+    for (var rp = 0; rp < teamSize * 2; rp++) {
+      replayRoster.push({
+        pid: rp, team: rp < teamSize ? 0 : 1,
+        name: simRoster[rp].name, ai: simRoster[rp].isAi,
+      });
+      var uid = simRoster[rp].userId;
+      if (uid && !simRoster[rp].isAi) {
+        var src = stored[uid] || {};
+        playerDocs[uid] = {
+          elo: typeof src.elo === 'number' ? src.elo : ELO_DEFAULT,
+          wins: src.wins | 0, losses: src.losses | 0, draws: src.draws | 0,
+        };
+      }
+    }
     var state = {
       v: 1,
       match: match,
@@ -1501,6 +1614,13 @@ globalThis.game = {
       offlineSince: {},
       pendingCeremonies: [],
       ended: false,
+      playerDocs: playerDocs,
+      summary: { status: 'active', moveCount: 0 },
+      replay: {
+        v: 1, every: REPLAY_FRAME_EVERY,
+        teamSize: teamSize, halfLength: match.halfLength,
+        roster: replayRoster, frames: [], evs: [], truncated: false,
+      },
     };
     return { ok: true, sessionState: state, broadcast: [{ to: 'all', data: buildSnapshot(state) }] };
   },
@@ -1543,6 +1663,7 @@ globalThis.game = {
     state.lastTickNow = ctx.now;
     state.serverNow = ctx.now;
     state.tick++;
+    state.summary.moveCount = state.tick;
 
     // The platform mailbox supplies at most one latest input per authenticated
     // sender each tick, avoiding a complete script/DB transaction per frame.
@@ -1556,7 +1677,7 @@ globalThis.game = {
     if (!state.ended) {
       reconcilePresence(ctx, state);
       maybeStartCeremony(state);
-      drainEvents(match, bc);
+      drainEvents(match, bc, state);
 
       // inputs: fresh human input for human seats, AI for the rest; only
       // open play consumes inputs (other phases ignore them — save the CPU)
@@ -1584,13 +1705,16 @@ globalThis.game = {
         }
       }
       stepMatch(match, inputs, dt);
-      drainEvents(match, bc);
+      drainEvents(match, bc, state);
       maybeStartCeremony(state); // e.g. a goal celebration just ended
-      drainEvents(match, bc);
+      drainEvents(match, bc, state);
+
+      recordReplayFrame(state);
 
       // all humans gone -> abandon as a draw, platform closes the room
       if (match.phase !== 'end' && allHumansGone(ctx, state)) {
         state.ended = true;
+        state.summary.status = 'finished';
         bc.push({ to: 'all', data: { type: 'ev', ev: { type: 'abandoned-draw' } } });
         if (ctx.now - state.lastSnapAt >= SNAP_INTERVAL_MS) {
           state.lastSnapAt = ctx.now;
@@ -1605,15 +1729,22 @@ globalThis.game = {
       // full time (the 'fulltime' event went out in the drained events above)
       if (match.phase === 'end') {
         state.ended = true;
+        state.summary.status = 'finished';
         var winner = match.score[0] === match.score[1] ? -1 : (match.score[0] > match.score[1] ? 0 : 1);
         if (ctx.now - state.lastSnapAt >= SNAP_INTERVAL_MS) {
           state.lastSnapAt = ctx.now;
           bc.push({ to: 'all', data: buildSnapshot(state) });
         }
-        return {
+        var ratings = computeRatings(state, winner);
+        var done = {
           ok: true, sessionState: state, broadcast: bc,
           result: { score: [match.score[0], match.score[1]], winner: winner, draw: winner === -1 },
         };
+        if (ratings) {
+          done.playerStates = ratings.playerStates;
+          done.eloUpdates = ratings.eloUpdates;
+        }
+        return done;
       }
     }
 

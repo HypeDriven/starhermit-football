@@ -198,6 +198,31 @@ migration and host rejoin recovery machinery of the old design is gone.
   `abandoned-draw`, returns `result { draw: true, score }`, and the platform
   finishes the session and closes the room.
 
+### 4.6 Ratings, session summary & replay
+
+- **Elo**: at full time the script rates the match itself — standard Elo,
+  K=32, computed on each team's **average rating over its humans only**;
+  every human on a team gets the same delta (min rating 100) plus a
+  win/loss/draw increment. New players default to 1200 with zeroed stats. The
+  full-time return carries full `playerStates` docs and `eloUpdates`
+  (`userId → new absolute rating`, the leaderboard channel). Unrated cases:
+  either team has zero humans (e.g. vs pure AI), and abandoned draws — both
+  return `result` alone.
+- **Session summary**: `sessionState.summary = { status, moveCount }` —
+  `active`/`finished`, `moveCount` mirrors the sim tick. This backs
+  `GET sessions/mine`. No `turnPlayerId`/`deadline` (turn-based concepts).
+- **Replay**: the platform archives the final `sessionState` as the session's
+  replay, so the script embeds one at `sessionState.replay`:
+  `{ v: 1, every: 15, teamSize, halfLength, roster, frames, evs, truncated }`.
+  `roster` is one static `{ pid, team, name, ai }` per seat in player-id
+  order. A frame is appended every 15 ticks (2 fps):
+  `{ t, sc: [home, away], ph, b, pl }` where `b`/`pl` mirror the broadcast
+  snapshot's ball/player arrays exactly (same field order, same 2-decimal
+  rounding), so the viewer reuses the client's snapshot parsing. `evs` holds
+  `{ t, ev }` for the presentation events only (`goal`, `halftime`,
+  `kickoff`, `fulltime`). Frames cap at 900 (`truncated: true` beyond that) —
+  a default 2×3 min match is ~720 frames.
+
 ## 5. Client: rendering & presentation
 
 Static ES-module site, no build step (same pattern as starhermit-chess).

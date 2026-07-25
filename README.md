@@ -31,7 +31,14 @@ The game is served as a static site — there is no build step.
 - **Quick Play** — joins (or creates) an open room; a 30-second window fills
   with other players, then empty seats become AI with random names.
 - **Create Lobby** — invite up to 10 StarHermit friends, then Find Match:
-  best-effort matchmaking fills the rest, AI backfills after 30 s.
+  best-effort matchmaking fills the rest, AI backfills after 30 s. Or copy a
+  shareable invite link — anyone who opens it can sign in, auto-friend you,
+  and get a game invite back.
+- **Leaderboard** — your Elo rating and the platform-wide ranked list, with
+  paging and a friends-only filter.
+- **Replays** — menu → REPLAYS lists your finished online matches; WATCH opens
+  a 3D playback of the recorded match (play/pause, seek, ball-follow camera).
+- **In-match text chat** — press T during an online match; Enter sends, Esc closes.
 
 ## Controls
 

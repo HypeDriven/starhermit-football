@@ -1,15 +1,18 @@
 // main.js — boot, screens state machine, renderer, match lifecycle.
 import * as THREE from 'three';
-import * as api from './api.js?v=3';
-import { createAudio } from './game/audio.js?v=3';
-import { createInput } from './game/input.js?v=3';
-import { createHud } from './hud.js?v=3';
-import { createMatchController } from './match.js?v=3';
-import { createLobby } from './lobby.js?v=3';
-import { createNetClient, createGameClient } from './net.js?v=3';
-import { createMenuScene } from './menuScene.js?v=3';
-import { createVoice } from './voice.js?v=3';
-import { createControlsScreen } from './controls.js?v=3';
+import * as api from './api.js?v=4';
+import { createAudio } from './game/audio.js?v=4';
+import { createInput } from './game/input.js?v=4';
+import { createHud } from './hud.js?v=4';
+import { createMatchController } from './match.js?v=4';
+import { createLobby } from './lobby.js?v=4';
+import { createNetClient, createGameClient } from './net.js?v=4';
+import { createMenuScene } from './menuScene.js?v=4';
+import { createVoice } from './voice.js?v=4';
+import { createControlsScreen } from './controls.js?v=4';
+import { createLeaderboardScreen } from './leaderboard.js?v=4';
+import { createReplaysScreen } from './replays.js?v=4';
+import { createReplayViewer } from './replayview.js?v=4';
 
 const $ = (id) => document.getElementById(id);
 
@@ -42,12 +45,13 @@ const voice = createVoice();
 
 let match = null;
 let lobby = null;
+let replay = null;
 let teamSize = 5;
 let activeRoom = null;   // room the server says we're still a participant of
 let matchRoom = null;    // room the current match is played in (for Esc-leave)
 
 // ── screens ──
-const screens = ['screen-menu', 'screen-lobby', 'screen-invite', 'screen-controls', 'screen-result'];
+const screens = ['screen-menu', 'screen-lobby', 'screen-invite', 'screen-controls', 'screen-leaderboard', 'screen-replays', 'screen-result'];
 function showScreen(id) {
   for (const s of screens) $(s).classList.toggle('hidden', s !== id);
   if (!id) for (const s of screens) $(s).classList.add('hidden');
@@ -167,8 +171,19 @@ function setupMenu() {
   if (input.isTouch || !auth.online) controlsBtn.classList.add('hidden');
   controlsBtn.onclick = () => { audio.ui(); showScreen('screen-controls'); controlsScreen.open(); };
 
+  // Platform leaderboard (rating + ranked entries) — needs a launch token.
+  const lbBtn = $('btn-leaderboard');
+  if (!auth.online) lbBtn.classList.add('hidden');
+  lbBtn.onclick = () => { audio.ui(); showScreen('screen-leaderboard'); leaderboardScreen.open(); };
+
+  // Archived replays of my online matches — also platform-only.
+  const replaysBtn = $('btn-replays');
+  if (!auth.online) replaysBtn.classList.add('hidden');
+  replaysBtn.onclick = () => { audio.ui(); showScreen('screen-replays'); replaysScreen.open(); };
+
   $('btn-rejoin').onclick = () => { audio.ui(); rejoinActiveRoom(); };
   $('btn-invite').onclick = () => { audio.ui(); lobby.inviteFriends(); };
+  $('btn-share').onclick = () => { audio.ui(); lobby.copyInviteLink(); };
   $('btn-invite-back').onclick = () => { audio.ui(); $('screen-invite').classList.add('hidden'); };
   $('btn-find').onclick = () => { audio.ui(); lobby.findMatch().catch((e) => setStatus(e.message)); };
   $('btn-leave').onclick = () => { audio.ui(); lobby.leave(); };
@@ -268,7 +283,7 @@ async function onMatchReady(room, { isRejoin = false } = {}) {
   }).catch(() => { /* ancillary — snapshots carry the same data */ });
 
   await m.startFromRoom({
-    room, teamSize: ts, myUserId: me.userId,
+    room, teamSize: ts, myUserId: me.userId, sessionId,
     netClient: gameNet, lobbyNetClient: lobbyNet, isRejoin,
   });
 
@@ -312,9 +327,29 @@ function disposeMatch() {
   if (m) m.dispose();
 }
 
+// ── replay lifecycle ──
+// Third render-loop mode alongside menu backdrop and match: the menu scene is
+// stopped and the viewer owns the scene until exit, which returns to the list.
+function openReplay(sessionId) {
+  menuScene.stop();
+  showScreen(null);
+  replay = createReplayViewer({ scene, camera, hud, onExit: exitReplay });
+  replay.load(sessionId).catch((e) => {
+    console.error('replay load failed', e);
+    exitReplay();
+  });
+}
+
+function exitReplay() {
+  if (replay) { replay.dispose(); replay = null; }
+  menuScene.start();
+  showScreen('screen-replays');
+}
+
 // ── in-match leave (Esc) ──
 addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  if (document.activeElement?.matches?.('input, textarea')) return; // chat input handles Esc itself
   // First Escape releases desktop mouse-look. A second Escape opens leave.
   if (document.pointerLockElement === canvas) return;
   if (!match || match.phase === 'done' || !matchRoom) return;
@@ -338,6 +373,8 @@ lobby = createLobby({
   setStatus,
 });
 const controlsScreen = createControlsScreen({ input, audio, onBack: () => showScreen('screen-menu') });
+const leaderboardScreen = createLeaderboardScreen({ audio, onBack: () => showScreen('screen-menu') });
+const replaysScreen = createReplaysScreen({ audio, onWatch: openReplay, onBack: () => showScreen('screen-menu') });
 showScreen('screen-menu');
 api.resolveUsername().finally(() => {
   setupMenu();
@@ -361,6 +398,10 @@ function loop() {
   if (match) {
     match.update(dt);
     voice.updatePositions(dt, match.sim?.players, match.myPlayerId);
+  } else if (replay) {
+    // a viewer error must never wedge the menu/match modes — bail out cleanly
+    try { replay.update(dt); }
+    catch (e) { console.error('replay error', e); exitReplay(); }
   } else {
     menuScene.update(dt);
   }

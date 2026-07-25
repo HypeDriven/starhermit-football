@@ -11,12 +11,14 @@ import * as THREE from 'three';
 import {
   createMatch, stepMatch, takeAiName, makeRng, resetKickoff,
   WALK_SPEED, RUN_SPEED, SPRINT_SPEED, TURN_RATE, BALL_SLOWDOWN, BALL_R, GRAVITY,
-} from './game/sim.js?v=3';
-import { computeAiInput, clearAiPlans } from './game/ai.js?v=3';
-import { buildStadium } from './world/stadium.js?v=3';
-import { createPlayerMesh } from './world/player.js?v=3';
-import { createCeremonyViews } from './world/officials.js?v=3';
-import { createFollowCamera } from './game/camera.js?v=3';
+} from './game/sim.js?v=4';
+import { computeAiInput, clearAiPlans } from './game/ai.js?v=4';
+import { buildStadium } from './world/stadium.js?v=4';
+import { createPlayerMesh } from './world/player.js?v=4';
+import { createCeremonyViews } from './world/officials.js?v=4';
+import { createFollowCamera } from './game/camera.js?v=4';
+import { createMatchChat } from './chat.js?v=4';
+import { parsePlayerRow, parseBallRow } from './snapformat.js?v=4';
 
 const TEAM_KITS = [
   { shirt: '#1f5fb4', shorts: '#f2f2f2', socks: '#1f5fb4', gk: '#e67e22', plate: '#1f5fb4', label: 'BLUE' },
@@ -45,6 +47,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
   let acc = 0;
   let net = null;               // games-socket client (online)
   let lobbyNet = null;          // realtime-rooms client (roster pushes)
+  let chat = null;              // in-match text chat (online only)
   let inputTimer = 0, inputSeq = 0;
   let snaps = [];               // parsed snapshot buffer, oldest first
   let interpDelay = 0.075;
@@ -142,11 +145,12 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     beginMatch();
   }
 
-  function startFromRoom({ room, teamSize, myUserId, netClient, lobbyNetClient, isRejoin = false }) {
+  function startFromRoom({ room, teamSize, myUserId, sessionId, netClient, lobbyNetClient, isRejoin = false }) {
     cleanup();
     net = netClient;
     lobbyNet = lobbyNetClient ?? null;
     mode = 'online';
+    chat = createMatchChat({ sessionId, myUserId }); // best-effort; never blocks the match
     // roster: sort participants into team/slot seats
     const seats = new Array(teamSize * 2).fill(null);
     for (const part of room.participants) {
@@ -177,6 +181,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     }
     hud.showHud(true);
     hud.setTeamNames(TEAM_KITS[0].label, TEAM_KITS[1].label);
+    if (chat) { chat.start(); chat.setVisible(true); }
     input.showTouchUi(true);
     audio.crowd.setExcitement(0.6);
     stadium.crowd.setExcitement(0.6);
@@ -568,17 +573,12 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
   }
 
   function parseSnap(snap) {
-    const pl = snap.pl.map((e) => ({
-      id: e[0], team: e[1], x: e[2], z: e[3], vx: e[4], vz: e[5], facing: e[6],
-      anim: e[7], animSpeed: e[8], phase: e[9], kickT: e[10], tackleT: e[11],
-      stunT: e[12], diveT: e[13], diveDir: e[14], celebrateT: e[15],
-      isAi: e[16], name: e[17], y: e[18] || 0,
-    }));
-    const b = snap.b;
+    // b/pl field layout lives in snapformat.js (shared with the replay viewer).
+    const pl = snap.pl.map(parsePlayerRow);
     return {
       at: 0, arrived: 0, tick: snap.tick || 0, ack: snap.ack || [],
       t: snap.t, h: snap.h, ph: snap.ph, sc: snap.sc, kt: snap.kt,
-      b: { x: b[0], y: b[1], z: b[2], vx: b[3], vy: b[4], vz: b[5], owner: b[6] >= 0 ? b[6] : null },
+      b: parseBallRow(snap.b),
       pl, cer: snap.cer || null,
     };
   }
@@ -767,6 +767,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
 
   function cleanup() {
     disposed = false;
+    if (chat) { chat.dispose(); chat = null; }
     for (const v of views) v.dispose();
     views = [];
     if (stadium) { stadium.dispose(); stadium = null; }

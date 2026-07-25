@@ -1,8 +1,8 @@
 // lobby.js — lobby screen: create/invite/open/quick-join against the
 // platform's Realtime Rooms API (spec.md §8). Pure DOM + api.js; main.js
 // drives the transitions.
-import * as api from './api.js?v=3';
-import { roleForSlot } from './game/sim.js?v=3';
+import * as api from './api.js?v=4';
+import { roleForSlot } from './game/sim.js?v=4';
 
 const ROLE_NAMES = { GK: 'Goalkeeper', DF: 'Defender', MF: 'Midfielder', FW: 'Forward' };
 
@@ -84,6 +84,23 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
       };
       row.appendChild(btn);
       listEl.appendChild(row);
+    }
+  }
+
+  // Anyone who opens the link can sign in, auto-friend the sharer and get a
+  // game invite back — a way to recruit players outside the friends list.
+  async function copyInviteLink() {
+    const { userId, slug } = api.getAuth();
+    if (!userId || !slug) {
+      timerEl.textContent = 'Sign in via StarHermit to share an invite link.';
+      return;
+    }
+    const url = `https://dashboard.starhermit.com/game-invite/${userId}/${slug}`;
+    try {
+      await copyText(url);
+      timerEl.textContent = 'Invite link copied — send it to anyone to play together.';
+    } catch {
+      timerEl.textContent = 'Could not copy the invite link.';
     }
   }
 
@@ -263,7 +280,25 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
     else startPolling();
   }
 
-  return { create, quickPlay, inviteFriends, findMatch, leave, show, hide, adopt, get room() { return room; } };
+  return { create, quickPlay, inviteFriends, findMatch, leave, show, hide, adopt, copyInviteLink, get room() { return room; } };
+}
+
+// navigator.clipboard requires a secure context; fall back to the old
+// textarea + execCommand path when it's missing or rejects.
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch { /* non-secure context or denied — fall back below */ }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand('copy');
+  ta.remove();
+  if (!ok) throw new Error('copy failed');
 }
 
 function esc(s) {

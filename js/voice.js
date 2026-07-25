@@ -14,8 +14,8 @@
 // The feature is best-effort: any failure (no mic permission, voice disabled
 // platform-side, relay unreachable) degrades to a silent no-op — the match
 // itself never depends on voice.
-import * as api from './api.js?v=3';
-import { createVoiceClient } from './net.js?v=3';
+import * as api from './api.js?v=4';
+import { createVoiceClient } from './net.js?v=4';
 
 const LS_KEY = 'starhermit-football-voice';
 const ICE_SERVERS = [{ urls: ['stun:stun.l.google.com:19302'] }];
