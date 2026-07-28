@@ -7,7 +7,7 @@
 // geometry merged by hand). No external assets.
 //
 // Usage:
-//   import { buildStadium } from './world/stadium.js?v=4';
+//   import { buildStadium } from './world/stadium.js?v=5';
 //   const stadium = buildStadium(scene, { pitch: { L, W, goalW, goalH, boxD, boxW } });
 //   stadium.update(dt, camera);            // every frame
 //   stadium.crowd.setExcitement(0..1);

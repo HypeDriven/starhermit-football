@@ -4,7 +4,7 @@
 // All three humanoids are driven by snapshot entities [x, z, facing, anim,
 // animSpeed, phase] with the same conventions as players.
 import * as THREE from 'three';
-import { createPlayerMesh } from './player.js?v=4';
+import { createPlayerMesh } from './player.js?v=5';
 
 const REF_KIT = { shirt: '#161616', shorts: '#161616', socks: '#161616', number: null, gk: true };
 const MEDIC_KIT = { shirt: '#f2f2f2', shorts: '#161616', socks: '#f2f2f2', number: null, gk: false };

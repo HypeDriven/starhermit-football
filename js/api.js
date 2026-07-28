@@ -136,7 +136,8 @@ export const sendChatMessage = (conversationId, content) =>
 
 // ── voice rooms (platform voice relay; used for WebRTC signaling) ──
 export const listVoiceRooms = (conversationId) => req('GET', `/api/v1/voice/rooms?conversationId=${encodeURIComponent(conversationId)}`);
-export const createVoiceRoom = (conversationId, maxParticipants = 22) =>
+// Platform caps voice rooms at 10 participants (docs/api/voice.md).
+export const createVoiceRoom = (conversationId, maxParticipants = 10) =>
   req('POST', '/api/v1/voice/rooms', { conversationId, maxParticipants });
 export const joinVoiceRoom = (roomId) => req('POST', `/api/v1/voice/rooms/${roomId}/join`);
 export const leaveVoiceRoom = (roomId) => req('POST', `/api/v1/voice/rooms/${roomId}/leave`);

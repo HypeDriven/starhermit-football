@@ -2,7 +2,7 @@
 // manifest-declared action: click the keycap to capture a new key, duplicates
 // highlight red, SAVE PUTs the overrides to the platform, RESET ALL DELETEs
 // them. Pure DOM + api.js, same shape as lobby.js.
-import * as api from './api.js?v=4';
+import * as api from './api.js?v=5';
 
 const KEY_LABELS = {
   ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',

@@ -4,12 +4,12 @@
 // between the 2 fps keyframes with the same math as the live snapshot
 // interpolation in match.js (applyInterp). No net, no input, no audio.
 import * as THREE from 'three';
-import * as api from './api.js?v=4';
-import { pitchFor, roleForSlot, makeRng, BALL_R } from './game/sim.js?v=4';
-import { buildStadium } from './world/stadium.js?v=4';
-import { createPlayerMesh } from './world/player.js?v=4';
-import { createFollowCamera } from './game/camera.js?v=4';
-import { parsePlayerRow, parseBallRow } from './snapformat.js?v=4';
+import * as api from './api.js?v=5';
+import { pitchFor, roleForSlot, makeRng, BALL_R } from './game/sim.js?v=5';
+import { buildStadium } from './world/stadium.js?v=5';
+import { createPlayerMesh } from './world/player.js?v=5';
+import { createFollowCamera } from './game/camera.js?v=5';
+import { parsePlayerRow, parseBallRow } from './snapformat.js?v=5';
 
 const TEAM_KITS = [
   { shirt: '#1f5fb4', shorts: '#f2f2f2', socks: '#1f5fb4', gk: '#e67e22', plate: '#1f5fb4', label: 'BLUE' },

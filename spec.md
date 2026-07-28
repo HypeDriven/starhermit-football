@@ -38,11 +38,12 @@ The platform offers three multiplayer substrates:
 
 - **Scripted games** (`server.js` in a Jint sandbox): server-authoritative.
   Fresh stateless invocations (~250 ms CPU budget), 16 KB text frames, all
-  state round-tripped through JSON documents. The platform's tick service now
-  supports **per-game tick rates** (`GameDefinition.TickRateHz`, 30 Hz default,
-  clamped to 1000 Hz), and realtime rooms can be **bound to an N-player
-  scripted session** whose ctx carries the room roster (AI seats included) and
-  live presence — enough to run a realtime football sim server-side.
+  state round-tripped through JSON documents. Scripts declare their own tick
+  rate statically (`game.tickRateHz`, 30 Hz default, clamped to 1000 Hz, 0
+  disables — read once at publish time), and realtime rooms can be **bound to
+  an N-player scripted session** whose ctx carries the room roster (AI seats
+  included) and live presence — enough to run a realtime football sim
+  server-side.
   Reference game is correspondence chess (low tick rate, turn-based flow).
 - **Peer relay** (`ws/v1/relay`): binary fan-out, but disabled by default,
   `maxParticipants` defaults to 8, 4 KB frames, 10 msgs/s/user, max 5 sessions
@@ -211,6 +212,13 @@ migration and host rejoin recovery machinery of the old design is gone.
 - **Session summary**: `sessionState.summary = { status, moveCount }` —
   `active`/`finished`, `moveCount` mirrors the sim tick. This backs
   `GET sessions/mine`. No `turnPlayerId`/`deadline` (turn-based concepts).
+- **Achievements**: server-authoritative. The catalog is declared statically
+  on `game.achievements` in `server.js` (debut, first-win, goalscorer,
+  hat-trick, clean-sheet); the sim tallies per-seat goals in
+  `sessionState.goals` and grants keys at full time via the `achievements`
+  return field (`userId → [keys]`), limited to humans who finished the match.
+  Unlocks arrive on `ws/v1/games` as `{"type":"achievement"}` frames; the
+  client shows a HUD banner.
 - **Replay**: the platform archives the final `sessionState` as the session's
   replay, so the script embeds one at `sessionState.replay`:
   `{ v: 1, every: 15, teamSize, halfLength, roster, frames, evs, truncated }`.
@@ -502,8 +510,9 @@ scripted session instead of on a host client:
   the abandoned-draw), the platform finishes the session, stores the result on
   the room, and closes the room — no host-submitted `POST .../result` for
   room-bound games.
-- **Tick rate**: the session ticks at `GameDefinition.TickRateHz` (30 Hz for
-  this game; 30 Hz platform default, clamped to 1–1000 Hz).
+- **Tick rate**: the session ticks at the script-declared `game.tickRateHz`
+  (30 Hz for this game; 30 Hz platform default, clamped to 1–1000 Hz, read at
+  publish time).
 
 ### 8.8 Per-player control bindings (generalized)
 
@@ -672,7 +681,9 @@ Opt-out in-match voice between the human players of an online match.
   polite/impolite ("perfect negotiation") pattern keyed on userId order.
 - **Room bridging**: match → `GET /api/v1/games/{slug}/sessions/{id}` →
   `chatConversationId` → list-or-create `/api/v1/voice/rooms` → join →
-  connect the relay socket. AI seats never join (no userId).
+  connect the relay socket. AI seats never join (no userId). Voice rooms are
+  capped at 10 participants platform-side, so in matches with more than 10
+  humans late joiners simply get no voice (best-effort, below).
 - **Positional audio**: each remote stream runs through
   `GainNode → StereoPannerNode`. Gain is recomputed at 10 Hz from the world
   distance between my footballer and the speaker's footballer (full volume

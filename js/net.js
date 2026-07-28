@@ -160,6 +160,8 @@ export function createGameClient({ sessionId, getToken }) {
       return;
     }
     if (msg.type === 'presence') { handlers.onPresence?.(msg); return; }
+    // server-authoritative achievement unlock, addressed to the earning player
+    if (msg.type === 'achievement') { handlers.onAchievement?.(msg.data); return; }
     if (msg.type === 'error') handlers.onError?.(msg.error);
   }
 

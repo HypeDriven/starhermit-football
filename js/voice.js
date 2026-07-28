@@ -14,8 +14,8 @@
 // The feature is best-effort: any failure (no mic permission, voice disabled
 // platform-side, relay unreachable) degrades to a silent no-op — the match
 // itself never depends on voice.
-import * as api from './api.js?v=4';
-import { createVoiceClient } from './net.js?v=4';
+import * as api from './api.js?v=5';
+import { createVoiceClient } from './net.js?v=5';
 
 const LS_KEY = 'starhermit-football-voice';
 const ICE_SERVERS = [{ urls: ['stun:stun.l.google.com:19302'] }];
@@ -217,7 +217,7 @@ export function createVoice() {
       if (!convId) return void hangup(); // session has no conversation (not bridged)
       let rooms = await api.listVoiceRooms(convId);
       if (!live(s)) return;
-      if (!rooms?.length) await api.createVoiceRoom(convId, 22);
+      if (!rooms?.length) await api.createVoiceRoom(convId); // platform caps rooms at 10 participants
       if (!live(s)) return;
 
       // Every client can reach this point together. Give concurrent creators a

@@ -23,6 +23,10 @@
 //   game.onPlayerMessage(ctx)    -> { ok, sessionState, broadcast }
 //   game.onTick(ctx)             -> { ok, sessionState, broadcast, result? }
 //
+// Static declarations read once at publish time: `game.tickRateHz` (30) and
+// `game.achievements` (the achievement catalog). A full-time return also
+// carries `achievements: { "<userId>": [key, ...] }` for eligible humans.
+//
 // ctx = {
 //   now:          ms since epoch (host clock)
 //   random:       float in [0,1) supplied by the host per invocation
@@ -57,6 +61,7 @@
 //   offlineSince: { "<userId>": now },  // ms, offline-grace tracking
 //   pendingCeremonies: [{ kind, playerId, inName }],
 //   ended: bool,
+//   goals: { "<playerId>": count },   // per-seat tally for achievements
 //   playerDocs: { "<userId>": { elo, wins, losses, draws } },  // human seats
 //   summary: { status: 'active'|'finished', moveCount },  // sessions/mine
 //   replay: {                            // archived with the session as replay
@@ -1291,9 +1296,16 @@ function rosterNameFor(ctx, userId) {
 function drainEvents(match, out, state) {
   for (var i = 0; i < match.events.length; i++) {
     out.push({ to: 'all', data: { type: 'ev', ev: match.events[i] } });
-    if (state) recordReplayEv(state, match.events[i]);
+    if (state) { recordReplayEv(state, match.events[i]); trackGoal(state, match.events[i]); }
   }
   match.events.length = 0;
+}
+
+// Per-seat goal tally (sessionState.goals, pid -> count) for achievements.
+function trackGoal(state, ev) {
+  if (!ev || ev.type !== 'goal' || ev.ownGoal || ev.scorer == null) return;
+  var goals = state.goals || (state.goals = {});
+  goals[ev.scorer] = (goals[ev.scorer] | 0) + 1;
 }
 
 // ── Replay recording (stored in sessionState, never broadcast) ──────────────
@@ -1372,6 +1384,31 @@ function computeRatings(state, winner) {
     }
   }
   return { playerStates: docs, eloUpdates: eloUpdates };
+}
+
+// Achievement grants at full time, keyed by userId (the platform's
+// `achievements` return field; unlocks are idempotent server-side). Only
+// humans who finished the match (still seated, not gone/standin) are eligible.
+function computeAchievements(state, winner) {
+  var teamSize = state.match.teamSize;
+  var score = state.match.score;
+  var goals = state.goals || {};
+  var grants = {};
+  for (var pid in state.seats) {
+    var seat = state.seats[pid];
+    if (!seat.userId || seat.gone || seat.standin) continue;
+    var keys = ['debut'];
+    var team = (+pid) < teamSize ? 0 : 1;
+    if ((goals[pid] | 0) >= 1) keys.push('goalscorer');
+    if ((goals[pid] | 0) >= 3) keys.push('hat-trick');
+    if (winner === team) {
+      keys.push('first-win');
+      if (score[1 - team] === 0) keys.push('clean-sheet');
+    }
+    grants[seat.userId] = keys;
+  }
+  for (var uid in grants) return grants; // at least one eligible human
+  return null;
 }
 
 function pendingForSeat(state, pid, kind) {
@@ -1557,6 +1594,17 @@ function storeRealtimeInput(state, from, data, now) {
 
 globalThis.game = {
 
+  // Static declarations, read by the platform once at publish time (not per
+  // invocation): the sim tick rate and the achievement catalog.
+  tickRateHz: 30,
+  achievements: [
+    { key: 'debut', name: 'Debut', description: 'Finish your first match.', points: 10 },
+    { key: 'first-win', name: 'First Win', description: 'Win a match.', points: 25 },
+    { key: 'goalscorer', name: 'Goalscorer', description: 'Score a goal.', points: 15 },
+    { key: 'hat-trick', name: 'Hat-Trick', description: 'Score three goals in one match.', points: 50 },
+    { key: 'clean-sheet', name: 'Clean Sheet', description: 'Win without conceding a goal.', points: 40 },
+  ],
+
   // New session. Roster seats come from ctx.room.roster (team/slot); missing
   // seats are filled with AI. The match seed derives from ctx.random.
   createSession: function (ctx) {
@@ -1614,6 +1662,7 @@ globalThis.game = {
       offlineSince: {},
       pendingCeremonies: [],
       ended: false,
+      goals: {},
       playerDocs: playerDocs,
       summary: { status: 'active', moveCount: 0 },
       replay: {
@@ -1744,6 +1793,8 @@ globalThis.game = {
           done.playerStates = ratings.playerStates;
           done.eloUpdates = ratings.eloUpdates;
         }
+        var grants = computeAchievements(state, winner);
+        if (grants) done.achievements = grants;
         return done;
       }
     }

@@ -1,18 +1,18 @@
 // main.js — boot, screens state machine, renderer, match lifecycle.
 import * as THREE from 'three';
-import * as api from './api.js?v=4';
-import { createAudio } from './game/audio.js?v=4';
-import { createInput } from './game/input.js?v=4';
-import { createHud } from './hud.js?v=4';
-import { createMatchController } from './match.js?v=4';
-import { createLobby } from './lobby.js?v=4';
-import { createNetClient, createGameClient } from './net.js?v=4';
-import { createMenuScene } from './menuScene.js?v=4';
-import { createVoice } from './voice.js?v=4';
-import { createControlsScreen } from './controls.js?v=4';
-import { createLeaderboardScreen } from './leaderboard.js?v=4';
-import { createReplaysScreen } from './replays.js?v=4';
-import { createReplayViewer } from './replayview.js?v=4';
+import * as api from './api.js?v=5';
+import { createAudio } from './game/audio.js?v=5';
+import { createInput } from './game/input.js?v=5';
+import { createHud } from './hud.js?v=5';
+import { createMatchController } from './match.js?v=5';
+import { createLobby } from './lobby.js?v=5';
+import { createNetClient, createGameClient } from './net.js?v=5';
+import { createMenuScene } from './menuScene.js?v=5';
+import { createVoice } from './voice.js?v=5';
+import { createControlsScreen } from './controls.js?v=5';
+import { createLeaderboardScreen } from './leaderboard.js?v=5';
+import { createReplaysScreen } from './replays.js?v=5';
+import { createReplayViewer } from './replayview.js?v=5';
 
 const $ = (id) => document.getElementById(id);
 
@@ -269,6 +269,7 @@ async function onMatchReady(room, { isRejoin = false } = {}) {
     await gameNet.connect({
       onSnapshot: (snap) => m.onSnapshot(snap),
       onEvent: (ev) => m.onNetEvent(ev),
+      onAchievement: (a) => { if (a?.name) hud.banner(`Achievement unlocked: ${a.name}`, 4000); },
       onClose: () => { if (match && match.phase !== 'done') { setStatus('Connection lost'); backToMenu(); } },
     });
   } catch (e) {

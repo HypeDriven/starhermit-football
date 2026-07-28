@@ -16,8 +16,8 @@ launch=index.html
 owner=2712e04e-461b-4d23-81ae-e40b429128a8
 
 # The authoritative match simulation. The platform runs this script server-side
-# in its Jint sandbox, ticking it at the game's configured tick rate (30 Hz) via
-# the platform's per-game tick-rate support — see spec.md section 3. Realtime
+# in its Jint sandbox, ticking it at the script-declared rate (game.tickRateHz
+# = 30) — see spec.md section 3. Realtime
 # Rooms (/api/v1/realtime, /ws/v1/realtime) are used for lobby/roster only.
 server=server.js
 

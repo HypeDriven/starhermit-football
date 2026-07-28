@@ -1,7 +1,7 @@
 // leaderboard.js — platform leaderboard screen: my rating (from the game info
 // endpoint) and ranked entries with paging + a friends-only filter. Pure DOM +
 // api.js, same shape as controls.js.
-import * as api from './api.js?v=4';
+import * as api from './api.js?v=5';
 
 const PAGE_SIZE = 20;
 
