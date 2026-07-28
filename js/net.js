@@ -75,7 +75,7 @@ export function createVoiceClient({ roomId, getToken }) {
       ws.onerror = () => { if (!connected) reject(new Error('Voice socket connection failed')); };
       ws.onclose = (e) => { connected = false; handlers.onClose?.(e); };
       ws.onmessage = (m) => {
-        if (typeof m.data !== 'string') return; // native PCM relay frames — not for us
+        if (typeof m.data !== 'string') return; // native Opus relay frames — not for us
         let msg;
         try { msg = JSON.parse(m.data); } catch { return; }
         if (msg && typeof msg.event === 'string') handlers.onEvent?.(msg.event, msg.data || {});
@@ -94,6 +94,7 @@ export function createVoiceClient({ roomId, getToken }) {
     connect,
     // directed WebRTC signaling: delivered to `to` as voice.rtc with our userId stamped in
     sendRtc: (to, payload) => send({ type: 'rtc', to, payload }),
+    sendMute: (muted) => send({ type: 'mute', muted: !!muted }),
     close: () => { try { ws?.close(); } catch {} ws = null; connected = false; },
     get connected() { return connected; },
   };

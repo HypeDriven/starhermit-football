@@ -11,14 +11,15 @@ import * as THREE from 'three';
 import {
   createMatch, stepMatch, takeAiName, makeRng, resetKickoff,
   WALK_SPEED, RUN_SPEED, SPRINT_SPEED, TURN_RATE, BALL_SLOWDOWN, BALL_R, GRAVITY,
-} from './game/sim.js?v=5';
-import { computeAiInput, clearAiPlans } from './game/ai.js?v=5';
-import { buildStadium } from './world/stadium.js?v=5';
-import { createPlayerMesh } from './world/player.js?v=5';
-import { createCeremonyViews } from './world/officials.js?v=5';
-import { createFollowCamera } from './game/camera.js?v=5';
-import { createMatchChat } from './chat.js?v=5';
-import { parsePlayerRow, parseBallRow } from './snapformat.js?v=5';
+} from './game/sim.js?v=6';
+import { computeAiInput, clearAiPlans } from './game/ai.js?v=6';
+import { buildStadium } from './world/stadium.js?v=6';
+import { createPlayerMesh } from './world/player.js?v=6';
+import { createCeremonyViews } from './world/officials.js?v=6';
+import { createFollowCamera } from './game/camera.js?v=6';
+import { createMatchChat } from './chat.js?v=6';
+import { parsePlayerRow, parseBallRow } from './snapformat.js?v=6';
+import * as api from './api.js?v=6';
 
 const TEAM_KITS = [
   { shirt: '#1f5fb4', shorts: '#f2f2f2', socks: '#1f5fb4', gk: '#e67e22', plate: '#1f5fb4', label: 'BLUE' },
@@ -133,6 +134,23 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
   }
 
   // ── public: start modes ───────────────────────────────────────────────────
+
+  // Display names: nametags show profile nicknames, not the roster's raw
+  // usernames. Resolved per userId (cached in api.js); until a lookup lands
+  // the server-provided name shows, and the snapshot loop below swaps in the
+  // nickname once it resolves. AI seats keep their server nickname.
+  const displayNames = new Map(); // userId(lower) → nickname | null (pending)
+  function nameFor(userId, fallback) {
+    if (!userId) return fallback;
+    const key = String(userId).toLowerCase();
+    const hit = displayNames.get(key);
+    if (hit) return hit;
+    if (!displayNames.has(key)) {
+      displayNames.set(key, null);
+      api.getDisplayName(userId).then((n) => displayNames.set(key, n));
+    }
+    return fallback;
+  }
 
   function startPractice({ teamSize, myName }) {
     cleanup();
@@ -558,12 +576,14 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     kickoffTeam = parsed.kt;
 
     // names/isAi ride in the snapshot — covers substitutions even if the
-    // roster push lags; rebuild the name tag when a player's name changes
+    // roster push lags; rebuild the name tag when a player's name changes.
+    // Human names go through nameFor (nickname > server username).
     for (let i = 0; i < parsed.pl.length && i < sim.players.length; i++) {
       const ps = parsed.pl[i], p = sim.players[i];
       p.isAi = !!ps.isAi;
-      if (ps.name && ps.name !== p.name) {
-        p.name = ps.name;
+      const nm = nameFor(p.userId, ps.name);
+      if (nm && nm !== p.name) {
+        p.name = nm;
         const old = views[i];
         if (old) { old.dispose(); views[i] = makeViewFor(p); }
       }
@@ -593,8 +613,9 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
       const p = sim.players[seat];
       if (!p) continue;
       p.isAi = !!part.isAi;
-      if (part.username && part.username !== p.name) {
-        p.name = part.username;
+      const nm = nameFor(part.userId, part.username);
+      if (nm && nm !== p.name) {
+        p.name = nm;
         // rebuild the view so the name tag shows the new name
         const old = views[seat];
         if (old) { old.dispose(); views[seat] = makeViewFor(p); }

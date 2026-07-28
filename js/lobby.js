@@ -1,8 +1,8 @@
 // lobby.js — lobby screen: create/invite/open/quick-join against the
 // platform's Realtime Rooms API (spec.md §8). Pure DOM + api.js; main.js
 // drives the transitions.
-import * as api from './api.js?v=5';
-import { roleForSlot } from './game/sim.js?v=5';
+import * as api from './api.js?v=6';
+import { roleForSlot } from './game/sim.js?v=6';
 
 const ROLE_NAMES = { GK: 'Goalkeeper', DF: 'Defender', MF: 'Midfielder', FW: 'Forward' };
 
@@ -25,6 +25,28 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
     stopPolling();
   }
 
+  // open/seats/start are host-only on the platform — the UI must not offer
+  // them to guests (hostUserId on the room; IsHost participant as fallback).
+  function amHost() {
+    if (!room) return false;
+    const me = api.getAuth();
+    if (room.hostUserId) return room.hostUserId === me.userId;
+    const host = (room.participants || []).find((p) => p.isHost && !p.leftAt);
+    return !!host && host.userId === me.userId;
+  }
+
+  // A room can report Playing before the platform binds gameSessionId (the
+  // bridge is best-effort at start, and an Open room now auto-starts the
+  // moment every seat is taken — so quick-join/invite-accept/open responses
+  // can already be Playing). Entering without the session id fails with
+  // "match session unavailable", so hand off to the poller, which gives the
+  // binding a few polls to appear before entering.
+  function enterWhenReady() {
+    if (room.gameSessionId) { enterMatch(); return; }
+    timerEl.textContent = 'Starting match…';
+    startPolling();
+  }
+
   async function create(teamSize) {
     stopPolling();
     entered = false;
@@ -34,7 +56,6 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
       backfillAfterSeconds: 30,
       metadata: { game: 'football' },
     });
-    findBtn.disabled = false;
     render();
     startPolling();
     show();
@@ -56,9 +77,30 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
     }
     render();
     show();
-    if (room.status === 'Playing' || room.status === 'playing') enterMatch();
+    if (room.status === 'Playing' || room.status === 'playing') enterWhenReady();
     else startPolling();
     setStatus('');
+  }
+
+  // Ranked solo vs AI: every seat but mine is an AI seated at creation
+  // (aiPlayers), so starting the room begins the match immediately — no
+  // backfill wait. Unlike offline practice this is a real platform match:
+  // server-authoritative, rated, and archived as a replay.
+  async function soloVsAi(teamSize) {
+    stopPolling();
+    entered = false;
+    timerEl.textContent = 'Starting match…';
+    room = await api.createRoom({
+      teamCount: 2,
+      seatsPerTeam: teamSize,
+      backfillAfterSeconds: 30,
+      aiPlayers: 2 * teamSize - 1,
+      metadata: { game: 'football' },
+    });
+    render();
+    show();
+    room = await api.startRoom(room.id);
+    enterWhenReady();
   }
 
   async function inviteFriends() {
@@ -109,7 +151,7 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
     inviteBtn.disabled = true;
     room = await api.openRoom(room.id);
     if (room.status === 'Playing' || room.status === 'playing') {
-      enterMatch();
+      enterWhenReady();
       return;
     }
     timerEl.textContent = 'Finding players… 30s';
@@ -178,7 +220,12 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
     }
     const me = api.getAuth();
     const status = (room.status || '').toLowerCase();
-    const canMove = status === 'lobby' || status === 'open';
+    const canMove = (status === 'lobby' || status === 'open') && amHost();
+    // open/start are host-only — a guest's FIND MATCH would just 403; and in
+    // an already-Open room matchmaking is running, so the button stays off
+    const host = amHost();
+    findBtn.disabled = !host || status !== 'lobby';
+    findBtn.title = host ? '' : 'Only the lobby host can start matchmaking';
     for (let t = 0; t < 2; t++) {
       const head = document.createElement('div');
       head.className = 'team-head';
@@ -217,14 +264,20 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
 
         const who = document.createElement('span');
         if (p) {
-          who.textContent = p.username + (p.isAi ? ' (AI)' : '');
+          if (p.isAi || !p.userId) {
+            who.textContent = p.username + (p.isAi ? ' (AI)' : '');
+          } else {
+            // humans: resolve the profile nickname, never the raw username
+            who.textContent = '…';
+            api.getDisplayName(p.userId).then((n) => { if (who.isConnected) who.textContent = n; });
+          }
           if (p.isAi) el.classList.add('ai');
           if (p.userId === me.userId) el.classList.add('me');
         } else {
           who.textContent = '— open —';
           if (canMove) {
             el.classList.add('clickable');
-            el.title = `Move here and play ${ROLE_NAMES[role] || role}`;
+            el.title = `Move me here to play ${ROLE_NAMES[role] || role}`;
             el.onclick = () => moveTo(t, s);
           }
         }
@@ -238,8 +291,8 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
       : `${humans} player${humans === 1 ? '' : 's'} in lobby`;
   }
 
-  // Click an open seat → move my participant there (any player may move
-  // themself; the server rejects taken seats and post-start moves).
+  // Click an open seat → move my participant there. The seats endpoint is
+  // host-only on the platform, so render() only offers this to the host.
   async function moveTo(team, slot) {
     const me = api.getAuth();
     const mine = (room?.participants || []).find((p) => p.userId === me.userId && !p.leftAt);
@@ -273,14 +326,13 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
   function adopt(r) {
     room = r;
     entered = false;
-    findBtn.disabled = false;
     render();
     show();
-    if (room.status === 'Playing' || room.status === 'playing') enterMatch();
+    if (room.status === 'Playing' || room.status === 'playing') enterWhenReady();
     else startPolling();
   }
 
-  return { create, quickPlay, inviteFriends, findMatch, leave, show, hide, adopt, copyInviteLink, get room() { return room; } };
+  return { create, quickPlay, soloVsAi, inviteFriends, findMatch, leave, show, hide, adopt, copyInviteLink, get room() { return room; } };
 }
 
 // navigator.clipboard requires a secure context; fall back to the old

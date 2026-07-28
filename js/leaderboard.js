@@ -1,7 +1,7 @@
 // leaderboard.js — platform leaderboard screen: my rating (from the game info
 // endpoint) and ranked entries with paging + a friends-only filter. Pure DOM +
 // api.js, same shape as controls.js.
-import * as api from './api.js?v=5';
+import * as api from './api.js?v=6';
 
 const PAGE_SIZE = 20;
 
@@ -101,10 +101,17 @@ export function createLeaderboardScreen({ audio, onBack }) {
     for (const e of items) {
       const row = document.createElement('div');
       row.className = 'lb-row';
-      row.innerHTML =
-        `<span class="rank">#${e.rank ?? '—'}</span>` +
-        `<span class="name">${esc(e.username)}</span>` +
-        `<span class="elo">${e.score}</span>`;
+      const nameEl = document.createElement('span');
+      nameEl.className = 'name';
+      nameEl.textContent = '…';
+      // entries carry only the account username — resolve the profile nickname
+      api.getDisplayName(e.userId).then((n) => { if (nameEl.isConnected) nameEl.textContent = n; });
+      row.innerHTML = `<span class="rank">#${e.rank ?? '—'}</span>`;
+      row.appendChild(nameEl);
+      const eloEl = document.createElement('span');
+      eloEl.className = 'elo';
+      eloEl.textContent = e.score;
+      row.appendChild(eloEl);
       listEl.appendChild(row);
     }
   }
@@ -121,8 +128,4 @@ export function createLeaderboardScreen({ audio, onBack }) {
   backBtn.onclick = () => { audio.ui(); close(); };
 
   return { open };
-}
-
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }

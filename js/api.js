@@ -84,6 +84,21 @@ export function getUserAvatarUrl(uid) {
   return avatarUrls.get(uid);
 }
 
+// Player-facing views render the profile nickname, never the raw account
+// username (profile.md); lookup failures fall back to a neutral shortened id.
+// Cached per user for the session — chat/leaderboard/replays re-render often.
+const displayNames = new Map();
+export function getDisplayName(uid) {
+  if (!uid || !token) return Promise.resolve('Player');
+  if (!displayNames.has(uid)) {
+    displayNames.set(uid,
+      req('GET', `/api/v1/users/${uid}/profile`)
+        .then((p) => p?.nickname || p?.username || `Player ${String(uid).slice(0, 8)}`)
+        .catch(() => `Player ${String(uid).slice(0, 8)}`));
+  }
+  return displayNames.get(uid);
+}
+
 // ── platform ──
 export const getGameInfo = () => req('GET', `/api/v1/games/${slug}`);
 export const remintLaunchToken = () => req('POST', `/api/v1/games/${slug}/launch-token`)
@@ -141,3 +156,4 @@ export const createVoiceRoom = (conversationId, maxParticipants = 10) =>
   req('POST', '/api/v1/voice/rooms', { conversationId, maxParticipants });
 export const joinVoiceRoom = (roomId) => req('POST', `/api/v1/voice/rooms/${roomId}/join`);
 export const leaveVoiceRoom = (roomId) => req('POST', `/api/v1/voice/rooms/${roomId}/leave`);
+export const setVoiceMute = (roomId, muted) => req('POST', `/api/v1/voice/rooms/${roomId}/mute`, { muted: !!muted });

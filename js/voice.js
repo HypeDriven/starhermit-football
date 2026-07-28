@@ -14,8 +14,13 @@
 // The feature is best-effort: any failure (no mic permission, voice disabled
 // platform-side, relay unreachable) degrades to a silent no-op — the match
 // itself never depends on voice.
-import * as api from './api.js?v=5';
-import { createVoiceClient } from './net.js?v=5';
+//
+// Mute: the platform drops relayed audio from muted users, but our audio is
+// WebRTC P2P, so mute is enforced client-side — locally by disabling the mic
+// tracks at source, remotely by zeroing a muted peer's gain (roster `muted`
+// flags and voice.mute_changed events). Toggle with M or the HUD mic button.
+import * as api from './api.js?v=6';
+import { createVoiceClient } from './net.js?v=6';
 
 const LS_KEY = 'starhermit-football-voice';
 const ICE_SERVERS = [{ urls: ['stun:stun.l.google.com:19302'] }];
@@ -34,11 +39,42 @@ export function createVoice() {
   let localStream = null;
   let actx = null;
   let bus = null;           // shared voice bus → destination
-  const peers = new Map();  // userId(lower) → { pc, gain, pan, makingOffer, ignoreOffer }
+  const peers = new Map();  // userId(lower) → { pc, gain, pan, muted, makingOffer, ignoreOffer }
   let posTimer = 0;
   let wsRetries = 0;
+  let muted = false;        // my mic mute — client-enforced for P2P audio
 
   const live = (s) => s === session && active;
+
+  // ── mic mute (HUD button + M key) ─────────────────────────────────────────
+  const micBtn = document.createElement('button');
+  micBtn.id = 'btn-mic';
+  micBtn.className = 'hidden';
+  micBtn.onclick = () => setMuted(!muted);
+  document.getElementById('hud').appendChild(micBtn);
+
+  function renderMicBtn() {
+    micBtn.classList.toggle('hidden', !active);
+    micBtn.classList.toggle('muted', muted);
+    micBtn.textContent = muted ? 'MIC OFF · M' : 'MIC ON · M';
+  }
+
+  function setMuted(m) {
+    muted = !!m;
+    if (localStream) for (const t of localStream.getTracks()) t.enabled = !muted;
+    if (active && voiceRoomId) {
+      api.setVoiceMute(voiceRoomId, muted).catch(() => {});
+      voiceNet?.sendMute(muted);
+    }
+    renderMicBtn();
+  }
+
+  addEventListener('keydown', (e) => {
+    if (!active || e.code !== 'KeyM' || e.repeat) return;
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return; // typing in chat
+    setMuted(!muted);
+  });
 
   // ── mic + audio graph ─────────────────────────────────────────────────────
 
@@ -84,7 +120,7 @@ export function createVoice() {
     gain.gain.value = 0;
     const pan = actx.createStereoPanner();
     gain.connect(pan).connect(bus);
-    const peer = { pc, gain, pan, source: null, makingOffer: false, ignoreOffer: false };
+    const peer = { pc, gain, pan, source: null, muted: false, makingOffer: false, ignoreOffer: false };
     peers.set(id, peer);
 
     const polite = myUserId < id; // deterministic glare resolution
@@ -158,13 +194,25 @@ export function createVoice() {
   function onVoiceEvent(event, data) {
     switch (event) {
       case 'voice.roster':
-        for (const p of data.participants || []) ensurePeer(p.userId);
+        for (const p of data.participants || []) {
+          const peer = ensurePeer(p.userId);
+          if (peer) peer.muted = !!p.muted; // server drops relayed audio; we mute P2P locally
+        }
         break;
       case 'voice.participant_joined':
-        if (data.userId) ensurePeer(data.userId);
+        if (data.userId) {
+          const peer = ensurePeer(data.userId);
+          if (peer) peer.muted = !!data.muted;
+        }
         break;
       case 'voice.participant_left':
         if (data.userId) dropPeer(data.userId);
+        break;
+      case 'voice.mute_changed':
+        if (data.userId) {
+          const peer = peers.get(String(data.userId).toLowerCase());
+          if (peer) peer.muted = !!data.muted;
+        }
         break;
       case 'voice.rtc':
         onRtc(data.from, data.payload);
@@ -227,14 +275,27 @@ export function createVoice() {
       if (!live(s)) return;
       rooms = await api.listVoiceRooms(convId);
       if (!live(s)) return;
-      const room = [...(rooms || [])]
+      const candidates = [...(rooms || [])]
         .filter((r) => !r.status || String(r.status).toLowerCase() === 'active')
         .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
-          || String(a.id).localeCompare(String(b.id)))[0];
-      if (!room) return void hangup();
-      voiceRoomId = room.id;
-      await connectWs(s);
-      console.info('voice: joined room', voiceRoomId);
+          || String(a.id).localeCompare(String(b.id)));
+      if (!candidates.length) return void hangup();
+      // A join can fail on an individual room (e.g. it is at the platform's
+      // 10-participant cap) — walk the active rooms oldest-first instead of
+      // giving up on the first refusal.
+      for (const room of candidates) {
+        if (!live(s)) return;
+        voiceRoomId = room.id;
+        try {
+          await connectWs(s);
+          console.info('voice: joined room', voiceRoomId);
+          setMuted(muted); // publish my mute state to the room and show the mic button
+          return;
+        } catch (e) {
+          console.warn('voice: could not join room', room.id, e?.message || e);
+        }
+      }
+      hangup();
     } catch (e) {
       if (live(s)) { console.warn('voice: join failed:', e.message || e); hangup(); }
     }
@@ -250,6 +311,7 @@ export function createVoice() {
   function hangup() {
     session++;
     active = false;
+    renderMicBtn();
     const net = voiceNet;
     voiceNet = null;
     if (net) net.close();
@@ -284,6 +346,8 @@ export function createVoice() {
     if (!me) return;
     const t = actx.currentTime;
     for (const [id, peer] of peers) {
+      // muted peer: P2P audio is client-enforced — silence them locally
+      if (peer.muted) { peer.gain.gain.setTargetAtTime(0, t, 0.1); continue; }
       // find the speaker's footballer by userId (AI seats have userId null)
       let sp = null;
       for (const p of players) {

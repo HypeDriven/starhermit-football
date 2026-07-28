@@ -31,15 +31,19 @@
 //   now:          ms since epoch (host clock)
 //   random:       float in [0,1) supplied by the host per invocation
 //   sessionId:    string
-//   players:      [{ id, name }]
+//   players:      [{ id, name, ai /*bool, present on the platform AI seat*/ }]
 //   room:         { roomId, metadata,
 //                   roster: [{ userId /*string|null*/, name, team /*0|1*/,
 //                              slot, ai /*bool*/ }] }   // both teams, all seats
-//   presence:     { "<userId>": { online: bool, left: bool } }  // tick/message
+//   presence:     { "<userId>": { online: bool, left: bool } }
 //   sessionState: object|null        // this script's session doc
 //   playerStates: { [playerId]: object|null }
 //   message:      { from, data } | undefined   // onPlayerMessage only
+//   inputs:       [{ from, data }] | undefined // onTick only; realtime batch
 // }
+// room and presence are present on EVERY invocation of a room-bound session,
+// createSession included; a standalone session (matchmaking, invite-accept,
+// AI practice) has neither — createSession then seats ctx.players instead.
 //
 // Returning `result` ends the session:
 //   full time:        { score: [a, b], winner: -1|0|1, draw: bool }
@@ -91,7 +95,7 @@
 //   b   [x, y, z, vx, vy, vz, owner]       owner -1 = loose ball
 //   pl  one entry per player, in id order:
 //       [id, team, x, z, vx, vz, facing, anim, animSpeed, phase,
-//        kickT, tackleT, stunT, diveT, diveDir, celebrateT, isAi(0|1), name]
+//        kickT, tackleT, stunT, diveT, diveDir, celebrateT, isAi(0|1), name, y]
 //       (floats rounded to 2 decimals; anim is the animator's state string:
 //        'idle'|'walk'|'run'|'sprint'|'kick'|'slide'|'dive'|'fallen'|
 //        'celebrate'|'dejected')
@@ -1492,6 +1496,10 @@ function triggerRejoin(ctx, state, pid, seat) {
 function reconcilePresence(ctx, state) {
   var match = state.match;
   if (match.phase === 'end' || state.ended) return;
+  // Presence is only supplied to room-bound sessions; a standalone session
+  // (matchmaking / AI practice) has no roster to reconcile against, and
+  // treating everyone as missing would AI-take-over every human seat.
+  if (!ctx.room) return;
   var presence = ctx.presence || {};
   for (var pid in state.seats) {
     var seat = state.seats[pid];
@@ -1592,6 +1600,23 @@ function storeRealtimeInput(state, from, data, now) {
   };
 }
 
+// Standalone sessions (matchmaking, invite-accept, AI practice) carry no
+// ctx.room — synthesize a roster from ctx.players, alternating teams in ctx
+// order (the platform AI seat arrives flagged ai: true with no userId seat).
+function synthRoster(players) {
+  var roster = [];
+  for (var i = 0; players && i < players.length; i++) {
+    roster.push({
+      userId: players[i].ai ? null : players[i].id,
+      name: players[i].name,
+      team: i % 2,
+      slot: Math.floor(i / 2),
+      ai: !!players[i].ai,
+    });
+  }
+  return roster;
+}
+
 globalThis.game = {
 
   // Static declarations, read by the platform once at publish time (not per
@@ -1605,11 +1630,13 @@ globalThis.game = {
     { key: 'clean-sheet', name: 'Clean Sheet', description: 'Win without conceding a goal.', points: 40 },
   ],
 
-  // New session. Roster seats come from ctx.room.roster (team/slot); missing
+  // New session. Roster seats come from ctx.room.roster (team/slot) for
+  // room-bound matches, or from ctx.players for standalone ones; missing
   // seats are filled with AI. The match seed derives from ctx.random.
   createSession: function (ctx) {
-    var roster = (ctx.room && ctx.room.roster) || [];
-    var teamSize = Math.max(1, Math.floor(roster.length / 2));
+    var roster = (ctx.room && ctx.room.roster && ctx.room.roster.length)
+      ? ctx.room.roster : synthRoster(ctx.players);
+    var teamSize = Math.max(1, Math.ceil(roster.length / 2));
     var seed = Math.floor((ctx.random || 0) * 2147483647);
     var fillRng = makeRng(seed ^ 0x9e3779b9);
     var simRoster = [];

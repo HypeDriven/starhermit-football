@@ -1,7 +1,7 @@
 // replays.js — archived replays of my online matches: date, sides, score, and
 // a WATCH button that opens the 3D replay viewer. Pure DOM + api.js, same
 // shape as leaderboard.js.
-import * as api from './api.js?v=5';
+import * as api from './api.js?v=6';
 
 export function createReplaysScreen({ audio, onWatch, onBack }) {
   const screen = document.getElementById('screen-replays');
@@ -40,24 +40,56 @@ export function createReplaysScreen({ audio, onWatch, onBack }) {
       const date = when && !isNaN(when)
         ? when.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         : '—';
-      const names = (r.players || []).map((p) => p.username || 'Player');
-      // players[] carries no team assignment — show the two halves of the list
-      // as the two sides (platform returns them in roster order).
-      const mid = Math.ceil(names.length / 2);
-      const sides = names.length > 1
-        ? `${names.slice(0, mid).join(', ')} vs ${names.slice(mid).join(', ')}`
-        : (names[0] || '—');
       const score = r.result && r.result.score ? `${r.result.score[0]} – ${r.result.score[1]}` : '–';
       row.innerHTML =
         `<span class="date">${esc(date)}</span>` +
-        `<span class="names" title="${esc(sides)}">${esc(sides)}</span>` +
+        `<span class="names">…</span>` +
         `<span class="score">${esc(score)}</span>`;
+      const namesEl = row.querySelector('.names');
+      sidesFor(r).then((sides) => {
+        if (!namesEl.isConnected) return;
+        namesEl.textContent = sides;
+        namesEl.title = sides;
+      });
       const btn = document.createElement('button');
       btn.textContent = 'WATCH';
       btn.onclick = () => { audio.ui(); onWatch(r.sessionId); };
       row.appendChild(btn);
       listEl.appendChild(row);
     }
+  }
+
+  // The list payload's players[] has no team assignment and an undocumented
+  // ordering — halving it mis-splits unbalanced human teams. The archived
+  // session state knows the truth: seats map pid → userId/name and
+  // replay.teamSize splits the teams. Fall back to the halving heuristic
+  // only when the detail fetch fails.
+  async function sidesFor(r) {
+    try {
+      const d = await api.getReplay(r.sessionId);
+      const st = d?.state;
+      const ts = st?.replay?.teamSize;
+      if (ts && st.seats) {
+        const teams = [[], []];
+        for (let pid = 0; pid < ts * 2; pid++) {
+          const seat = st.seats[pid];
+          if (!seat) continue;
+          const name = seat.userId
+            ? await api.getDisplayName(seat.userId)
+            : `${seat.name} (AI)`;
+          teams[pid < ts ? 0 : 1].push(name);
+        }
+        if (teams[0].length || teams[1].length) {
+          return `${teams[0].join(', ') || '—'} vs ${teams[1].join(', ') || '—'}`;
+        }
+      }
+    } catch { /* fall through to the heuristic */ }
+    const names = await Promise.all(
+      (r.players || []).map((p) => api.getDisplayName(p.userId)));
+    const mid = Math.ceil(names.length / 2);
+    return names.length > 1
+      ? `${names.slice(0, mid).join(', ')} vs ${names.slice(mid).join(', ')}`
+      : (names[0] || '—');
   }
 
   backBtn.onclick = () => { audio.ui(); close(); };

@@ -39,16 +39,20 @@ The platform offers three multiplayer substrates:
 - **Scripted games** (`server.js` in a Jint sandbox): server-authoritative.
   Fresh stateless invocations (~250 ms CPU budget), 16 KB text frames, all
   state round-tripped through JSON documents. Scripts declare their own tick
-  rate statically (`game.tickRateHz`, 30 Hz default, clamped to 1000 Hz, 0
-  disables — read once at publish time), and realtime rooms can be **bound to
+  rate statically (`game.tickRateHz`, 30 Hz default, clamped to the supported
+  platform range, 0 disables — read once at publish time), and realtime rooms can be **bound to
   an N-player scripted session** whose ctx carries the room roster (AI seats
   included) and live presence — enough to run a realtime football sim
   server-side.
   Reference game is correspondence chess (low tick rate, turn-based flow).
-- **Peer relay** (`ws/v1/relay`): binary fan-out, but disabled by default,
-  `maxParticipants` defaults to 8, 4 KB frames, 10 msgs/s/user, max 5 sessions
+- **Peer relay** (`ws/v1/relay`): binary fan-out (availability may vary).
+  Every relay is now **bound to one match** (a game session or a realtime
+  room) and authorized against that match's roster; `maxParticipants`
+  defaults to 8, 4 KB frames, per-sender rate limit derived from the bound
+  match's tick rate (violations close the sender's socket), max 5 sessions
   per title, no host/authority concept, no invites/matchmaking/backfill.
-  **Insufficient for 22-player football.**
+  **Insufficient for 22-player football** — and this game needs server-side
+  rules authority anyway, which the relay deliberately does not provide.
 - **Realtime Rooms** (`/api/v1/realtime`, `ws/v1/realtime`): generalized
   lobbies — rooms, seats, invites, quick-join matchmaking, AI-seat backfill —
   added by this project (§8). With the room⇄script bridge they now also create
@@ -120,6 +124,10 @@ all-humans-gone rule are covered in §4.5.
 - **Practice (1 vs AI)** — offline-capable path: no room needed, local
   simulation, you + AI opponent(s). Runs the same `server.js` sim code
   in-browser, looped back locally.
+- **Ranked vs AI** — online solo: `POST /rooms` with
+  `aiPlayers = 2×teamSize − 1` (every seat but the host's is an AI seated at
+  creation), then `POST .../start`. No backfill wait; a real
+  server-authoritative platform match — rated and archived as a replay.
 
 ### 4.2 Lobby & matchmaking sequence
 
@@ -137,7 +145,9 @@ all-humans-gone rule are covered in §4.5.
 
 ### 4.3 AI backfill
 
-When the 30 s window expires (or the host force-starts early), the host calls
+When the 30 s window expires (or the host force-starts early, **or every seat
+is taken** — an Open room auto-starts there and then, so the `open`/join
+response can already be `Playing`), the host calls
 `POST .../rooms/{id}/start`. The server atomically fills every empty seat
 with an **AI seat**: a participant record flagged `ai: true` with a
 server-generated random nickname (name pool: plausible footballer handles,
@@ -147,7 +157,9 @@ and the room⇄script bridge creates the bound GameSession (`server.js`'s
 `createSession` receives the full roster, AI seats included, as
 `ctx.room.roster`). AI seats are simulated by `server.js` server-side with
 position-appropriate personalities (§7). Practice mode skips the server
-entirely.
+entirely. The bridge binds `gameSessionId` in a separate step from flipping
+the room to `Playing`, so a client that sees `Playing` without it waits
+("Starting match…") and re-polls briefly rather than entering session-less.
 
 ### 4.4 Match sequence
 
@@ -230,6 +242,14 @@ migration and host rejoin recovery machinery of the old design is gone.
   `{ t, ev }` for the presentation events only (`goal`, `halftime`,
   `kickoff`, `fulltime`). Frames cap at 900 (`truncated: true` beyond that) —
   a default 2×3 min match is ~720 frames.
+- **Display names**: player-facing views (leaderboard, replays, chat, lobby
+  roster, in-match nametags) render the profile **nickname** resolved via
+  `GET /api/v1/users/{id}/profile` (cached per session in
+  `api.getDisplayName`), never the raw account username; lookup failures
+  fall back to a neutral `Player <id8>`. The
+  replay-list sides come from the archived `state.seats`/`replay.teamSize` —
+  the list payload's `players[]` has no team assignment and no documented
+  ordering, so halving it would mis-split unbalanced human teams.
 
 ## 5. Client: rendering & presentation
 
@@ -401,8 +421,8 @@ session via the room⇄script bridge (§8.7).
 
 - `RealtimeRoom` — `Id, GameSlug, HostUserId, Status (Lobby|Open|Playing|
   Closed), ConfigJson { teamCount, seatsPerTeam, backfillAfterSeconds,
-  metadata }, GameSessionId (bound scripted session, once started), CreatedAt,
-  OpenedAt, StartedAt, ClosedAt`.
+  aiPlayers, metadata }, GameSessionId (bound scripted session, once
+  started), CreatedAt, OpenedAt, StartedAt, ClosedAt`.
 - `RealtimeParticipant` — `Id, RoomId, UserId (null for AI), Username, IsAi,
   IsHost, Team, Slot, JoinedAt, LeftAt`.
 - `RealtimeInvite` — `Id, RoomId, FromUserId, ToUserId, Status, CreatedAt`.
@@ -416,13 +436,13 @@ session via the room⇄script bridge (§8.7).
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/rooms` | Create lobby; caller becomes host. Body: `{ teamCount, seatsPerTeam, backfillAfterSeconds=30, metadata }`. Caps: teamCount ≤ 2 (v1), seatsPerTeam ≤ 11, total seats ≤ 32. |
+| POST | `/rooms` | Create lobby; caller becomes host. Body: `{ teamCount, seatsPerTeam, backfillAfterSeconds=30, aiPlayers=0, metadata }`. `aiPlayers` seats that many AI participants immediately (emptiest team first; they occupy seats, so invites/quick-join fill only what remains). Caps: teamCount ≤ 2 (v1), seatsPerTeam ≤ 11, total seats ≤ 32. |
 | GET | `/rooms/{id}` | Room + roster (participants or invitees only). |
 | POST | `/rooms/{id}/invites` | Invite friend (`{ toUserId }`); friends-only check, 409 dup. |
 | GET | `/rooms/invites` | Caller's pending room invites (cross-game). |
 | POST | `/rooms/invites/{inviteId}/accept` | Join that room (seat assigned). |
 | POST | `/rooms/invites/{inviteId}/decline` | 204. |
-| POST | `/rooms/{id}/open` | Host: open to matchmaking; starts backfill timer. |
+| POST | `/rooms/{id}/open` | Host: open to matchmaking; starts backfill timer. An Open room also starts the moment every seat is taken (humans and/or creation-time AI) — the `open`/join response can already be `Playing`. |
 | POST | `/rooms/quick-join` | Body `{ gameSlug (implied by token), seats: 1 }` → placed in oldest open room with free seats for this game, else 404 (client then creates its own open room). |
 | POST | `/rooms/{id}/start` | Host: AI-backfill empty seats, status→Playing, returns frozen roster. Idempotent; auto-invoked by a worker at backfill deadline. Also creates the room-bound scripted session (§8.7). |
 | POST | `/rooms/{id}/leave` | Leave. In Lobby/Open the seat is removed (host leaving transfers host to the longest-serving human; none left → Closed). In Playing the seat converts to an AI participant (fresh server nickname, roster pushed) so the match continues; host leaving transfers `IsHost` to the longest-serving remaining human, or closes the room if none remain. |
@@ -505,7 +525,10 @@ scripted session instead of on a host client:
   was a human participant (`online` = a live socket on either WS registry;
   `left` = the seat was explicitly left and converted to AI). The script
   drives AI takeover, the injury ceremony, and the all-humans-gone rule from
-  this (§4.5).
+  this (§4.5). A **standalone** session (matchmaking, invite-accept, AI
+  practice) receives neither field: `server.js` then seats `ctx.players`
+  (alternating teams, the platform AI seat flagged `ai: true`) and skips
+  presence reconciliation entirely.
 - **Result closes the room**: when the script returns `result` (full time, or
   the abandoned-draw), the platform finishes the session, stores the result on
   the room, and closes the room — no host-submitted `POST .../result` for
@@ -662,8 +685,6 @@ matches render from server snapshots only.
 
 - Fouls/cards/offside (kick-and-rush rules: out-of-bounds → throw-in style
   restart only, goals + kickoffs; keeps the sim and AI tractable).
-- Replays, in-game text chat beyond lobby ready/chat (the room-bound session
-  gets a platform chat conversation, but the client doesn't surface it).
 
 ## 13. Voice chat
 
@@ -689,6 +710,12 @@ Opt-out in-match voice between the human players of an online match.
   distance between my footballer and the speaker's footballer (full volume
   within 4 m, silent beyond 55 m, squared falloff); pan follows the direction
   relative to my facing. Nearby players sound nearby, distant ones distant.
+- **Mute**: toggle with M or the HUD mic button. The platform drops relayed
+  audio from muted users, but this client's audio is WebRTC P2P, so mute is
+  enforced client-side: locally by disabling the mic tracks at source,
+  remotely by zeroing a muted peer's gain (roster `muted` flags and
+  `voice.mute_changed` events). State is published via
+  `POST /rooms/{roomId}/mute` and the `{type:'mute'}` relay frame.
 - **Best-effort**: any failure (mic denied, voice disabled platform-side,
   relay unreachable) degrades silently — the match never depends on voice.
 - The Windows client needs no changes: games run in the system browser over

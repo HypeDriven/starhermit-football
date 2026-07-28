@@ -1,18 +1,18 @@
 // main.js — boot, screens state machine, renderer, match lifecycle.
 import * as THREE from 'three';
-import * as api from './api.js?v=5';
-import { createAudio } from './game/audio.js?v=5';
-import { createInput } from './game/input.js?v=5';
-import { createHud } from './hud.js?v=5';
-import { createMatchController } from './match.js?v=5';
-import { createLobby } from './lobby.js?v=5';
-import { createNetClient, createGameClient } from './net.js?v=5';
-import { createMenuScene } from './menuScene.js?v=5';
-import { createVoice } from './voice.js?v=5';
-import { createControlsScreen } from './controls.js?v=5';
-import { createLeaderboardScreen } from './leaderboard.js?v=5';
-import { createReplaysScreen } from './replays.js?v=5';
-import { createReplayViewer } from './replayview.js?v=5';
+import * as api from './api.js?v=6';
+import { createAudio } from './game/audio.js?v=6';
+import { createInput } from './game/input.js?v=6';
+import { createHud } from './hud.js?v=6';
+import { createMatchController } from './match.js?v=6';
+import { createLobby } from './lobby.js?v=6';
+import { createNetClient, createGameClient } from './net.js?v=6';
+import { createMenuScene } from './menuScene.js?v=6';
+import { createVoice } from './voice.js?v=6';
+import { createControlsScreen } from './controls.js?v=6';
+import { createLeaderboardScreen } from './leaderboard.js?v=6';
+import { createReplaysScreen } from './replays.js?v=6';
+import { createReplayViewer } from './replayview.js?v=6';
 
 const $ = (id) => document.getElementById(id);
 
@@ -149,6 +149,17 @@ function setupMenu() {
     if (!(await confirmLeaveActiveRoom())) return;
     startPractice();
   };
+  // Ranked solo vs AI — an online platform match, so it needs a launch token.
+  const soloBtn = $('btn-solo');
+  if (!auth.online) soloBtn.classList.add('hidden');
+  soloBtn.onclick = async () => {
+    audio.ui(); audio.resume();
+    if (!(await confirmLeaveActiveRoom())) return;
+    try {
+      showScreen('screen-lobby');
+      await lobby.soloVsAi(teamSize);
+    } catch (e) { showScreen('screen-menu'); setStatus(`Could not start match: ${e.message}`); }
+  };
   $('btn-lobby').onclick = async () => {
     audio.ui(); audio.resume();
     if (!(await confirmLeaveActiveRoom())) return;
@@ -263,8 +274,10 @@ async function onMatchReady(room, { isRejoin = false } = {}) {
   matchRoom = room;
   const m = ensureMatch();
 
-  // gameplay transport: server-authoritative games socket
-  const gameNet = createGameClient({ sessionId, getToken: () => me.token });
+  // gameplay transport: server-authoritative games socket. Read the token
+  // live — the 45-minute remint replaces it, and a reconnect must not use
+  // the captured (by then expired) one.
+  const gameNet = createGameClient({ sessionId, getToken: () => api.getAuth().token });
   try {
     await gameNet.connect({
       onSnapshot: (snap) => m.onSnapshot(snap),
@@ -278,7 +291,7 @@ async function onMatchReady(room, { isRejoin = false } = {}) {
   }
 
   // realtime rooms socket stays for roster pushes (name/AI flag changes)
-  const lobbyNet = createNetClient({ roomId: room.id, getToken: () => me.token });
+  const lobbyNet = createNetClient({ roomId: room.id, getToken: () => api.getAuth().token });
   lobbyNet.connect({
     onRoster: (parts) => m.applyRoster(parts),
   }).catch(() => { /* ancillary — snapshots carry the same data */ });
@@ -414,8 +427,16 @@ loop();
 addEventListener('pointerdown', () => audio.resume(), { once: true });
 addEventListener('keydown', () => audio.resume(), { once: true });
 
-// refresh launch token before its 60-minute expiry
-if (auth.online) setInterval(() => api.remintLaunchToken().catch(() => {}), 45 * 60 * 1000);
+// refresh the launch token before its 60-minute expiry. Retry every minute on
+// failure: an expired game-scoped token can no longer remint, so one swallowed
+// failure must not take the whole session permanently offline.
+function scheduleTokenRefresh(delay = 45 * 60 * 1000) {
+  setTimeout(async () => {
+    try { await api.remintLaunchToken(); scheduleTokenRefresh(); }
+    catch { scheduleTokenRefresh(60 * 1000); }
+  }, delay);
+}
+if (auth.online) scheduleTokenRefresh();
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

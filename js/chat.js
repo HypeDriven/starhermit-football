@@ -6,7 +6,7 @@
 // renders the tail into a small HUD panel (bottom-left, inside #hud).
 // Like voice, chat is best-effort: any failure degrades to a muted status
 // line or silence — the match itself never depends on it.
-import * as api from './api.js?v=5';
+import * as api from './api.js?v=6';
 
 const POLL_MS = 5000;
 const PAGE_SIZE = 50;
@@ -78,7 +78,9 @@ export function createMatchChat({ sessionId, myUserId }) {
     }
     const name = document.createElement('span');
     name.className = 'chat-name';
-    name.textContent = m.senderUsername || '?';
+    name.textContent = '…';
+    // senderUsername is the account username — resolve the profile nickname
+    api.getDisplayName(m.senderId).then((n) => { if (name.isConnected) name.textContent = n; });
     el.append(name, document.createTextNode(m.content ?? ''));
     return el;
   }
