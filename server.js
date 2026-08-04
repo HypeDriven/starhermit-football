@@ -327,7 +327,7 @@ function resetKickoff(state, kickoffTeam) {
   for (var pi = 0; pi < state.players.length; pi++) {
     var p = state.players[pi];
     var a = formationAnchor(p.slot, teamSize);
-    p.x = a.u * pitch.L * -attackSign(state, p.team);
+    p.x = a.u * pitch.L * attackSign(state, p.team);
     p.z = a.v * pitch.W;
     if (p.team === kickoffTeam && p.role === 'FW') {
       // two forwards near the center spot
@@ -923,7 +923,7 @@ function decide(state, p, hasBall, difficulty) {
   // Formation anchor shifts with the ball: attack when we have it, fall back
   // when we don't; more "positioning" = holds shape, less = chases.
   var ballBiasU = clamp(b.x / (L / 2), -1, 1) * 0.16 * (b.owner != null && state.players[b.owner].team === p.team ? 1 : -0.7);
-  var ax = (anchor.u + ballBiasU) * L * -atk * -1;
+  var ax = (anchor.u + ballBiasU) * L * atk;
   var az = anchor.v * W + clamp(b.z / (W / 2), -1, 1) * W * 0.08;
 
   var plan = { x: ax, z: az, sprint: false, wantShoot: false, wantPass: false, wantTackle: false };
@@ -1247,7 +1247,7 @@ function stepCeremony(state, dt) {
   // ── replacement runs on to its formation anchor ──
   if (c.stage >= 3 && c.stage < 5) {
     var a = formationAnchor(p.slot, state.teamSize);
-    var ax = a.u * L * -attackSign(state, p.team);
+    var ax = a.u * L * attackSign(state, p.team);
     var az = a.v * W;
     approach(p, ax, az, RUN_SPEED, c.tSubBy - c.t, dt);
     if (!c.subPushed && (p.x > -L / 2 || c.t >= c.tSubBy)) {
