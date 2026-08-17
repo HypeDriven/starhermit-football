@@ -23,8 +23,9 @@
 //   game.onPlayerMessage(ctx)    -> { ok, sessionState, broadcast }
 //   game.onTick(ctx)             -> { ok, sessionState, broadcast, result? }
 //
-// Static declarations read once at publish time: `game.tickRateHz` (30) and
-// `game.achievements` (the achievement catalog). A full-time return also
+// Static declarations read once at publish time: `game.tickRateHz` (30),
+// `game.replays` (keep finished matches as replays; the platform keeps none
+// unless asked) and `game.achievements` (the achievement catalog). A full-time return also
 // carries `achievements: { "<userId>": [key, ...] }` for eligible humans.
 //
 // ctx = {
@@ -1620,8 +1621,10 @@ function synthRoster(players) {
 globalThis.game = {
 
   // Static declarations, read by the platform once at publish time (not per
-  // invocation): the sim tick rate and the achievement catalog.
+  // invocation): the sim tick rate, whether finished matches are kept as
+  // replays (nothing is kept unless a game asks), and the achievement catalog.
   tickRateHz: 30,
+  replays: true,
   achievements: [
     { key: 'debut', name: 'Debut', description: 'Finish your first match.', points: 10 },
     { key: 'first-win', name: 'First Win', description: 'Win a match.', points: 25 },
