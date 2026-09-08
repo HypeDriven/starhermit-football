@@ -194,11 +194,8 @@ var AI_NAME_POOL = [
   'Cole Ashford', 'Ilya Sorin', 'Tomás Rocha', 'Felix Grau', 'Andi Prata',
 ];
 
-var nextAiNameIdx = 0;
 function takeAiName(rng) {
-  var i = Math.floor((rng ? rng() : Math.random()) * AI_NAME_POOL.length);
-  nextAiNameIdx = (i + 1) % AI_NAME_POOL.length;
-  return AI_NAME_POOL[i];
+  return AI_NAME_POOL[Math.floor((rng ? rng() : Math.random()) * AI_NAME_POOL.length)];
 }
 
 // ── Pitch / formation helpers ────────────────────────────────────────────────
@@ -904,11 +901,10 @@ function computeAiInput(state, p, dt, difficulty) {
     if (dist(p, owner) < 1.7 && plan.wantTackle && state.rng() < dt * (1 + p.personality.aggression * 4)) {
       input.tackle = true;
     }
-    // GK dive at close-range shots
-    if (p.role === 'GK' && b.owner == null) {
-      var spd = Math.hypot(b.vx, b.vz);
-      if (spd > 10 && dist(p, b) < 3.2 && ballHeadingAt(state, p)) input.tackle = true;
-    }
+  } else if (b.owner == null && p.role === 'GK') {
+    // GK dive at close-range shots (a loose ball flying at goal)
+    var spd = Math.hypot(b.vx, b.vz);
+    if (spd > 10 && dist(p, b) < 3.2 && ballHeadingAt(state, p)) input.tackle = true;
   }
 
   return input;
@@ -1280,6 +1276,12 @@ var INPUT_STALE_MS = 1000;    // zero inputs older than this
 var OFFLINE_GRACE_MS = 5000;  // offline this long -> seat goes away
 var SNAP_INTERVAL_MS = 30;    // one snapshot per 30 Hz tick when on schedule
 var MAX_TICK_DT = 0.25;       // clamp tick delta (seconds)
+// Clients play the walkout + coin-flip presentation (~12.5 s) right after
+// connecting. Hold the kickoff formation and the clock for that window so the
+// match cannot start — and AI seats cannot play or score — while every human
+// is still watching the intro. Rejoining clients skip the intro and simply
+// see everyone waiting at the kickoff spots until the hold lapses.
+var INTRO_HOLD_MS = 13000;
 
 function r2(v) { return Math.round(v * 100) / 100; }
 
@@ -1692,6 +1694,7 @@ globalThis.game = {
       offlineSince: {},
       pendingCeremonies: [],
       ended: false,
+      introUntil: ctx.now + INTRO_HOLD_MS,
       goals: {},
       playerDocs: playerDocs,
       summary: { status: 'active', moveCount: 0 },
@@ -1753,7 +1756,12 @@ globalThis.game = {
         storeRealtimeInput(state, frame.from, frame.data, ctx.now);
     }
 
-    if (!state.ended) {
+    // Intro hold: no presence reconciliation, no sim step — everyone stays at
+    // the kickoff formation with the clock at 0:00 until clients finish the
+    // walkout/coin-flip presentation. Snapshots still go out below.
+    var introHold = state.introUntil != null && ctx.now < state.introUntil;
+
+    if (!state.ended && !introHold) {
       reconcilePresence(ctx, state);
       maybeStartCeremony(state);
       drainEvents(match, bc, state);

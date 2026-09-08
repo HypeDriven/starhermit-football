@@ -11,15 +11,15 @@ import * as THREE from 'three';
 import {
   createMatch, stepMatch, takeAiName, makeRng, resetKickoff,
   WALK_SPEED, RUN_SPEED, SPRINT_SPEED, TURN_RATE, BALL_SLOWDOWN, BALL_R, GRAVITY,
-} from './game/sim.js?v=6';
-import { computeAiInput, clearAiPlans } from './game/ai.js?v=6';
-import { buildStadium } from './world/stadium.js?v=6';
-import { createPlayerMesh } from './world/player.js?v=6';
-import { createCeremonyViews } from './world/officials.js?v=6';
-import { createFollowCamera } from './game/camera.js?v=6';
-import { createMatchChat } from './chat.js?v=6';
-import { parsePlayerRow, parseBallRow } from './snapformat.js?v=6';
-import * as api from './api.js?v=6';
+} from './game/sim.js?v=7';
+import { computeAiInput, clearAiPlans } from './game/ai.js?v=7';
+import { buildStadium } from './world/stadium.js?v=7';
+import { createPlayerMesh } from './world/player.js?v=7';
+import { createCeremonyViews } from './world/officials.js?v=7';
+import { createFollowCamera } from './game/camera.js?v=7';
+import { createMatchChat } from './chat.js?v=7';
+import { parsePlayerRow, parseBallRow } from './snapformat.js?v=7';
+import * as api from './api.js?v=7';
 
 const TEAM_KITS = [
   { shirt: '#1f5fb4', shorts: '#f2f2f2', socks: '#1f5fb4', gk: '#e67e22', plate: '#1f5fb4', label: 'BLUE' },

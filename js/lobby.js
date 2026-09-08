@@ -1,8 +1,8 @@
 // lobby.js — lobby screen: create/invite/open/quick-join against the
 // platform's Realtime Rooms API (spec.md §8). Pure DOM + api.js; main.js
 // drives the transitions.
-import * as api from './api.js?v=6';
-import { roleForSlot } from './game/sim.js?v=6';
+import * as api from './api.js?v=7';
+import { roleForSlot } from './game/sim.js?v=7';
 
 const ROLE_NAMES = { GK: 'Goalkeeper', DF: 'Defender', MF: 'Midfielder', FW: 'Forward' };
 
@@ -149,7 +149,15 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
   async function findMatch() {
     findBtn.disabled = true;
     inviteBtn.disabled = true;
-    room = await api.openRoom(room.id);
+    try {
+      room = await api.openRoom(room.id);
+    } catch (e) {
+      // still in the lobby: restore both buttons (render() never touches the
+      // invite button, so without this it would stay disabled for good)
+      findBtn.disabled = false;
+      inviteBtn.disabled = false;
+      throw e;
+    }
     if (room.status === 'Playing' || room.status === 'playing') {
       enterWhenReady();
       return;
@@ -226,6 +234,9 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
     const host = amHost();
     findBtn.disabled = !host || status !== 'lobby';
     findBtn.title = host ? '' : 'Only the lobby host can start matchmaking';
+    // invites make sense until the match starts; render owns this state so a
+    // disabled button never leaks into a fresh lobby
+    inviteBtn.disabled = status === 'playing' || status === 'closed';
     for (let t = 0; t < 2; t++) {
       const head = document.createElement('div');
       head.className = 'team-head';

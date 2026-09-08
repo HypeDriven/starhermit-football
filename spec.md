@@ -169,7 +169,9 @@ the room to `Playing`, so a client that sees `Playing` without it waits
    and kicks off (server-side RNG inside `server.js` decides; animation shows
    the result).
 3. **Play**: 2 halves × configurable length (default 3 min). Kickoff after
-   each goal, teams swap sides at half time.
+   each goal, teams swap sides at half time. The script holds the kickoff
+   formation and the clock for ~13 s after session creation (`INTRO_HOLD_MS`)
+   so no play — and no AI — runs while clients are still in steps 1–2.
 4. **Full time**: final whistle, crowd reaction by result, celebration
    animation for winners, stats screen (score, possession, shots), then
    back to lobby. The script ends the match by returning `result`

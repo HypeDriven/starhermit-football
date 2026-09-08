@@ -1,18 +1,18 @@
 // main.js — boot, screens state machine, renderer, match lifecycle.
 import * as THREE from 'three';
-import * as api from './api.js?v=6';
-import { createAudio } from './game/audio.js?v=6';
-import { createInput } from './game/input.js?v=6';
-import { createHud } from './hud.js?v=6';
-import { createMatchController } from './match.js?v=6';
-import { createLobby } from './lobby.js?v=6';
-import { createNetClient, createGameClient } from './net.js?v=6';
-import { createMenuScene } from './menuScene.js?v=6';
-import { createVoice } from './voice.js?v=6';
-import { createControlsScreen } from './controls.js?v=6';
-import { createLeaderboardScreen } from './leaderboard.js?v=6';
-import { createReplaysScreen } from './replays.js?v=6';
-import { createReplayViewer } from './replayview.js?v=6';
+import * as api from './api.js?v=7';
+import { createAudio } from './game/audio.js?v=7';
+import { createInput } from './game/input.js?v=7';
+import { createHud } from './hud.js?v=7';
+import { createMatchController } from './match.js?v=7';
+import { createLobby } from './lobby.js?v=7';
+import { createNetClient, createGameClient } from './net.js?v=7';
+import { createMenuScene } from './menuScene.js?v=7';
+import { createVoice } from './voice.js?v=7';
+import { createControlsScreen } from './controls.js?v=7';
+import { createLeaderboardScreen } from './leaderboard.js?v=7';
+import { createReplaysScreen } from './replays.js?v=7';
+import { createReplayViewer } from './replayview.js?v=7';
 
 const $ = (id) => document.getElementById(id);
 

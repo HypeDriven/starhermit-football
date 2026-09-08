@@ -62,11 +62,17 @@ export function createInput() {
     shootHoldTime = 0;
   }
 
+  // Typing in a form field (match chat) or operating a menu control (the
+  // team-size select) must not move the player or lose the default behavior.
+  const fieldFocused = () => document.activeElement?.matches?.('input, textarea, select');
+
   addEventListener('keydown', (e) => {
-    // Typing in a form field (match chat) must not move the player.
-    if (document.activeElement?.matches?.('input, textarea')) return;
+    if (fieldFocused()) return;
     const k = keymap[e.code];
     if (!k) return;
+    // Outside gameplay (menus, lobby, result screen) leave Space/arrows to the
+    // focused controls — no preventDefault, no tracking.
+    if (!gameplayActive) return;
     e.preventDefault();
     if (downCodes.has(e.code)) return;
     downCodes.add(e.code);
@@ -78,6 +84,7 @@ export function createInput() {
   addEventListener('keyup', (e) => {
     const k = keymap[e.code];
     if (!k) return;
+    if (!downCodes.has(e.code)) return; // never tracked (menu/field) — leave it alone
     e.preventDefault();
     downCodes.delete(e.code);
     // An action can have alternate bindings; keep it down until all of its
@@ -96,9 +103,10 @@ export function createInput() {
   }
   addEventListener('blur', clearDesktopInput);
   document.addEventListener('visibilitychange', () => { if (document.hidden) clearDesktopInput(); });
-  // A field taking focus (match chat) drops held keys so a run doesn't stick.
+  // A field taking focus (match chat, team-size select) drops held keys so a
+  // run doesn't stick.
   document.addEventListener('focusin', (e) => {
-    if (e.target?.matches?.('input, textarea')) clearDesktopInput();
+    if (e.target?.matches?.('input, textarea, select')) clearDesktopInput();
   });
 
   // ── touch ──
