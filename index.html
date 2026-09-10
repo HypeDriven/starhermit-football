@@ -6,7 +6,7 @@
 <title>StarHermit Football</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <!-- Keep this version in sync with local ES-module imports when deploying. -->
-<link rel="stylesheet" href="css/style.css?v=7">
+<link rel="stylesheet" href="css/style.css?v=8">
 <script type="importmap">
 { "imports": { "three": "./vendor/three/three.module.min.js" } }
 </script>
@@ -17,9 +17,11 @@
 <!-- ══ HUD (in-match) ══ -->
 <div id="hud" class="hidden">
   <div id="scorebar">
+    <img class="crest" src="assets/crest-blue.webp" alt="" aria-hidden="true">
     <span id="score-home-name">HOME</span>
     <span id="score-home">0</span><span id="score-sep">–</span><span id="score-away">0</span>
     <span id="score-away-name">AWAY</span>
+    <img class="crest" src="assets/crest-red.webp" alt="" aria-hidden="true">
     <span id="match-clock">00:00</span>
   </div>
   <div id="ball-arrow" class="hidden"><div id="ball-arrow-head">▲</div><div id="ball-arrow-dist"></div></div>

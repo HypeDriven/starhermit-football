@@ -24,7 +24,7 @@
  *   deviceScaleFactor 0.5 on desktop only shrinks the WebGL drawing buffer
  *   (CSS layout is untouched) to keep software rendering affordable.
  *
- * Run: npm run test:e2e
+ * Run: npm run test:e2e   (PORT=<n> pins the embedded static server's port)
  */
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -44,6 +44,7 @@ const MIME = {
   '.png': 'image/png', '.ico': 'image/x-icon', '.wav': 'audio/wav',
   '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.opus': 'audio/opus',
   '.glb': 'model/gltf-binary', '.woff2': 'font/woff2', '.ts': 'video/mp2t',
+  '.webp': 'image/webp',
 };
 const server = http.createServer(async (req, res) => {
   try {
@@ -270,7 +271,8 @@ const mobileDrive = (base) => {
 let browser;
 try {
   await new Promise((resolve, reject) => {
-    server.listen(0, '127.0.0.1', resolve);
+    // PORT pins the static server (CI port ranges); default is ephemeral
+    server.listen(Number(process.env.PORT) || 0, '127.0.0.1', resolve);
     server.once('error', reject);
   });
   const base = `http://127.0.0.1:${server.address().port}/`;

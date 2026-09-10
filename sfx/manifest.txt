@@ -1,0 +1,24 @@
+# StarHermit Football — SFX manifest (canonical). One clip per line:
+# file | event id (js/game/audio.js) | description of the sound | usage context
+# Clips: MOSS-SoundEffect v2.0, 48 kHz mono Opus 96 kbps VBR, loudness-normalised (-20 LUFS), 100 steps.
+# audio.js fetches sfx/manifest.json, decodes every listed clip into an AudioBuffer, and plays the clip for
+# an event when it decoded; otherwise the WebAudio synthesiser for that event plays instead (never silence).
+# The looping crowd bed, the reverb, the excitement level and per-play pitch/pan variation stay synthesised.
+kick-pass.opus | kick.pass | A soft short football pass, a leather boot brushing a ball on grass, one light thump | audio.kick(power) with power < 0.5: sim 'kick' events of kind pass/loose (server.js doPass, looseBall) and the local pass feedback in match.js updateOnline
+kick-shot.opus | kick.shot | A powerful football shot, a boot striking a ball hard, one deep solid thump with a leather slap | audio.kick(power) with power >= 0.5: sim 'kick' events of kind shoot (server.js doShoot) and the local charged-shot feedback
+ball-bounce.opus | bounce | A football bouncing once on firm turf, a single dull hollow bounce | sim 'bounce' event with power > 0.25 (server.js stepBall ground contact), match.js handleSimEvent
+tackle-slide.opus | tackle | A footballer sliding across grass in a slide tackle, grass scuff, soft body thud and a short grunt | sim 'tackle' and 'steal' events (server.js stepPlayer, stepBall proximity steal)
+gk-dive.opus | dive | A goalkeeper diving and landing on grass, a rush of movement then a heavy body thud on turf | sim 'dive' event (goalkeeper tackle near own goal, server.js stepPlayer)
+whistle-short.opus | whistle.short | A single sharp referee whistle blast in a large open stadium | audio.whistle('short'): kickoff after the coin flip, 'goal', 'kickoff', 'restart' (sideline/goalline/drop-ball) and 'referee-whistle' events
+whistle-long.opus | whistle.long | Three sharp referee whistle blasts in a row echoing in a large stadium | audio.whistle('long'): 'halftime', 'fulltime' and 'abandoned-draw' events
+crowd-cheer.opus | crowd.cheer | A large stadium crowd cheering, a rising swell of voices and applause that settles back down | audio.crowd.cheer(strength): walkout start, coin flip, own goal, full time by result, 'substitution'
+crowd-goal.opus | crowd.goal | A huge stadium crowd erupting in a roar as a goal is scored, air horns and whistles, long sustained roar | audio.crowd.goal(isHome): 'goal' event (not own goals)
+crowd-gasp.opus | crowd.gasp | A stadium crowd gasping sharply all at once, then a hushed murmur | audio.crowd.gasp(): 'woodwork', own goal, 'injury-start'
+crowd-ooh.opus | crowd.ooh | A football crowd groaning ooh in unison at a near miss, a falling collective moan | audio.crowd.ooh(): 'woodwork' (post or bar)
+crowd-boo.opus | crowd.boo | A stadium crowd booing loudly, thousands of people jeering and whistling in disapproval | audio.crowd.boo(strength): one second after an 'injury-start' of kind leave (a human left the match)
+crowd-anticipation.opus | crowd.anticipation | A stadium crowd rising in anticipation, a growing murmur and rumble of excited voices | audio.crowd.anticipation(): 'dive' event (goalkeeper going for a shot)
+crowd-matchstart.opus | crowd.matchStart | A packed stadium roaring as the teams walk out, a sustained wall of cheering with drums and chanting | audio.crowd.matchStart(): the lobby flips to a match (lobby.js enterMatch → main.js onStarting)
+injury-cry.opus | injury | A footballer crying out in pain and falling onto grass, a short yelp then a body thud | audio.injury(): 'injury-start' event (leave or rejoin ceremony begins)
+footstep-grass.opus | footstep | A single running footstep of a football boot on short grass, one quick soft crunch | audio.footstep(): own footballer at run/sprint cadence (match.js updateAudio, one per stride)
+coin-flip.opus | coin | A metal coin flicked into the air, spinning with a bright metallic ring, then landing flat | audio.coin(): the coin-flip phase begins after the walkout (match.js updateWalkout → 'coinflip')
+ui-click.opus | ui | A short soft plastic click of a menu button, a single quiet tick | audio.ui(): every menu, lobby, dialog, leaderboard, replays and controls button

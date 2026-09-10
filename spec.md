@@ -1,725 +1,482 @@
-# StarHermit Football — Design & Implementation Spec
+# StarHermit Football — Game Design Document (running spec)
 
-A realtime, 3D, multiplayer football (soccer) game for the browser, built on
-three.js and hosted on the StarHermit platform at
-`<slug>.starhermit.com`. Up to 22 players (11 per side), minimum 1 vs 1
-against an AI opponent. Desktop and mobile browsers.
+Realtime 3D football (soccer) in the browser: 1v1 up to 11v11, humans and AI on the
+same pitch, a night match under floodlights, played on desktop and mobile and hosted on
+the StarHermit platform. This document describes the game as it ships today, in present
+tense. Anything the design wants that the code does not yet do is listed once, at the end,
+under "Design intent not yet implemented".
 
-- Repo layout: this repository is the **game** (a static, no-build site with a
-  `starhermit.txt` manifest, following the starhermit-chess reference shape).
-- Backend work lives in the sibling repository
-  `../starhermit` (`Platform.Backend.sln`): a new, generalized **Realtime
-  Rooms** API that any game on the platform can use (see §8).
+## 1. Overview
 
----
-
-## 1. Requirements (from the brief)
-
-| # | Requirement | Where addressed |
-|---|-------------|-----------------|
-| 1 | Web-based, three.js, 3D animated characters, realistic movement animation | §5 |
-| 2 | Multiplayer football, up to 22 players (11v11) | §6, §8 |
-| 3 | Minimum 1 vs 1 AI opponent | §4.1, §7 |
-| 4 | Art style: "football club professional" | §5.1 |
-| 5 | Hosted on StarHermit, using platform features | §3, §8 |
-| 6 | Lobby with up to 10 pre-invited friends (11 total per side); remaining spots filled by best-effort matchmaking | §4.2, §8.2 |
-| 7 | After 30 s, unfilled spots become AI players with random names | §4.3, §8.4 |
-| 8 | Nicknames float above players' heads | §5.4 |
-| 9 | Camera follows your character; arrow indicates off-screen ball | §5.5 |
-| 10 | SFX: ball contact, contextual crowd cheers/gasps, high variety | §9 |
-| 11 | Match intro: players walk out, crowd cheers, coin flip for kickoff | §4.4 |
-| 12 | Realtime gameplay | §6 |
-| 13 | Missing platform features implemented backend-side, secure + generalized | §8 |
-| 14 | Desktop + mobile browser, controls that feel good on both | §5.6 |
-
-## 2. Platform reality check (from wiki.starhermit.com)
-
-The platform offers three multiplayer substrates:
-
-- **Scripted games** (`server.js` in a Jint sandbox): server-authoritative.
-  Fresh stateless invocations (~250 ms CPU budget), 16 KB text frames, all
-  state round-tripped through JSON documents. Scripts declare their own tick
-  rate statically (`game.tickRateHz`, 30 Hz default, clamped to the supported
-  platform range, 0 disables — read once at publish time), and realtime rooms can be **bound to
-  an N-player scripted session** whose ctx carries the room roster (AI seats
-  included) and live presence — enough to run a realtime football sim
-  server-side.
-  Reference game is correspondence chess (low tick rate, turn-based flow).
-- **Peer relay** (`ws/v1/relay`): binary fan-out (availability may vary).
-  Every relay is now **bound to one match** (a game session or a realtime
-  room) and authorized against that match's roster; `maxParticipants`
-  defaults to 8, 4 KB frames, per-sender rate limit derived from the bound
-  match's tick rate (violations close the sender's socket), max 5 sessions
-  per title, no host/authority concept, no invites/matchmaking/backfill.
-  **Insufficient for 22-player football** — and this game needs server-side
-  rules authority anyway, which the relay deliberately does not provide.
-- **Realtime Rooms** (`/api/v1/realtime`, `ws/v1/realtime`): generalized
-  lobbies — rooms, seats, invites, quick-join matchmaking, AI-seat backfill —
-  added by this project (§8). With the room⇄script bridge they now also create
-  the room-bound scripted session that runs the match.
-
-The earlier verdict that scripted games are "not viable for realtime" is
-outdated: tick-rate support plus room-bound sessions make the Jint sandbox a
-viable authoritative match server at 30 Hz. This project therefore runs the
-football simulation as a **scripted game** (`server.js`, §3) and uses Realtime
-Rooms for what they are good at: lobby, invites, matchmaking, backfill,
-roster, and reconnect.
-
-What we reuse as-is from the platform:
-
-- Launch tokens (`POST /api/v1/games/{slug}/launch-token`, `#game_token=`
-  fragment, game-scope fencing) for authentication.
-- `GET /api/v1/me/friends` (allowed for launch tokens) for the invite picker.
-- GitHub-games hosting: `starhermit.txt` manifest, static site served at
-  `<slug>.starhermit.com`, `/api` + `/ws` proxied same-origin (client uses
-  relative URLs only — no base URL, no CORS config).
-- Scripted-games substrate: tick service (30 Hz for this game), gameplay
-  transport `ws/v1/games`, script-owned per-player state/elo via `eloUpdates`.
-
-## 3. High-level architecture
-
-```
-┌────────────────────────────┐        ┌──────────────────────────────┐
-│  Browser client (this repo)│        │  StarHermit backend          │
-│  - three.js renderer       │  WS+   │  (../starhermit)             │
-│  - inputs up, snapshots    │  REST  │  - Jint sandbox: server.js   │
-│    down (ws/v1/games)      │◀──────▶│    authoritative sim @30 Hz  │
-│  - lobby UI (rooms API)    │        │  - Realtime Rooms (lobby)    │
-│                            │        │  - launch tokens / friends   │
-└────────────────────────────┘        └──────────────────────────────┘
-```
-
-**Server-authoritative model.** The platform runs `server.js` — the match
-simulation (physics, AI, score, injury/substitution ceremonies) — inside the
-Jint sandbox, ticked at the game's configured rate (30 Hz). Clients send only
-their *inputs* (move vector, sprint, action buttons; ~30 Hz `cmd` frames over
-`ws/v1/games`) and render the script's server-timed broadcast snapshots (up to 30 Hz)
-with adaptive interpolation, short bounded extrapolation, and render-only local
-player prediction. No client has any authority: the script validates every input,
-owns the score and clock, and ends the match by returning `result`. Realtime
-Rooms still handle the pre-match world — lobby, invites, matchmaking, AI-seat
-backfill, roster — and the room⇄script bridge (§8) creates the bound session
-at room start and closes the room when the script returns `result`.
-
-Trade-offs (accepted): each simulation tick remains a stateless script
-invocation, so sim state round-trips through the JSON `sessionState` document
-(the sim keeps this small — quantized snapshots, RNG stored as data, rehydrated
-per tick). High-rate player inputs do not invoke or persist the script: the
-platform buffers one latest frame per sender and supplies the batch as
-`ctx.inputs` on the next 30 Hz tick. Leaving, rejoining, and the
-all-humans-gone rule are covered in §4.5.
-
-## 4. Game flow
-
-### 4.1 Modes
-
-- **Quick Play** — instant matchmaking: join (or create) an open room, 30 s
-  fill window, AI backfill, play. Team size default 5v5, scales down to 1v1
-  if chosen.
-- **Lobby with friends** — create a lobby, invite up to 10 friends from your
-  StarHermit friends list (they accept in-game or via the platform invite
-  push). Then **Find Match**: the lobby's empty seats open to best-effort
-  matchmaking. After 30 s, remaining seats become AI. Team size selectable
-  1–11 per side; lobby party is pinned to the same team.
-- **Practice (1 vs AI)** — offline-capable path: no room needed, local
-  simulation, you + AI opponent(s). Runs the same `server.js` sim code
-  in-browser, looped back locally.
-- **Ranked vs AI** — online solo: `POST /rooms` with
-  `aiPlayers = 2×teamSize − 1` (every seat but the host's is an AI seated at
-  creation), then `POST .../start`. No backfill wait; a real
-  server-authoritative platform match — rated and archived as a replay.
-
-### 4.2 Lobby & matchmaking sequence
-
-1. Creator opens lobby → `POST /api/v1/realtime/rooms` (config: team size N,
-   `openMatchmaking=false`). Server returns room + join code.
-2. Creator invites friends (`POST .../rooms/{id}/invites`); invitees accept
-   (`POST .../invites/{inviteId}/accept` → join). Friends list via
-   `GET /api/v1/me/friends`.
-3. Creator presses **Find Match** → `POST .../rooms/{id}/open`. Room becomes
-   discoverable; solo queuers (`POST .../rooms/quick-join`) are placed into
-   open rooms with free seats, best effort (first-come, prefer rooms closest
-   to full so matches start sooner).
-4. A 30-second countdown starts when the room opens. Room UI shows seats
-   filling in realtime (WS presence events).
-
-### 4.3 AI backfill
-
-When the 30 s window expires (or the host force-starts early, **or every seat
-is taken** — an Open room auto-starts there and then, so the `open`/join
-response can already be `Playing`), the host calls
-`POST .../rooms/{id}/start`. The server atomically fills every empty seat
-with an **AI seat**: a participant record flagged `ai: true` with a
-server-generated random nickname (name pool: plausible footballer handles,
-e.g. "Rafa Vento", "Moss Kante", seeded by the server so all clients agree).
-The room is locked (`status=playing`), the frozen roster is the match roster,
-and the room⇄script bridge creates the bound GameSession (`server.js`'s
-`createSession` receives the full roster, AI seats included, as
-`ctx.room.roster`). AI seats are simulated by `server.js` server-side with
-position-appropriate personalities (§7). Practice mode skips the server
-entirely. The bridge binds `gameSessionId` in a separate step from flipping
-the room to `Playing`, so a client that sees `Playing` without it waits
-("Starting match…") and re-polls briefly rather than entering session-less.
-
-### 4.4 Match sequence
-
-1. **Walkout** (~8 s): camera on tunnel, both teams walk out side by side,
-   crowd cheer swells, players take formation positions.
-2. **Coin flip**: center-circle close-up; referee flips a coin; winner chooses
-   and kicks off (server-side RNG inside `server.js` decides; animation shows
-   the result).
-3. **Play**: 2 halves × configurable length (default 3 min). Kickoff after
-   each goal, teams swap sides at half time. The script holds the kickoff
-   formation and the clock for ~13 s after session creation (`INTRO_HOLD_MS`)
-   so no play — and no AI — runs while clients are still in steps 1–2.
-4. **Full time**: final whistle, crowd reaction by result, celebration
-   animation for winners, stats screen (score, possession, shots), then
-   back to lobby. The script ends the match by returning `result`
-   (`{ score, winner, draw }`); the platform stores it and closes the room.
-
-### 4.5 Leaving, rejoining, and the injury ceremony
-
-Mid-match absence is handled **server-side by the script** — the sim watches
-`ctx.presence` on every tick/message. There is no host to migrate; the host
-migration and host rejoin recovery machinery of the old design is gone.
-
-- **Rejoin**: the menu checks `GET /rooms/mine` on load and shows a
-  **REJOIN MATCH** (Playing) or **RETURN TO LOBBY** button. Starting anything
-  else (Quick Play / Create Lobby / Practice) while in a room prompts for
-  confirmation first. Reconnecting to the match means rejoining the room WS
-  plus `ws/v1/games?sessionId=…` and sending a `sync` cmd for a fresh snapshot.
-- **Explicit leave**: `POST .../rooms/{id}/leave` converts the leaver's seat
-  into an AI seat **permanently** (new server-generated nickname, roster push,
-  `presence.left=true`). The match continues and the user is free to join
-  something else; there is no rejoin for that seat.
-- **Disconnect grace**: if a player's sockets drop (`presence.online=false`),
-  the AI immediately takes over their footballer, with a **5 s grace period**
-  before the absence becomes official; reconnecting within grace restores
-  control silently.
-- **Injury ceremony (~10 s)**: once the grace lapses (or a human leaves
-  explicitly), the sim enters the `injury` phase and plays a stretcher
-  ceremony: the footballer falls → the referee runs over and blows the whistle
-  → two carriers bring the stretcher, load the player, and carry them off
-  through the tunnel → the AI substitute runs on from the tunnel and takes the
-  seat → the crowd boos the departure (or cheers a return) → play restarts
-  with a **drop ball** at the injury spot. The same ceremony runs in reverse
-  (`kind: 'rejoin'`) when a disconnected human comes back and retakes their
-  seat. Ceremony progress is broadcast in snapshots (`snap.cer`) and as `ev`
-  events (`injury-start`, `referee-whistle`, `stretcher-load`,
-  `stretcher-off`, `substitution`, drop-ball `restart`); triggers during a
-  ceremony or during goal/halftime queue and play one at a time.
-- **All humans gone**: if no human seat remains occupied (all left or offline
-  past grace), the script ends the match as a **draw** — broadcasts
-  `abandoned-draw`, returns `result { draw: true, score }`, and the platform
-  finishes the session and closes the room.
-
-### 4.6 Ratings, session summary & replay
-
-- **Elo**: at full time the script rates the match itself — standard Elo,
-  K=32, computed on each team's **average rating over its humans only**;
-  every human on a team gets the same delta (min rating 100) plus a
-  win/loss/draw increment. New players default to 1200 with zeroed stats. The
-  full-time return carries full `playerStates` docs and `eloUpdates`
-  (`userId → new absolute rating`, the leaderboard channel). Unrated cases:
-  either team has zero humans (e.g. vs pure AI), and abandoned draws — both
-  return `result` alone.
-- **Session summary**: `sessionState.summary = { status, moveCount }` —
-  `active`/`finished`, `moveCount` mirrors the sim tick. This backs
-  `GET sessions/mine`. No `turnPlayerId`/`deadline` (turn-based concepts).
-- **Achievements**: server-authoritative. The catalog is declared statically
-  on `game.achievements` in `server.js` (debut, first-win, goalscorer,
-  hat-trick, clean-sheet); the sim tallies per-seat goals in
-  `sessionState.goals` and grants keys at full time via the `achievements`
-  return field (`userId → [keys]`), limited to humans who finished the match.
-  Unlocks arrive on `ws/v1/games` as `{"type":"achievement"}` frames; the
-  client shows a HUD banner.
-- **Replay**: the platform archives the final `sessionState` as the session's
-  replay, so the script embeds one at `sessionState.replay`:
-  `{ v: 1, every: 15, teamSize, halfLength, roster, frames, evs, truncated }`.
-  `roster` is one static `{ pid, team, name, ai }` per seat in player-id
-  order. A frame is appended every 15 ticks (2 fps):
-  `{ t, sc: [home, away], ph, b, pl }` where `b`/`pl` mirror the broadcast
-  snapshot's ball/player arrays exactly (same field order, same 2-decimal
-  rounding), so the viewer reuses the client's snapshot parsing. `evs` holds
-  `{ t, ev }` for the presentation events only (`goal`, `halftime`,
-  `kickoff`, `fulltime`). Frames cap at 900 (`truncated: true` beyond that) —
-  a default 2×3 min match is ~720 frames.
-- **Display names**: player-facing views (leaderboard, replays, chat, lobby
-  roster, in-match nametags) render the profile **nickname** resolved via
-  `GET /api/v1/users/{id}/profile` (cached per session in
-  `api.getDisplayName`), never the raw account username; lookup failures
-  fall back to a neutral `Player <id8>`. The
-  replay-list sides come from the archived `state.seats`/`replay.teamSize` —
-  the list payload's `players[]` has no team assignment and no documented
-  ordering, so halving it would mis-split unbalanced human teams.
-
-## 5. Client: rendering & presentation
-
-Static ES-module site, no build step (same pattern as starhermit-chess).
-three.js vendored under `vendor/three/`. All art is generated in code
-(geometry + procedural textures + WebAudio synthesis) — zero binary assets,
-so the repo stays clone-and-serve.
-
-### 5.1 Art direction — "football club professional"
-
-- Night match under floodlights: dark sky, 4 floodlight towers with volumetric-style
-  light cones (transparent additive geometry) and real shadow-casting spotlights.
-- Pitch: striped mow pattern (alternating light/dark green bands via canvas
-  texture), crisp white line markings (canvas texture), grass-grain noise.
-- Stadium: two-tier seated bowl (instanced crowd: ~8–12k `InstancedMesh`
-  spectators with per-instance color, animated sway/bounce on excitement),
-  LED advertising boards with scrolling club-style sponsor strips, tunnel,
-  dugouts, corner flags, goal nets (transparent grid texture).
-- Kits: home/away strip per team (distinct shirt/shorts/sock colors, auto-
-  derived from team identity), shirt numbers on backs, skin-tone variety.
-
-### 5.2 Character model
-
-Characters are procedural, jointed figures built from primitives — stylized-
-realistic proportions (~1.8 m), composed of: pelvis, torso, head (+hair),
-upper/lower arms with elbow joints, upper/lower legs with knee joints, boots.
-Each limb is a `Group` pivot so the whole figure is a small skeleton driven
-entirely in code (no external rigs). Kits drawn via canvas textures
-(shirt color, shorts, socks, number).
-
-### 5.3 Animation (procedural, phase-driven)
-
-A reusable `Animator` drives every character from its locomotion state:
-
-- **Idle**: subtle weight shift, breathing, head look-at-ball.
-- **Walk / jog / sprint**: phase-locked leg swings with knee flexion, counter-
-  swinging arms, torso lean & bob scaled to speed; foot-plant cadence matches
-  ground speed (no sliding).
-- **Kick**: wind-up → strike → follow-through, blended over locomotion when
-  kicking while running.
-- **Header, slide tackle, goalkeeper dive** (lateral leap with arm extension).
-- **Celebrations** (knee slide, arm pump), **dejection**, **walkout wave**.
-- Blending: simple cross-fade between pose layers; lower/upper body split so a
-  player can run and point/shout simultaneously.
-
-### 5.4 Name tags
-
-Nicknames float above heads as camera-facing `Sprite`s with canvas-rendered
-text (team-colored plate, white text). Your own player shows "You". AI names
-come from the server-assigned roster. Tags fade beyond ~40 m.
-
-### 5.5 Camera & ball indicator
-
-- Third-person follow camera: positioned behind/above your player, damped
-  spring follow, smoothly swings behind the direction your player faces, FOV
-  widens slightly at sprint. Camera collision-free (stadium is open above
-  pitch).
-- **Off-screen ball arrow**: when the ball projects outside the viewport, an
-  edge-clamped arrow (HUD div) points toward it, colored by possession team;
-  distance readout in meters.
-
-### 5.6 Controls
-
-Desktop:
-- Tank-style steering: **W/↑** runs forward (quickly accelerating into a
-  sprint; no sprint modifier or toggle), **S/↓** backpedals, **A/←** and
-  **D/→** rotate your footballer left/right. **Space** is contextual: tap to
-  pass (best teammate ahead with a clear lane, otherwise a knock-on into
-  space with a chase burst), hold to charge a shot (power bar, release to
-  strike). **J** is an alternate shoot key, **L** a dedicated pass key, and
-  **K** slide tackles / pressures. You always control your own footballer.
-
-Mobile:
-- Left virtual **joystick** (dynamic origin, analog move + sprint at full
-  deflection), right-side **Pass** and **Shoot** buttons (shoot is
-  press-and-hold charge), **Tackle** button. Haptic `navigator.vibrate` ticks
-  on kick contact where supported.
-- Touch UI auto-activates on `pointer: coarse`; big tap targets, HUD scales
-  with `rem`/`dvh`, game renders at capped devicePixelRatio for perf.
-
-Remappable desktop bindings:
-- The desktop bindings above are the game's **defaults**, declared in
-  `starhermit.txt` as `control.<action>=` lines (§8.8) so the platform knows
-  them. Players rebind them per game from the platform client's game-details
-  page; the game never hard-codes the player's keys.
-- At boot, when the environment is a non-touch browser (`isTouch === false`)
-  and a launch token is present, the client calls
-  `GET /api/v1/games/{slug}/controls` (api.js) and rebuilds input.js's
-  `code → action` KEYMAP from the returned effective bindings (player
-  override where present, manifest default otherwise). Fetch failure,
-  offline launch, and Practice-without-token fall back to the built-in
-  defaults; touch devices never fetch (the joystick/button UI is not
-  remappable).
-- Remapping only changes which `KeyboardEvent.code`s trigger each of the
-  seven actions (`up`/`down`/`left`/`right`/`pass`/`shoot`/`tackle`);
-  steering semantics (turn/forward axes, tap-to-pass vs hold-to-shoot) are
-  unchanged. `preventDefault()`
-  applies exactly to the mapped codes, as today.
-
-### 5.7 Performance budget
-
-60 fps on a mid laptop, 30+ fps on a mid phone: ≤ ~120 draw calls (instancing
-for crowd/seats/floodlight cones), one shadow-casting light, capped pixel
-ratio, crowd LOD, no post-processing on mobile.
-
-## 6. Netcode (client side)
-
-- Gameplay transport: `ws/v1/games?sessionId=…` (the scripted-games socket) —
-  JSON **text frames** only, ≤ 16 KB. The realtime-rooms WS
-  (`ws/v1/realtime?roomId=…`) remains connected for lobby/roster/presence only.
-- **Client → server**: input cmds at 30 Hz inside the platform `cmd`
-  envelope: `{type:'input', realtime:true, seq, mx, mz, turn, fwd, sprint, pass, shoot, tackle}`
-  (`mx`/`mz` normalized world-space move vector for touch; `turn`/`fwd` (or
-  null) steering axes for desktop tank controls; `shoot` = release power,
-  one-shot flags on the triggering frame). `{type:'sync'}` requests a full
-  snapshot (sent on connect/reconnect).
-- **Server → client**: the script broadcasts `{type:'snap', …}` at up to 30 Hz —
-  full state as compact quantized arrays (floats rounded to 2 decimals): match
-  clock/half/phase/score, ball `[x,y,z,vx,vy,vz,owner]`, one flat array per
-  player (pos, vel, facing, anim state + speed, kick/tackle/stun/dive timers,
-  isAi, name), plus `cer` ceremony state. ~0.5–3 KB per snap depending on
-  phase. Discrete moments (kick, goal, whistle, ceremony beats) go out as
-  `{type:'ev', ev}` broadcasts, one per sim event, in order.
-- **Clients** place snapshots on the stamped server timeline and select an
-  adaptive 55–140 ms interpolation delay from measured arrival jitter. Short
-  underruns extrapolate players and ball for at most 120 ms. The controlled
-  footballer uses render-only local prediction with smooth reconciliation, and
-  local kick feedback plays immediately. There is **no prediction authority**:
-  the server snapshot can correct every locally rendered value.
-- Clock: snapshots carry `ts`, monotonic `tick`, and per-seat acknowledged input
-  sequence (`ack`); clients use server spacing rather than packet arrival time.
-- Match results: the script ends the match by returning `result`
-  (`{score, winner, draw}`); the platform stores it, finishes the session, and
-  closes the room (§8). Clients show stats from the final snapshot/result.
-  Script-owned per-player records are updated via `eloUpdates` — no
-  client-submitted scores anywhere.
-
-## 7. AI
-
-AI runs inside `server.js` on the platform for every AI seat (and for *all*
-seats in Practice mode, where the client runs the same code locally).
-Each AI footballer has a **personality**: `{ aggression, positioning,
-dribbling, passing, workRate }` sampled at roster creation plus a random
-nickname from the server.
-
-Behavior model (utility scoring, re-evaluated ~5 Hz, steering executed per
-tick):
-
-- **Roles by formation slot** (4-4-2 / scaled variants for smaller teams):
-  GK, DF, MF, FW. Formation anchor points shift with ball position
-  (attack/defense bias by personality `positioning`).
-- **On ball**: dribble toward goal, pass when pressed (choose teammate by
-  forward-ness + openness), shoot in range (power/accuracy from personality).
-- **Off ball**: nearest pressers chase ball (count from `aggression`), others
-  hold shape, make runs, mark space.
-- **GK**: hold line, come for through balls, dive at shots (reach check),
-  distribute after save.
-- 1v1 practice: single AI opponent with scaled-down pitch and goal.
-
-## 8. Backend: Realtime Rooms API (work in `../starhermit`)
-
-New generalized subsystem for realtime multiplayer games. Deliberately not
-football-specific: rooms, seats, invites, quick-join matchmaking, AI-seat
-backfill, roster/presence pushes. For this game the rooms layer handles only
-the pre-match world (lobby/roster); gameplay runs in a room-bound scripted
-session via the room⇄script bridge (§8.7).
-
-### 8.1 Data model (Platform.Domain / Persistence)
-
-- `RealtimeRoom` — `Id, GameSlug, HostUserId, Status (Lobby|Open|Playing|
-  Closed), ConfigJson { teamCount, seatsPerTeam, backfillAfterSeconds,
-  aiPlayers, metadata }, GameSessionId (bound scripted session, once
-  started), CreatedAt, OpenedAt, StartedAt, ClosedAt`.
-- `RealtimeParticipant` — `Id, RoomId, UserId (null for AI), Username, IsAi,
-  IsHost, Team, Slot, JoinedAt, LeftAt`.
-- `RealtimeInvite` — `Id, RoomId, FromUserId, ToUserId, Status, CreatedAt`.
-- `GameSession.RealtimeRoomId` links a scripted session back to its room
-  (migration `20260722200822_RoomScriptSessions`); `GameDefinition.TickRateHz`
-  holds the per-game tick rate (migration `20260722140138_GameTickRates`).
-- EF Core migration + `StarhermitDbContext.Realtime.cs` partial, mirroring the
-  existing Relay persistence style.
-
-### 8.2 REST (`/api/v1/realtime`, JWT or game-scoped launch token)
-
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/rooms` | Create lobby; caller becomes host. Body: `{ teamCount, seatsPerTeam, backfillAfterSeconds=30, aiPlayers=0, metadata }`. `aiPlayers` seats that many AI participants immediately (emptiest team first; they occupy seats, so invites/quick-join fill only what remains). Caps: teamCount ≤ 2 (v1), seatsPerTeam ≤ 11, total seats ≤ 32. |
-| GET | `/rooms/{id}` | Room + roster (participants or invitees only). |
-| POST | `/rooms/{id}/invites` | Invite friend (`{ toUserId }`); friends-only check, 409 dup. |
-| GET | `/rooms/invites` | Caller's pending room invites (cross-game). |
-| POST | `/rooms/invites/{inviteId}/accept` | Join that room (seat assigned). |
-| POST | `/rooms/invites/{inviteId}/decline` | 204. |
-| POST | `/rooms/{id}/open` | Host: open to matchmaking; starts backfill timer. An Open room also starts the moment every seat is taken (humans and/or creation-time AI) — the `open`/join response can already be `Playing`. |
-| POST | `/rooms/quick-join` | Body `{ gameSlug (implied by token), seats: 1 }` → placed in oldest open room with free seats for this game, else 404 (client then creates its own open room). |
-| POST | `/rooms/{id}/start` | Host: AI-backfill empty seats, status→Playing, returns frozen roster. Idempotent; auto-invoked by a worker at backfill deadline. Also creates the room-bound scripted session (§8.7). |
-| POST | `/rooms/{id}/leave` | Leave. In Lobby/Open the seat is removed (host leaving transfers host to the longest-serving human; none left → Closed). In Playing the seat converts to an AI participant (fresh server nickname, roster pushed) so the match continues; host leaving transfers `IsHost` to the longest-serving remaining human, or closes the room if none remain. |
-| POST | `/rooms/{id}/result` | Host: submit result JSON (validated vs roster, score sanity-clamped); stored on room, fan-out over WS. |
-| GET | `/rooms/mine` | Caller's active room, if any (reconnect). |
-
-Seat assignment: humans take seats in join order, host may re-balance teams
-pre-start via `POST /rooms/{id}/seats` (host only, Lobby/Open status).
-Party pinning: invite-joins are seated on the host's team while space lasts.
-
-### 8.3 WebSocket (`/ws/v1/realtime?roomId=…`)
-
-- Auth: JWT header or `?access_token=`; participants only; launch-token
-  `game_scope` must equal the room's `GameSlug` (reuse `GameScopeMiddleware`
-  pattern). Newest connection supersedes old (same semantics as
-  `ws/v1/games`).
-- **Binary frames** (≤ 8 KB) are routed by role, enforced server-side:
-  host → fanned out to every other participant; guest → delivered to host
-  only. Frame is prefixed by the server with sender participant id, so
-  impersonation is impossible.
-- **JSON text control frames** (≤ 4 KB): `{ "type": "event"|"chat"|"ready",
-  ... }` — host may broadcast events; guests may only send `ready`/lobby
-  chat (rate-limited like chat, 10/min).
-- **Presence**: server pushes `{ "type": "presence", userId, online }` and
-  `{ "type": "roster", participants: [...] }` on joins/leaves/start.
-- **Rate limits**: host binary 30 msgs/s, guest binary 30 msgs/s (burst 2× for
-  1 s), enforced per connection with a token bucket; violation →
-  `PolicyViolation` close (same enforcement style as `RelayWebSocketHandler`).
-
-### 8.4 Backfill & stale-room workers
-
-`Platform.Workers` jobs (modeled on `CleanupStaleRelaySessionsJob`): one sweeps
-`Open` rooms whose `OpenedAt + backfillAfterSeconds` has passed and performs
-the same atomic start/backfill as `POST .../start` (AI nicknames drawn from a
-server-side pool, unique per room). Another closes stale rooms: `Playing`
-rooms whose host has had no live socket for > 60 s, and `Lobby`/`Open` rooms
-idle for > 60 min with no connected participants.
-
-### 8.5 Security & generalization notes
-
-- Every endpoint works with a full JWT **or** a game-scoped launch token
-  (scope fencing via existing middleware; rooms are per-`GameSlug`, so two
-  games can never see each other's rooms).
-- Authorization: participant-only reads; host-only mutations (open, seats,
-  start, result); friends-only invites (reuse friendship check used by game
-  invites).
-- Validation: seat/team bounds, one active room per user (409 otherwise),
-  idempotent start, result-score clamp (0–50 per side), invite expiry with
-  room close.
-- Transport security: server-tagged sender ids, role-based routing, frame
-  size caps, per-connection rate limits, no server-side parsing of binary
-  payloads (host authority is the game's contract, documented).
-- Generic: nothing references football; `metadata` is an opaque per-game JSON
-  blob; teamCount is a parameter (1 = free-for-all games).
-
-### 8.6 Backend tests
-
-xUnit suite in `tests/` mirroring existing patterns: room lifecycle
-(create→invite→accept→open→quick-join→backfill→result), auth fencing (403s),
-seat caps, host transfer, WS routing/rate-limit behavior via handler-level
-tests.
-
-### 8.7 Realtime rooms ⇄ script bridge
-
-The bridge lets a realtime room run its match as a server-authoritative
-scripted session instead of on a host client:
-
-- **Session creation on room start**: when a room enters `Playing` (host
-  force-start or backfill worker), the platform creates an N-player
-  `GameSession` for the game's `server=` script — one `GameSessionPlayer` per
-  human (AI seats are roster-only, not session players) — and links both sides:
-  `GameSession.RealtimeRoomId` and `RealtimeRoom.GameSessionId`. The room DTO
-  and roster push carry `gameSessionId` so clients know which
-  `ws/v1/games?sessionId=…` to connect to.
-- **Extended ctx**: every script invocation for a room-bound session
-  (`createSession`, `onPlayerMessage`, `onTick`) receives
-  `ctx.room = { roomId, metadata, roster }` — the frozen roster, humans and AI
-  seats, ordered by team then slot — and
-  `ctx.presence = { "<userId>": { online, left } }` for every user who is or
-  was a human participant (`online` = a live socket on either WS registry;
-  `left` = the seat was explicitly left and converted to AI). The script
-  drives AI takeover, the injury ceremony, and the all-humans-gone rule from
-  this (§4.5). A **standalone** session (matchmaking, invite-accept, AI
-  practice) receives neither field: `server.js` then seats `ctx.players`
-  (alternating teams, the platform AI seat flagged `ai: true`) and skips
-  presence reconciliation entirely.
-- **Result closes the room**: when the script returns `result` (full time, or
-  the abandoned-draw), the platform finishes the session, stores the result on
-  the room, and closes the room — no host-submitted `POST .../result` for
-  room-bound games.
-- **Tick rate**: the session ticks at the script-declared `game.tickRateHz`
-  (30 Hz for this game; 30 Hz platform default, clamped to 1–1000 Hz, read at
-  publish time).
-
-### 8.8 Per-player control bindings (generalized)
-
-Games declare their default desktop-browser controls in the manifest;
-players tune them per game from the game-details page; the game fetches the
-player's effective bindings at launch (§5.6). Like the rooms API, nothing
-here is football-specific.
-
-**Manifest declaration** (`starhermit.txt`) — zero or more lines:
-
-```
-control.<action>=<code>[+<code>...][ | <label>]
-```
-
-- `<action>` — lowercase `[a-z0-9_]{1,32}` id, unique per manifest (manifest
-  keys are lowercased by the parser anyway). Declaration order is display
-  order.
-- `<code>` — a `KeyboardEvent.code` value (`[A-Za-z0-9]{1,32}`); `+`
-  separates alternates that all trigger the action (e.g. `KeyW+ArrowUp`).
-- `<label>` — optional human-readable name for the game-details page, after
-  a `|`; defaults to the action id.
-- Caps: ≤ 32 actions, ≤ 4 codes per action, no code bound to two actions.
-  Invalid `control.*` lines are ignored (same tolerance as the rest of the
-  parser); games with no `control.*` lines simply get no Controls UI.
-
-`GitHubGameValidation.ParseStarhermitTxtControls` parses this alongside the
-existing name/launch/owner/server readers. The result is stored as ordered
-JSON on `GitHubGame.DefaultControlsJson` (new column + migration) and
-refreshed wherever the manifest is re-read today (game add, redeploy).
-
-**Per-user overrides** — new entity `GameControlOverride`:
-`Id, UserId, GitHubGameId, BindingsJson, UpdatedAt`, unique index on
-`(UserId, GitHubGameId)`, rows deleted with the user (same lifecycle rule as
-other user-owned rows). `BindingsJson` is `{ "<action>": ["<code>", …] }` —
-a subset of the declared actions; omitted actions keep manifest defaults.
-
-**REST** (`/api/v1/games/{slug}/controls` — full JWT **or** game-scoped
-launch token whose `game_scope` matches `{slug}`, the same dual-auth rule as
-the rest of the games API):
-
-| Method | Purpose |
+| | |
 |---|---|
-| GET | The caller's effective bindings, in manifest order: `{ actions: [{ action, label, defaultCodes, codes }] }` where `codes` = override ?? default. 404 when the game declares no controls. |
-| PUT | Replace the caller's overrides. Body `{ bindings: { "<action>": ["<code>", …] } }`. Validation: every action must be declared in the manifest, codes match the code regex, ≤ 4 codes per action ≥ 1, and the **effective** map (overrides merged over defaults) must bind each code to at most one action — 400 naming the conflicting pair otherwise. |
-| DELETE | Remove the caller's overrides (reset everything to manifest defaults). 204. |
+| Pitch | Arcade football with real physics: dribble, pass, charge a shot, slide tackle, dive. No fouls, no offside — just goals. |
+| Genre | Realtime sports, server-authoritative multiplayer with offline practice. |
+| Players | 2–22 seats (1–11 per side). Any seat a human does not take is an AI footballer with a name and a personality. |
+| Session | One match = two halves of 3:00 match time (`halfLength` 180 s), plus ~12.5 s of walkout and coin flip and ~4.5 s of full-time celebration: about 7 minutes. |
+| Platforms | Desktop browsers (keyboard + mouse), phones and tablets (touch). Both orientations. |
+| Rendering | three.js (vendored `vendor/three/`), WebGL, one `<canvas>` behind a DOM HUD and DOM screens. All stadium and character art is generated in code; authored assets are the cover art, the loading key art, two club crests and the SFX clips. |
+| Authority | `server.js` is both the platform-side match script (Jint sandbox, 30 Hz) and, loaded as a classic `<script>`, the client's simulation core for practice and prediction. |
 
-Launch-token write access is deliberate: it lets a game ship an in-game
-rebinding screen later with no new auth work (this game's v1 uses the
-platform UI only). Writes are rate-limited like other launch-token
-mutations.
+File map (everything shipped or run from this repository):
 
-**Game-details UI** (platform client): the game-details page gains a
-**Controls** section, shown only when the game declares controls — one row
-per action (label + a keycap chip per code), click-to-capture rebinding
-(the client maps its captured key to the corresponding `KeyboardEvent.code`
-string, since bindings are stored in web form), duplicate-binding
-highlighting, per-row and page-wide **Reset to default**. Saves via PUT,
-reset via DELETE.
+| Path | Responsibility |
+|---|---|
+| `index.html` | Shell: canvas, HUD, replay bar, touch controls, every DOM screen and dialog. Loads `server.js` then `js/main.js`. |
+| `starhermit.txt` | Platform manifest: `name`, `launch=index.html`, `owner`, `server=server.js`, `control.*` default key bindings, `cover=coverart.png`. |
+| `server.js` | Simulation core (`FootballSim`: pitch, players, ball, AI, injury ceremony) and the platform script (`game.createSession / onPlayerMessage / onTick`, Elo, achievements, replay recording). |
+| `js/main.js` | Boot, renderer, screen state machine, match lifecycle, rejoin/leave prompts, token refresh, render loop. |
+| `js/match.js` | Match controller: world build, walkout → coin flip → play → done, practice stepping, online prediction/interpolation, events → audio/HUD. |
+| `js/game/sim.js`, `js/game/ai.js` | Thin ES-module re-exports of `globalThis.FootballSim`. No logic. |
+| `js/game/input.js` | Keyboard tank steering, contextual shoot/pass key, pointer-lock mouse, touch joystick and buttons, platform key remapping. |
+| `js/game/camera.js` | Third-person follow camera, cinematic framing helper, off-screen ball arrow. |
+| `js/game/audio.js` | WebAudio engine: buses, synthesised crowd bed and reverb, authored clips from `sfx/manifest.json` with a synthesiser fallback per event. |
+| `js/hud.js` | Score bar, match clock, shot power bar, event banners. |
+| `js/world/stadium.js` | Pitch, markings, two-tier bowl, instanced seats and crowd, floodlights and cones, LED boards, tunnel, dugouts, flags, goals, sky and fog. |
+| `js/world/player.js`, `js/world/animator.js` | Procedural jointed footballer (kits, numbers, skin and hair variety) and its phase-driven animation. |
+| `js/world/nametags.js` | Camera-facing nickname plates. |
+| `js/world/officials.js` | Referee, two stretcher carriers and the stretcher for the injury ceremony. |
+| `js/net.js` | WebSocket clients: rooms socket (roster/presence), games socket (inputs up, snapshots down, reconnect), voice relay socket. |
+| `js/api.js` | Platform REST client: launch token, profiles, rooms, controls, sessions, leaderboards, replays, chat, voice. |
+| `js/lobby.js` | Lobby screen: create, quick play, ranked vs AI, invites, seat moves, backfill countdown, invite links. |
+| `js/controls.js`, `js/leaderboard.js`, `js/replays.js` | The Controls, Leaderboard and Replays screens. |
+| `js/replayview.js` | Render-only 3D playback of an archived match. |
+| `js/chat.js`, `js/voice.js` | In-match text chat (REST polling) and positional WebRTC voice chat. |
+| `js/menuScene.js` | AI-vs-AI exhibition match with a drifting camera behind the menu. |
+| `js/snapformat.js` | Shared parser for the snapshot/replay row layout. |
+| `css/style.css` | All styling, safe-area insets, responsive sizes. |
+| `assets/` | `keyart-night-stadium.webp` (loading screen), `crest-blue.webp`, `crest-red.webp` (score bar and lobby). |
+| `coverart.png`, `icon.png`, `favicon.svg` | Platform listing art and icons. |
+| `sfx/` | 18 Opus clips, `manifest.txt` (canonical table), `manifest.json` (binding + generation prompts), `manifest.md` (generator output). |
+| `tests/server-regression.cjs`, `tests/e2e.mjs` | `npm test` rules regression; `npm run test:e2e` Playwright playthrough. |
 
-**Tests & docs**: controller/service tests mirror §8.6 patterns (auth
-fencing, scope fencing, validation 400s, override merge, reset). Wiki docs
-per platform convention: the manifest key in `github-games.md`, the
-endpoints in `games.md`.
+## 2. Vision and design pillars
 
-## 9. Audio (client, WebAudio — all synthesized, no assets)
+**Every seat is a footballer.** Whether a seat holds a human, a matchmade stranger or an AI,
+it is one entity with one name plate, one kit number and the same physics. Rules in: AI seats
+with names from a 30-name pool, personalities and formation roles; AI takeover of a
+disconnected human within 5 s; a stretcher ceremony that visibly substitutes a leaver.
+Rules out: invisible bots, empty positions, "AI difficulty" toggles that would make AI seats
+play by different physics than humans.
 
-- **Ball contact**: layered thump (filtered noise burst + sine thud), pitch/
-  gain randomized per kick power; footstep scuffs at sprint.
-- **Crowd**: pink-noise bed through band-pass filters (looping, gain follows
-  excitement level). Reactions are granular: ~200 instanced "crowd voices"
-  panned across the stadium; cheers = rising filtered-noise swell + whistling
-  partials; gasps = sharp inhale-like band sweep; oohs on near misses; goal =
-  full swell + air-horn-ish partials for home/away bias. Randomized timing,
-  filter, and pan per event → non-repetitive.
-- **Whistle** (referee): two detuned square oscillators with vibrato.
-- **Injury ceremony**: referee whistle on stoppage, crowd **boos** (low,
-  jeering filtered-noise band with descending pitch) when a player is carried
-  off, a warm cheer when a substitute / returning player runs on — all driven
-  by the ceremony `ev` events (§4.5).
-- **Kickoff ambience**: tunnel murmur → swell as teams walk out.
-- Mute + volume in settings; `AudioContext` resumed on first user gesture.
+**One code path decides the match.** The sim in `server.js` is the only place a ball moves.
+The platform runs it at 30 Hz for online matches; the browser runs the same file for practice
+and for the menu backdrop. Rules in: quantised snapshots, render-only prediction of your own
+footballer, rules bugs fixed once. Rules out: client-submitted scores, host-migration logic,
+any client-side authority.
 
-## 10. Client code layout
+**Body before ball.** Shots follow your facing (90 % facing, 10 % goal assist), passes go to
+teammates in your facing cone, sprinting carriers get dispossessed more easily. Rules in: tank
+steering on desktop, hold-to-charge shots, a follow camera that swings behind your heading.
+Rules out: auto-aim to goal, lock-on passing, a top-down tactical camera.
+
+**A night at the ground.** Floodlit stadium, two tiers of swaying crowd, LED boards, a walkout
+and a coin flip before kick-off, a crowd that gasps, oohs, boos and roars. Rules in: crowd
+excitement that follows how close the ball is to a goal; authored crowd clips with synthesised
+depth under them; kit-coloured name plates. Rules out: daytime, empty stands, silent goals.
+
+**Best-effort platform features never block the ball.** Chat, voice, invites, leaderboard,
+replays and remappable keys all degrade to a quiet status line. Rules in: offline practice
+without a token; reconnect with backoff; AI stand-ins. Rules out: a match that waits for a
+microphone permission or a failed REST call.
+
+## 3. Player experience
+
+Target player: someone who wants a quick pick-up football match with friends or strangers in a
+browser tab, with enough physical feel to make a good goal feel earned, and who is happy to
+play a full 5v5 with AI teammates when nobody else is around.
+
+First 60 seconds (offline or online): the menu opens over a live AI-vs-AI match in the stadium,
+so the game explains its own look before a button is pressed. Team size defaults to 5 per side.
+PRACTICE vs AI starts a match immediately. The walkout (8 s) frames both teams leaving the
+tunnel; the coin flip (4.5 s) shows the kick-off decision and the banner "BLUE KICKS OFF" /
+"RED KICKS OFF". On desktop the bottom hint reads "CLICK THE PITCH FOR MOUSE CAMERA · LEFT
+SHOOT · RIGHT PASS · MIDDLE TACKLE" until the mouse is captured; the CONTROLS screen (online)
+lists every key. On touch, the joystick and three labelled buttons (TACKLE, PASS, SHOOT) are
+on screen from the first frame of the match. The off-screen ball arrow with a metre readout
+appears the moment the ball leaves the view, and the shot power bar appears while SHOOT is held,
+so the two mechanics a newcomer most needs are taught by their own feedback.
+
+Typical session: one 7-minute match, then the result card (VICTORY / DEFEAT / DRAW, score,
+possession, shots), back to the menu, another match or a look at the leaderboard. Online, the
+lobby's 30-second fill window and AI backfill guarantee the match starts.
+
+Emotional beat: the charged shot. Holding SHOOT fills the bar, the camera and crowd bed are
+already rising because the ball is in the danger zone, the release thumps, and either the net
+pins the ball with a stadium roar or the woodwork sends a gasp and an "ooh".
+
+## 4. Core loop and rules contract
+
+All rules below are implemented in `server.js`; the client never re-derives an outcome.
+
+**Pitch** (`pitchFor`): length `L = 40 + (teamSize − 1) × 7.2` m (40 m at 1v1, 112 m at
+11v11), width `W = 0.62 L`. Goals: `goalW = clamp(7.32 × W/68, 3.0, 7.32)`,
+`goalH = clamp(goalW/3, 2.0, 2.44)`. Team 0 (BLUE) attacks +x in the first half; sides swap
+at half time (`attackSign`). Players may step 1.5 m outside the lines (`clampToPitch`).
+
+**Seats and roles** (`roleForSlot`, `formationAnchor`): slot 0 is GK (except at 1v1, where the
+single player is FW), then DF (< 45 % of slots), MF (< 80 %), FW. Anchors sit at u = −0.47
+(GK), −0.28 (DF), −0.05 (MF), +0.22 (FW) of the length, spread across ±0.38 of the width.
+Kick-off (`resetKickoff`): everyone at their anchor; the kicking team's forwards at the
+centre spot.
+
+**Movement** (`stepPlayer`): walk 2.1, run 5.4, sprint 7.4 m/s; acceleration 22 m/s²;
+carrying the ball multiplies speed by 0.88; backpedal is 0.9 × walk. Steering input
+(desktop) rotates at 3.2 rad/s and runs along the facing; direction input (touch, AI) faces
+the movement, or turns toward the ball at 6 rad/s when still.
+
+**Possession** (`stepBall`): a loose ball is claimed within 0.95 m (GK inside 20 % of the
+length from its own goal line: 1.62 m) when it is below 1.25 m and slower than 9 m/s (GK:
+16 m/s), never while stunned or within 0.15 s of a kick. An owned ball rides
+`0.5 + 0.045 × speed` m ahead of the carrier. An opponent within 0.62 m pokes it loose
+with probability `dt × (1.2 × [1.8 if carrier > 6 m/s] + aggression)` per tick.
+
+**Actions** (owner only, none while `kickT > 0`):
+- Shoot (`doShoot`, power p ∈ (0, 1]): speed `15 + 11p`, direction 90 % facing + 10 %
+  toward a random point in the goal mouth, elevation from power, distance and the aim point;
+  `kickT` 0.4 s; counts as a shot in `stats.shots`.
+- Pass (`doPass`): best teammate 2–45 m away, within 1.25 rad of the facing, with no
+  opponent within 1.1 m of the pass line, preferring the one nearest the opponents' goal;
+  speed `clamp(9 + 0.42 d, 10, 24)`, lofted when d > 18 m, led by 0.35 s of the receiver's
+  velocity. With no option: a 7.5 m/s knock-on into space and a 3.4 m/s burst after it.
+- Tackle (`tackle` input): a 0.45 s lunge at +4.5 m/s. Connecting with an opposing carrier
+  within 1.5 m pops the ball loose at 3.2 m/s (`steal`) and stuns the tackler 0.35 s; a
+  lunge that ends more than 2 m from the ball stuns 0.55 s. A GK within 20 % of the length
+  of its own goal line dives instead: 0.6 s at 7 m/s, stunned 0.6 s (`dive` event).
+
+**Ball** (`stepBall`): gravity −21 m/s², radius 0.11 m, ground bounce with restitution 0.55
+when `|vy| > 1.2`, rolling friction `1 − 2.1 dt`, air drag `1 − 0.28 dt`. Crossing the goal
+line inside the mouth scores; hitting the frame ring (bar ±0.25 m, posts ±0.25 m) bounces
+back (`woodwork`). Beyond 1.2 m past the goal line or 0.8 m past a touchline the ball is
+placed 0.4 m inside the pitch and given to the nearest player of the team that did not touch
+it last (`restart`, kinds `goalline` / `sideline`). Own goals are credited to the team whose
+goal it is not; the last toucher hangs their head for 3 s (`dejectedT`).
+
+**Clock and phases** (`stepMatch`): the clock runs only in `play`. `goal` pauses 3.2 s
+(scoring team celebrates), then the conceding team kicks off. At 180 s the first half ends
+(`halftime`, 4 s) unless a loose ball is travelling faster than 9 m/s; the second half is
+kicked off by the team that did not kick off the first. At 360 s the match ends
+(`fulltime`); the winner celebrates for 5 s. During `injury` (see 4.1) the clock is paused.
+
+**Scoring and result**: goals only. Winner = higher score, `−1` on equal scores (draw).
+Worked example: BLUE 2–1 RED at full time, 41 % / 59 % possession (possession is seconds of
+ownership per team, `stats.possession`), shots 6–9 → `result { score: [2, 1], winner: 0,
+draw: false }`; BLUE humans' Elo rises by the same delta each.
+
+**Elo** (`computeRatings`): K = 32, default 1200, floor 100, expected score from each
+team's average rating over its humans; every human on a team gets the same rounded delta and
+a win/loss/draw increment. Unrated: a team with no humans (Practice, Ranked vs AI) or an
+abandoned match. Example from the regression test: 1400 vs 1200 draw → 1392 / 1208.
+
+**Achievements** (`computeAchievements`): `debut` (finish a match, 10), `first-win` (25),
+`goalscorer` (15), `hat-trick` (three goals, 50), `clean-sheet` (win conceding 0, 40).
+Granted at full time to humans still seated.
+
+**RNG**: mulberry32 stored as `{ seed, counter }` so a JSON round-trip continues the stream.
+Practice seeds from `Math.random()`; online from `floor(ctx.random × 2^31 − 1)`. AI names are
+drawn from `AI_NAME_POOL` with the same stream. There is no undo and no hint system; the only
+assists are the 10 % shot aim and the pass-lane selection.
+
+### 4.1 Presence, injuries and abandonment (online only)
+
+`reconcilePresence` runs every tick of a room-bound session. A human whose sockets drop is
+taken over by AI immediately and, after 5 s (`OFFLINE_GRACE_MS`), a `leave` ceremony is
+queued; reconnecting inside the grace restores control silently. An explicit leave
+(`presence.left`) is permanent. The ceremony (`startCeremony`, `stepCeremony`): the victim
+falls; the referee runs in from the far touchline and whistles at 2.5 s; two carriers hustle in
+with the stretcher at 6 m/s, crouch, load at +1.4 s, carry the player to the west tunnel at
+5.5 m/s, set down; the same entity takes the replacement's name and runs from the tunnel to its
+anchor (`substitution`); play restarts with a dropped ball at the spot. A returning human gets
+the mirror `rejoin` ceremony. When every human seat is gone the match ends as
+`{ draw: true }` (`abandoned-draw`) with no ratings.
+
+## 5. Modes and progression
+
+| Mode (menu button) | Requires | What happens |
+|---|---|---|
+| PRACTICE vs AI | nothing | Local sim at 60 Hz fixed step (`match.js updateAuthoritative`), you in seat 0 of BLUE, AI everywhere else. Unrated, no replay. Works without a launch token. |
+| QUICK PLAY | launch token | `POST /realtime/rooms/quick-join`; on 404 creates and opens a room. 30 s fill window, AI backfill, then the platform starts the scripted session. |
+| CREATE LOBBY | launch token | Creates a closed room; INVITE FRIENDS (friends list), COPY INVITE LINK (`dashboard.starhermit.com/game-invite/<user>/<slug>`), host clicks empty seats to move themself, FIND MATCH opens the room and starts the 30 s countdown. |
+| RANKED vs AI | launch token | A room with `aiPlayers = 2 × teamSize − 1` started at once: server-authoritative, rated only if both teams have humans (so in practice unrated), archived as a replay. |
+| REJOIN MATCH / RETURN TO LOBBY | an active room on the server | Shown when `GET /rooms/mine` returns a room; rejoin skips the intro and resyncs from snapshots. |
+| LEADERBOARD | launch token | My rating and W/L/D from `GET /games/{slug}`; ranked entries, 20 per page, friends-only filter. |
+| REPLAYS | launch token | Last 20 finished online matches; WATCH plays the archived 2 fps log with play/pause, seek and an orbiting ball camera. |
+| CONTROLS | launch token, non-touch | Rebind the seven actions; saved per user on the platform. |
+
+Team size (1–11 per side, default 5) applies to every mode. Difficulty does not scale: AI
+plays at `difficulty = 1` everywhere (`computeAiInput`), and the real curve is team size
+(a 1v1 on a 40 m pitch is a duel; 11v11 on 112 m is positional). There are no unlocks; the
+long-term progression is Elo, W/L/D and the five achievements.
+
+## 6. Controls and interaction
+
+Desktop defaults (`starhermit.txt`, `input.js DEFAULT_KEYMAP`), remappable per user:
+
+| Action | Keys | Behaviour |
+|---|---|---|
+| Run forward / backpedal | W / S, ↑ / ↓ | Forward ramps to sprint automatically after 0.2 s held. |
+| Turn left / right | A / D, ← / → | Rotates the footballer (tank steering), 3.2 rad/s. |
+| Shoot / pass | Space, J | Tap (< 0.22 s) passes; hold charges the power bar at 1.4/s to full in ~0.7 s; release shoots (minimum power 0.15). |
+| Pass | L | Dedicated pass. |
+| Tackle / dive | K | Slide tackle; GK dive near own goal. |
+| Mouse camera | click the pitch | Pointer lock: mouse turns the camera (0.0025 rad/px, height offset −2.2..5.5 m); left button shoots (hold to charge), right passes, middle tackles. Esc releases; a second Esc opens LEAVE MATCH? (online only). |
+| Chat / mic | T / M | T focuses the chat input (Enter sends, Esc closes); M toggles the mic (online, voice enabled). |
+
+Touch (`pointer: coarse`): a 132 px joystick bottom-left, camera-relative, full tilt
+(> 92 %) sprints; TACKLE and PASS (74 px) and SHOOT (92 px, hold to charge) bottom-right.
+Sprinting vibrates 4 ms per stride where `navigator.vibrate` exists.
+
+Input locking: gameplay keys are only tracked while a match is live (`showTouchUi(true)`);
+a focused input/select drops all held keys; window blur and tab hide clear input; the
+capture click for pointer lock never fires a shot; the Controls screen swallows the captured
+key before the gameplay listener sees it. Online, movement is sent at 30 Hz and pass/shoot/
+tackle edges are sent immediately; local kick feedback (thump, kick pose) plays on release
+and the server's own `kick` event for that touch is suppressed for 1 s to avoid an echo.
+
+## 7. Screens and UI flow
+
+`main.js showScreen` shows exactly one of: `screen-menu`, `screen-lobby`, `screen-invite`
+(stacked on the lobby), `screen-controls`, `screen-leaderboard`, `screen-replays`,
+`screen-result`, or none (match / replay). Overlays: `#loading` (until the username
+resolves), `#leave-confirm` (Esc in an online match), `#confirm-dialog` (starting anything
+while the server still has you in a room), `#hud`, `#touch-ui`, `#replay-ui`.
 
 ```
-starhermit.txt          # manifest (slug=football, launch=index.html, server=server.js,
-                        #   control.* default desktop bindings — §8.8)
-server.js               # authoritative match sim — platform Jint sandbox (30 Hz);
-                        #   also loaded client-side as the shared sim core
-index.html              # shell: canvas, HUD, lobby screens, touch UI
-css/style.css
-js/main.js              # boot, screens state machine (menu→lobby→match)
-js/api.js               # REST client (launch token, friends, rooms, controls, leaderboard)
-js/net.js               # ws/v1/games client: cmd inputs up, snapshot buffer, interpolation
-js/lobby.js             # lobby UI: invites, seats, countdown, quick play
-js/match.js             # match controller: walkout→coin flip→halves→fulltime→ceremonies
-js/world/stadium.js     # pitch, stands, floodlights, boards, crowd instancing
-js/world/player.js      # character factory (kits, numbers)
-js/world/animator.js    # procedural animation state machine
-js/world/nametags.js    # floating nickname sprites
-js/world/officials.js   # referee + stretcher carriers (injury ceremony actors)
-js/game/sim.js          # thin wrapper re-exporting FootballSim from server.js
-js/game/ai.js           # thin wrapper re-exporting the AI from server.js
-js/game/input.js        # keyboard (remappable, §5.6) + touch joystick/buttons
-js/game/camera.js       # follow cam + off-screen ball arrow
-js/game/audio.js        # WebAudio SFX + crowd engine
-js/menuScene.js         # menu backdrop: AI-vs-AI exhibition match + cinematic camera
-js/voice.js             # in-match voice chat (WebRTC mesh, distance-based volume — §13)
-vendor/three/           # three.module.js (+ addons actually used)
+loading → menu ─┬─ practice ──────────────→ match ─→ result ─→ menu
+                ├─ quick / lobby / ranked → lobby ─→ match ─→ result ─→ menu
+                ├─ rejoin ────────────────→ lobby | match
+                ├─ controls / leaderboard → back → menu
+                └─ replays ─→ replay viewer ─→ replays
 ```
 
-`server.js` is dependency-free (no three imports, no DOM) so the platform's
-Jint sandbox and the browser run exactly one simulation code path: the browser
-loads it as a classic script before the ES-module graph, and `sim.js`/`ai.js`
-re-export `globalThis.FootballSim`. Rendering consumes sim state; online
-matches render from server snapshots only.
+Layout: every screen is a centred flex column with `overflow-y: auto`, buttons
+`min(320px, 80vw)` wide, lists `min(440–560px, 92vw)` with `max-height` 44–52 vh so long
+rosters and leaderboards scroll inside the panel. The score bar is top-centre at
+`max(10px, env(safe-area-inset-top))`; joystick, touch buttons, power bar, mouse hint, chat
+and the replay bar all offset by `env(safe-area-inset-bottom)`; the mic button sits at the
+top-right inset. Portrait phones: the lobby roster is a two-column grid (BLUE | RED) that
+stays legible at 390 px; the result score uses `clamp(2.4rem, 9vw, 4.5rem)`. Landscape
+phones: the joystick and buttons keep 5–6 % margins so thumbs do not cover the pitch centre.
+Must never be cut off: the score bar and clock, the ball arrow (clamped to 86 % / 80 % of
+the viewport), the power bar, the three touch buttons and the joystick, the result title and
+score, and the primary button of every screen.
 
-## 11. Phased implementation plan
+## 8. Art direction
 
-1. **Spec + scaffolding** — this file; repo skeleton; vendored three.js;
-   manifest; local dev server script.
-2. **Backend Realtime Rooms** — domain, persistence + migration, REST,
-   WS handler, backfill worker, tests; run backend test suite. (Also update
-   the wiki docs repo `../starhermit-developer-wiki` with a `realtime.md`
-   page — the platform's convention is that features ship documented.)
-3. **World rendering** — stadium, pitch, lighting, crowd; static scene perf
-   check.
-4. **Characters & animation** — factory, kits, animator, name tags.
-5. **Core gameplay (offline)** — sim (ball physics, movement, kicking,
-   goals), desktop + touch controls, camera + arrow, 1v1 practice vs AI
-   playable end-to-end.
-6. **AI** — personalities, formations, full 11v11 behaviors.
-7. **Audio** — SFX + crowd engine wired to match events.
-8. **Match presentation** — walkout, coin flip, kickoffs, half time, full
-   time, stats.
-9. **Networking** — `ws/v1/games` net client, snapshot interpolation, lobby
-   screens wired to Realtime Rooms API, invites, quick-join, backfill.
-10. **Polish & verification** — mobile QA pass, perf caps, README, final
-    manual test matrix (desktop Chrome/Firefox, mobile Safari/Chrome).
-11. **Remappable desktop controls** (§5.6, §8.8) — manifest `control.*`
-    defaults; backend: manifest parsing, `DefaultControlsJson` +
-    `GameControlOverride` migration, `/controls` REST + validation + tests;
-    platform-client game-details Controls section; game client fetch/remap
-    in api.js + input.js; wiki docs (`github-games.md`, `games.md`).
+"Football club professional" at night. The hero of every screen is the floodlit pitch:
+the menu, the lobby and the result card are translucent panels over the live stadium.
 
-## 12. Out of scope (v1)
+Palette (from `css/style.css`, `stadium.js`, `match.js`):
 
-- Fouls/cards/offside (kick-and-rush rules: out-of-bounds → throw-in style
-  restart only, goals + kickoffs; keeps the sim and AI tractable).
+| Use | Value |
+|---|---|
+| Page / sky base | `#05070c`; sky gradient `#010208 → #040914 → #0a1524 → #122036`; fog `0x070d18` |
+| Panels | `rgba(10,14,20,0.82)` with `#2c3e50` borders, 8–10 px radius |
+| Text | `#eef2f5`; muted `#93a1b0`; secondary `#9fb0c0`, `#c7d2dc` |
+| Accent (pitch green) | `#27ae60` — primary buttons, logo glow, Elo, seek bar |
+| Accent 2 (gold) | `#f1c40f` — clock, own seat, invite buttons; name plate for "You" `#ffd54a` |
+| Danger | `#c0392b` / `#e74c3c` — leave buttons, key conflicts, mic muted |
+| Pitch | stripes `#2f6d31` / `#2a602c`, lines `#f5f8f5`, apron `0x0c100d` |
+| Floodlights | spot `0xf2f6ff`, fills `0xe8f0ff`, cones `0xaac8ff`, hemisphere `0x8fb4e8` |
+| BLUE kit | shirt/socks `#1f5fb4`, shorts `#f2f2f2`, GK `#e67e22`; crest: royal blue shield, silver heron |
+| RED kit | shirt/socks `#c0392b`, shorts `#232323`, GK `#8e44ad`; crest: crimson shield, gold wolf |
+| Skin range | `#f2c79b` → `#4a2c17`; hair `#1a1a1a … #8a3b12`; boots `#1b1b1f` |
+| Crowd | jackets `0x22242c … 0x2a2320`, splashes `0xc23b3b 0x2f5fd0 0xe6e2d8 0xd8a02c 0x3f9e4d`; away section `0x7e2233` |
 
-## 13. Voice chat
+Shape language: capsule-and-sphere footballers (~1.8 m, pelvis at 0.98 m) with boxy boots
+and a flat number plane, crisp canvas kits; a rectangular two-tier bowl; cylinder floodlight
+masts with additive light cones; rounded-rectangle name plates. Typography: "Segoe UI",
+system-ui; the logo is 800 weight with 0.12 em tracking and a green glow; screen titles and
+buttons are uppercase with 0.08–0.15 em tracking; the clock uses tabular numerals.
 
-Opt-out in-match voice between the human players of an online match.
+Motion: the follow camera is a critically damped lerp (`1 − e^(−6 dt)`), 13 m back and 7 m up,
+15 m / 7.5 m and +4° FOV when sprinting; cinematic framing for walkout (crane from the
+tunnel), coin flip (centre-circle close-up), ceremonies (touchline view) and full time
+(slow orbit). Banners pop in with a 0.35 s scale-up. The crowd sways continuously and
+pulses on goals, boos in place after a leaver. Floodlights flicker ±3 %. Reduced motion is
+not currently honoured (see Known limitations).
 
-- **Menu setting**: a "Voice chat" checkbox on the main menu, enabled by
-  default, persisted in `localStorage` (`starhermit-football-voice`).
-  Toggling it mid-match joins/leaves the voice room on the spot.
-- **Transport**: WebRTC full-mesh audio (`RTCPeerConnection`, public STUN).
-  Signaling rides the platform **voice relay** (`/ws/v1/voice`): opaque,
-  directed `{type:'rtc', to, payload}` frames the server stamps with the
-  sender id and forwards only to the addressed participant — no backend
-  changes required, payloads stay under the relay's ~4 KB frame cap (ICE is
-  trickled per candidate). Glare is resolved with the standard
-  polite/impolite ("perfect negotiation") pattern keyed on userId order.
-- **Room bridging**: match → `GET /api/v1/games/{slug}/sessions/{id}` →
-  `chatConversationId` → list-or-create `/api/v1/voice/rooms` → join →
-  connect the relay socket. AI seats never join (no userId). Voice rooms are
-  capped at 10 participants platform-side, so in matches with more than 10
-  humans late joiners simply get no voice (best-effort, below).
-- **Positional audio**: each remote stream runs through
-  `GainNode → StereoPannerNode`. Gain is recomputed at 10 Hz from the world
-  distance between my footballer and the speaker's footballer (full volume
-  within 4 m, silent beyond 55 m, squared falloff); pan follows the direction
-  relative to my facing. Nearby players sound nearby, distant ones distant.
-- **Mute**: toggle with M or the HUD mic button. The platform drops relayed
-  audio from muted users, but this client's audio is WebRTC P2P, so mute is
-  enforced client-side: locally by disabling the mic tracks at source,
-  remotely by zeroing a muted peer's gain (roster `muted` flags and
-  `voice.mute_changed` events). State is published via
-  `POST /rooms/{roomId}/mute` and the `{type:'mute'}` relay frame.
-- **Best-effort**: any failure (mic denied, voice disabled platform-side,
-  relay unreachable) degrades silently — the match never depends on voice.
-- The Windows client needs no changes: games run in the system browser over
-  https, so the normal mic-permission prompt applies (persisted per game
-  profile).
+Visual assets the design calls for: cover art (16:9 night stadium, no text), loading key
+art (the same image), one crest per team, the procedural stadium and rig. No 3D model or
+humanoid animation asset is called for: the rig is code-generated and phase-driven, so a
+Kimodo humanoid clip would be out of distribution for kicks, slides and dives, and a TRELLIS
+hero prop has no home in a sport whose only prop is a sphere.
+
+## 9. Audio direction
+
+Mix: `master` → destination, with `sfxBus` (0.9, dry: ball, body, whistle, UI) and
+`crowdBus` (0.8, also feeding a two-tap feedback-delay stadium reverb at 0.35 wet). The
+crowd bed is six looped band-passed noise voices with slow LFOs whose level follows
+`excitement^1.4 × 0.5`; excitement eases toward `0.3 + 0.55 × danger`, where danger is how
+deep the ball is in either final 30 % of the pitch (`match.js updateAudio`). There is no
+music: the crowd is the score. Mute state is stored in `localStorage`
+`starhermit-football-muted` (no menu toggle yet). The AudioContext is built on the first
+pointer or key gesture.
+
+Authored clips (`sfx/*.opus`, 48 kHz mono Opus, −20 LUFS, MOSS-SoundEffect v2) are decoded
+at build time from `sfx/manifest.json`; each event plays its clip with per-call pitch (±4–10 %)
+and pan variation, and falls back to the synthesiser when the clip is absent. The looping bed,
+reverb and excitement are always synthesised. This table is the source of `sfx/manifest.txt`.
+
+| Event id | File | Sound | Used when |
+|---|---|---|---|
+| `kick.pass` | `kick-pass.opus` | soft boot-on-ball thump | `kick` events with power < 0.5 (passes, knock-ons, loose balls), local pass feedback |
+| `kick.shot` | `kick-shot.opus` | hard strike with leather slap | `kick` events with power ≥ 0.5 (shots), local charged-shot feedback |
+| `bounce` | `ball-bounce.opus` | one hollow bounce on turf | `bounce` events with power > 0.25 |
+| `tackle` | `tackle-slide.opus` | grass scuff, body thud, grunt | `tackle`, `steal` |
+| `dive` | `gk-dive.opus` | rush then heavy landing | `dive` (goalkeeper) |
+| `whistle.short` | `whistle-short.opus` | one sharp peep | kick-off after the coin flip, `goal`, `kickoff`, `restart`, `referee-whistle` |
+| `whistle.long` | `whistle-long.opus` | three blasts | `halftime`, `fulltime`, `abandoned-draw` |
+| `crowd.cheer` | `crowd-cheer.opus` | swell of voices and applause | walkout start (0.9), coin flip (0.5), own goal (0.5), full time (1 win / 0.5 draw / 0.3 loss), `substitution` (0.8) |
+| `crowd.goal` | `crowd-goal.opus` | roar with horns and whistles | `goal` (home a touch louder) |
+| `crowd.gasp` | `crowd-gasp.opus` | sharp collective intake | `woodwork`, own goal, `injury-start` |
+| `crowd.ooh` | `crowd-ooh.opus` | falling groan | `woodwork` |
+| `crowd.boo` | `crowd-boo.opus` | jeering and whistling | 1 s after an `injury-start` of kind `leave` |
+| `crowd.anticipation` | `crowd-anticipation.opus` | rising murmur | `dive` |
+| `crowd.matchStart` | `crowd-matchstart.opus` | wall of cheering, drums | lobby flips to match (`onStarting`) |
+| `injury` | `injury-cry.opus` | yelp and fall | `injury-start` |
+| `footstep` | `footstep-grass.opus` | one boot on grass | own footballer, once per stride at run/sprint |
+| `coin` | `coin-flip.opus` | flicked coin ringing and landing | coin-flip phase begins |
+| `ui` | `ui-click.opus` | soft click | every menu/lobby/dialog button |
+
+Voice chat (`voice.js`): opt-out (`starhermit-football-voice`), WebRTC mesh signalled over
+`ws/v1/voice`, each peer through `GainNode → StereoPanner`; gain recomputed at 10 Hz from
+the distance between footballers (full within 4 m, silent beyond 55 m, squared falloff), pan
+from direction relative to my facing; M or the HUD button mutes locally and publishes the flag.
+
+## 10. Localization
+
+The game ships in English only. Every string is a literal in `index.html`
+(labels, buttons, hints) and in the JS modules (banners such as "GOAL!", "HALF TIME",
+"BLUE KICKS OFF"; status lines; chat notices; achievement names in `server.js`). There is no
+string table, no language detection and no `lang` switch; `<html lang="en">` is fixed. The
+required nine locales (en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT) are
+not present — see Known limitations and Design intent. Layout already tolerates ~30 %
+longer strings: buttons wrap inside `min(320px, 80vw)`, banners scale with `clamp()`, and
+list rows ellipsise names.
+
+## 11. Accessibility
+
+- Keyboard-only: every screen is built from native `<button>`, `<select>`, `<input>`
+  elements in DOM order, so Tab/Enter reaches every action; the match itself is fully
+  keyboard playable (mouse is optional). Focus is visible with the browser default ring.
+- Captions: match events are shown as text banners (GOAL!, OWN GOAL!, HALF TIME, FULL TIME,
+  INJURY — … CAN'T CONTINUE, … COMES ON / IS BACK, MATCH ABANDONED — DRAW) as well as heard.
+- Contrast: `#eef2f5` on `rgba(10,14,20,0.82)` panels; muted text `#93a1b0` is used only for
+  hints; name plates use white on team colour with a dark rim.
+- Target sizes: menu buttons ≥ 48 px tall; touch buttons 74 / 92 px; joystick 132 px;
+  list rows ≥ 40 px.
+- Screen-reader announcements, a reduced-motion mode and an in-game mute toggle are not
+  implemented (Known limitations).
+
+## 12. StarHermit integration
+
+Uses: launch tokens (`#game_token=`, `game_scope` claim = slug, reminted every 45 min via
+`POST /games/{slug}/launch-token`); profiles (`GET /users/{id}/profile`, nickname first,
+avatars via `GET /users/{id}/avatar`); friends (`GET /me/friends`); Realtime Rooms
+(`/api/v1/realtime/rooms` create / get / mine / invites / accept / decline / open / seats /
+quick-join / start / leave, and `ws/v1/realtime` for roster pushes); the scripted-games
+runtime (`server=server.js`, `game.tickRateHz = 30`, `ws/v1/games?sessionId=`, `cmd`
+frames with `realtime: true`, `ctx.room`, `ctx.presence`, `ctx.inputs`, `result`,
+`eloUpdates`, `playerStates`, `achievements`, `game.replays = true`); leaderboards
+(`GET /games/{slug}` for `leaderboardId` and `me`, `GET /leaderboards/{id}/entries`);
+replays (`GET /games/{slug}/replays/mine`, `/replays/{sessionId}`); sessions
+(`GET /games/{slug}/sessions/{id}` for `chatConversationId`); chat REST
+(`/chat/conversations/{id}/messages`, polled every 5 s); voice rooms and relay
+(`/voice/rooms`, `ws/v1/voice`); per-user control bindings
+(`GET/PUT/DELETE /games/{slug}/controls`). Achievement unlocks arrive as
+`{ type: 'achievement' }` frames and show as a HUD banner.
+
+Does not use: the peer relay (`ws/v1/relay`), chat WebSocket, presence outside rooms,
+host-submitted results (`POST /rooms/{id}/result`), or any platform storage beyond
+`playerStates`. Without a token the client is offline: PRACTICE only, platform buttons
+disabled or hidden. Conventions follow https://wiki.starhermit.com/ (relative `/api` and
+`/ws` paths, launch-token scope fencing, script return contract).
+
+## 13. Technical architecture
+
+- **Determinism**: the sim is a pure function of `(state, inputs, dt)` with its RNG in
+  state; the platform script rehydrates it each stateless invocation (`rehydrate`). The
+  regression test round-trips `sessionState` through JSON every tick.
+- **Online timeline**: snapshots (`snap`) ≥ 30 ms apart carry `ts`, `tick`, per-seat `ack`
+  and 2-decimal arrays; the client stamps them on the server timeline, picks an interpolation
+  delay of 55–140 ms from arrival jitter, extrapolates at most 120 ms, keeps 1.5 s of
+  buffer, and reconciles a render-only predictor for its own footballer (blend 0.18, 0.06
+  with unacknowledged input, snap on > 3 m error). Inputs older than 1 s are zeroed
+  server-side. The games socket reconnects with 250 ms → 15 s backoff and re-syncs.
+- **Intro hold**: the script freezes formation and clock for 13 s after session creation so
+  the walkout and coin flip (12.5 s) cannot be played through by AI.
+- **Persistence**: `localStorage` for mute and voice preferences; everything else lives on
+  the platform (rooms, sessions, ratings, replays, control overrides).
+- **Performance budget**: one shadow-casting spot plus fills, instanced seats and crowd
+  (80 % of seat positions filled), pixel ratio capped at 2 (desktop) / 1.5 (touch), fixed
+  60 Hz sim step with a 0.25 s accumulator cap, no post-processing. Snapshot size is
+  ~0.5–3 KB; the archived session for a 2×3 min match stays under the 900-frame cap.
+- **e2e**: `tests/e2e.mjs` serves the repo from an embedded static server (`PORT` env pins
+  the port), launches headless Chrome on SwiftShader, and plays a full 1v1 practice match
+  twice — desktop with real key presses, mobile with CDP touch events on the joystick and
+  buttons — synchronising on the visible `#match-clock`.
+
+## 14. Testing and acceptance criteria
+
+`npm test` (`tests/server-regression.cjs`) loads `server.js` in a VM and asserts: the intro
+hold keeps the clock at 0 and the formation frozen through stateless ticks; a full rated
+match returns `result`, exact Elo values (1400 vs 1200), W/L/D increments, a finished
+summary, replay frames every 15 ticks with the snapshot row shape, `kickoff` and `fulltime`
+events, and a 4-seat roster; a 2×60 s match rates in the right direction; a forced 0–0 is a
+rated draw; an abandoned match carries no ratings.
+
+`npm run test:e2e` asserts, at 1280×800 and 390×844: offline status text, QUICK PLAY /
+CREATE LOBBY disabled and platform screens hidden, the voice toggle persists, PRACTICE
+starts (touch UI visible on mobile), the clock leaves 00:00 after the intro, the match
+reaches 2nd 03:00, the result shows VICTORY / DEFEAT / DRAW with a score and possession, and
+MAIN MENU returns. Any page error or console error (other than GPU noise and offline `/api`
+404s) fails the run. On this box (software GL) a full run takes roughly 70 minutes (two
+real 2×3 min matches at ≤ 0.1 s of sim per frame), so it is run on demand rather than in
+every pass; the last full pass on the current build reached kick-off and played the first
+half on desktop with zero page or console errors before it was stopped at the time budget.
+
+QA bar (checkable): every button on every screen does something visible; no console errors
+or warnings on load, in a practice match, or on the result screen; at 390×844 portrait and
+844×390 landscape the score bar, ball arrow, power bar, joystick, three touch buttons, result
+title and score and every primary button are fully visible; the first practice match teaches
+shoot, pass, camera and the ball arrow through on-screen feedback without a manual.
+
+## 15. Asset inventory
+
+| Asset | Path | Purpose | Source | Status |
+|---|---|---|---|---|
+| Cover art | `coverart.png` (1200×675) | Platform listing (`cover=`) | FLUX.2 klein, seed 4471, 1216×688, 32 steps | generated in this pass (replaced the placeholder) |
+| Loading key art | `assets/keyart-night-stadium.webp` | `#loading` backdrop | same render, WebP q82 | generated in this pass, wired in `css/style.css` |
+| BLUE crest | `assets/crest-blue.webp` (256²) | Score bar, lobby team head | FLUX.2 klein, seed 9021 | generated in this pass, wired in `index.html`, `lobby.js` |
+| RED crest | `assets/crest-red.webp` (256²) | Score bar, lobby team head | FLUX.2 klein, seed 9022 | generated in this pass, wired |
+| App icon / favicon | `icon.png`, `favicon.svg` | Platform icon, tab icon | hand-authored | shipped |
+| SFX clips (18) | `sfx/*.opus` per section 9 | Event audio | MOSS-SoundEffect v2, 100 steps, seeds from the generator (sha256 of `football___<name>`) | generated in this pass, bound in `audio.js` with synth fallback |
+| SFX manifests | `sfx/manifest.txt`, `sfx/manifest.json`, `sfx/manifest.md` | Canonical table, binding + prompts, generator output | this pass | shipped |
+| Stadium, rig, ball, coin, stretcher | `js/world/*`, `match.js` | All 3D art | procedural | shipped |
+| 3D model (TRELLIS) | — | — | not called for (see section 8) | n/a |
+| Humanoid animation (Kimodo) | — | — | not called for: procedural rig; football kicks/dives are out of distribution | n/a |
+
+## 16. Known limitations
+
+- No localisation: English-only literals (section 10).
+- No reduced-motion mode; camera sway, crowd motion and banner pops always play.
+- `audio.setMuted` exists but no menu control calls it; mute can only be set via
+  `localStorage`. Voice has a mic toggle; game sound does not.
+- Ranked vs AI is never rated (one team has no humans) despite the button name.
+- Online stats: the result card shows possession and shots only for practice; online results
+  show the score alone (`stats` is `null`).
+- The e2e run needs `/usr/bin/google-chrome` and, on software GL, tens of minutes per pass.
+- Replay lists depend on `GET /replays/{sessionId}` per row to split teams correctly.
+- Screen-reader users get no live announcements of goals or the clock.
+
+### Design intent not yet implemented
+
+- Ship the nine locales through a string table with a locale picked from the launch
+  token's profile or `navigator.language`.
+- A SOUND toggle on the menu (bound to `audio.setMuted`) and `prefers-reduced-motion`
+  handling that stills the crowd sway, camera sprint FOV and banner animation.
+- Show the crests on the result card and on the LED boards (a FLUX board strip would replace
+  the procedural sponsor names).
+- `aria-live` region mirroring HUD banners.
+- Send `stats` in the full-time snapshot so online result cards match practice.

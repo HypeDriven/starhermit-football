@@ -288,6 +288,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
       phase = 'coinflip';
       phaseT = 4.5;
       coin.visible = true;
+      audio.coin();
       audio.crowd.cheer(0.5);
     }
   }
@@ -639,7 +640,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
         break;
       case 'bounce': if (ev.power > 0.25) audio.bounce(ev.power); break;
       case 'steal': case 'tackle': audio.tackle(); break;
-      case 'dive': audio.tackle(); audio.crowd.anticipation(); break;
+      case 'dive': audio.dive(); audio.crowd.anticipation(); break;
       case 'woodwork': audio.crowd.gasp(); audio.crowd.ooh(); stadium.crowd.pulse(0.5); break;
       case 'goal': {
         const isHome = ev.team === 0;

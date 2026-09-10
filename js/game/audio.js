@@ -1,5 +1,9 @@
 // StarHermit Football — game audio.
-// Everything is synthesized with the Web Audio API; no audio files.
+// Two layers: authored clips (sfx/*.opus, bound by event id through
+// sfx/manifest.json; the canonical table is sfx/manifest.txt) and a WebAudio
+// synthesiser that plays whenever an event has no decoded clip — so the game
+// is never silent if a clip is missing or fails to decode. The crowd bed loop,
+// the stadium reverb and the excitement level are always synthesised.
 // Lazily created AudioContext: call resume() from a user gesture.
 
 const MUTE_KEY = 'starhermit-football-muted';
@@ -26,6 +30,7 @@ export function createAudio() {
   let noiseBuffer = null;
   let built = false;
   let excitement = 0.35;
+  const clips = {}; // event id -> decoded AudioBuffer (sfx/manifest.json)
 
   let muted = false;
   try {
@@ -150,6 +155,43 @@ export function createAudio() {
     }
   }
 
+  // Authored clips: decode everything the manifest lists. Any failure (no
+  // manifest, 404, undecodable file) leaves that event on the synth path.
+  function loadClips() {
+    if (typeof fetch !== 'function') return;
+    fetch('sfx/manifest.json')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => {
+        for (const e of list || []) {
+          if (!e || !e.event || !e.name) continue;
+          fetch('sfx/' + e.name + '.opus')
+            .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('missing clip'))))
+            .then((buf) => ctx.decodeAudioData(buf))
+            .then((decoded) => { clips[e.event] = decoded; })
+            .catch(() => { /* synth fallback for this event */ });
+        }
+      })
+      .catch(() => { /* no manifest — fully synthesised */ });
+  }
+
+  // Play a decoded clip for an event. Returns false when no clip is bound so
+  // the caller can fall through to its synthesiser.
+  function playClip(event, dest, o) {
+    const buf = clips[event];
+    if (!buf) return false;
+    o = o || {};
+    const t = ctx.currentTime + (o.delay || 0) + 0.001;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = o.rate || 1;
+    const g = ctx.createGain();
+    g.gain.value = o.gain == null ? 1 : o.gain;
+    src.connect(g);
+    chainTail(g, dest, o.pan || 0);
+    src.start(t);
+    return true;
+  }
+
   function build() {
     if (built || !AC) return;
     ctx = new AC();
@@ -172,6 +214,7 @@ export function createAudio() {
     buildCrowdBed();
     applyExcitement(ctx.currentTime);
     built = true;
+    loadClips();
   }
 
   function applyExcitement(t) {
@@ -279,6 +322,8 @@ export function createAudio() {
       const t = ctx.currentTime + 0.001;
       const det = rand(0.92, 1.1); // per-call detune
       const pan = rand(-0.15, 0.15);
+      if (playClip(p >= 0.5 ? 'kick.shot' : 'kick.pass', sfxBus,
+        { rate: det, gain: 0.55 + p * 0.55, pan })) return;
 
       // Band-passed noise slap.
       noiseBurst(sfxBus, t, {
@@ -307,6 +352,7 @@ export function createAudio() {
       const p = clamp01(power);
       const t = ctx.currentTime + 0.001;
       const det = rand(0.9, 1.12);
+      if (playClip('bounce', sfxBus, { rate: det, gain: 0.25 + p * 0.6, pan: rand(-0.2, 0.2) })) return;
 
       noiseBurst(sfxBus, t, {
         freq: 500 * det + p * 300,
@@ -326,8 +372,16 @@ export function createAudio() {
       });
     },
 
+    // Goalkeeper dive: its own clip; the tackle synth stands in without one.
+    dive() {
+      if (!ready()) return;
+      if (playClip('dive', sfxBus, { rate: rand(0.94, 1.06), gain: 0.9, pan: rand(-0.2, 0.2) })) return;
+      this.tackle();
+    },
+
     tackle() {
       if (!ready()) return;
+      if (playClip('tackle', sfxBus, { rate: rand(0.9, 1.1), gain: 0.85, pan: rand(-0.25, 0.25) })) return;
       const t = ctx.currentTime + 0.001;
       // Body/grass scuff: band-swept noise swish.
       noiseBurst(sfxBus, t, {
@@ -354,6 +408,7 @@ export function createAudio() {
       if (!ready()) return;
       const t = ctx.currentTime + 0.001;
       const pan = rand(-0.2, 0.2);
+      if (playClip('injury', sfxBus, { rate: rand(0.95, 1.05), gain: 0.8, pan })) return;
       // Human-ish yelp: band-passed sawtooth, pitch drops as the cry dies.
       for (const det of [-7, 5]) {
         const osc = ctx.createOscillator();
@@ -403,6 +458,7 @@ export function createAudio() {
     footstep() {
       if (!ready()) return;
       const t = ctx.currentTime + 0.001;
+      if (playClip('footstep', sfxBus, { rate: rand(0.85, 1.2), gain: rand(0.18, 0.3), pan: rand(-0.2, 0.2) })) return;
       noiseBurst(sfxBus, t, {
         freq: rand(700, 1300),
         freqEnd: rand(300, 500),
@@ -417,6 +473,8 @@ export function createAudio() {
 
     whistle(kind) {
       if (!ready()) return;
+      if (playClip(kind === 'long' ? 'whistle.long' : 'whistle.short', sfxBus,
+        { rate: rand(0.97, 1.03), gain: 0.7, pan: rand(-0.1, 0.1) })) return;
       const blasts = kind === 'long' ? 3 : 1;
       const base = rand(2180, 2260);
       const vibRate = rand(24, 34);
@@ -461,6 +519,20 @@ export function createAudio() {
       }
     },
 
+    // Coin flip at the centre circle: authored clip, else a bright metallic
+    // ping with a short shimmer.
+    coin() {
+      if (!ready()) return;
+      if (playClip('coin', sfxBus, { rate: rand(0.97, 1.03), gain: 0.6 })) return;
+      const t = ctx.currentTime + 0.001;
+      for (const f of [3120, 4680, 6240]) {
+        tone(sfxBus, t, { freq: f * rand(0.99, 1.01), gain: 0.05, dur: rand(0.5, 0.8), attack: 0.002 });
+      }
+      for (let i = 0; i < 5; i++) {
+        tone(sfxBus, t + 0.35 + i * 0.09, { freq: 2600 + i * 180, gain: 0.02, dur: 0.05, attack: 0.002 });
+      }
+    },
+
     crowd: {
       setExcitement(level) {
         excitement = clamp01(level);
@@ -471,6 +543,7 @@ export function createAudio() {
       // match. Deliberately broader, louder and longer than a normal cheer.
       matchStart() {
         if (!ready()) return;
+        if (playClip('crowd.matchStart', crowdBus, { gain: 1.1, rate: rand(0.96, 1.02) })) return;
         const t = ctx.currentTime + 0.001;
         noiseBurst(crowdBus, t, {
           freq: rand(420, 620), freqEnd: rand(1050, 1450), q: 0.45,
@@ -496,6 +569,7 @@ export function createAudio() {
         if (!ready()) return;
         const s = clamp01(strength);
         const t = ctx.currentTime + 0.001;
+        if (playClip('crowd.cheer', crowdBus, { gain: 0.35 + s * 0.65, rate: rand(0.92, 1.08), pan: rand(-0.3, 0.3) })) return;
         const dur = rand(0.8, 1.7) + s * 0.8;
         const pan = rand(-0.3, 0.3);
 
@@ -528,6 +602,7 @@ export function createAudio() {
       gasp() {
         if (!ready()) return;
         const t = ctx.currentTime + 0.001;
+        if (playClip('crowd.gasp', crowdBus, { gain: 0.8, rate: rand(0.94, 1.08), pan: rand(-0.2, 0.2) })) return;
         // Sharp inhale: fast attack, band sweeping down quickly.
         noiseBurst(crowdBus, t, {
           freq: rand(1400, 1900),
@@ -544,6 +619,7 @@ export function createAudio() {
       ooh() {
         if (!ready()) return;
         const t = ctx.currentTime + 0.001;
+        if (playClip('crowd.ooh', crowdBus, { gain: 0.8, rate: rand(0.94, 1.06), pan: rand(-0.3, 0.3) })) return;
         const dur = rand(0.9, 1.4);
         // Falling 'oooh': lowpassed sawtooth cluster gliding down.
         const startF = rand(210, 250);
@@ -587,6 +663,7 @@ export function createAudio() {
         if (!ready()) return;
         const s = clamp01(strength == null ? 1 : strength);
         const t = ctx.currentTime + 0.001;
+        if (playClip('crowd.boo', crowdBus, { gain: 0.4 + s * 0.5, rate: rand(0.94, 1.04), pan: rand(-0.3, 0.3) })) return;
         const dur = rand(1.8, 2.3);
         // Descending 'booo': low-mid sawtooth cluster gliding slowly down,
         // darker and quieter than the ooh.
@@ -631,6 +708,7 @@ export function createAudio() {
         if (!ready()) return;
         const t = ctx.currentTime + 0.001;
         const big = isHome ? 1.15 : 0.95; // home crowd roars a touch harder
+        if (playClip('crowd.goal', crowdBus, { gain: big, rate: rand(0.95, 1.03), pan: rand(-0.15, 0.15) })) return;
 
         // Main roar swell with ~4s decay.
         noiseBurst(crowdBus, t, {
@@ -678,6 +756,7 @@ export function createAudio() {
       anticipation() {
         if (!ready()) return;
         const t = ctx.currentTime + 0.001;
+        if (playClip('crowd.anticipation', crowdBus, { gain: 0.7, rate: rand(0.94, 1.06) })) return;
         // Rising murmur swell: slow attack, then releases.
         noiseBurst(crowdBus, t, {
           freq: rand(380, 520),
@@ -695,6 +774,7 @@ export function createAudio() {
     ui() {
       if (!ready()) return;
       const t = ctx.currentTime + 0.001;
+      if (playClip('ui', sfxBus, { gain: 0.5, rate: rand(0.96, 1.04) })) return;
       tone(sfxBus, t, {
         freq: rand(700, 900),
         freqEnd: rand(400, 550),

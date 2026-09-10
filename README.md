@@ -58,23 +58,24 @@ mouse and again to open the leave-match prompt.
 ## Architecture
 
 - **Client** (this repo): no-build ES modules, three.js vendored in
-  `vendor/three/`. `js/game/sim.js` is a dependency-free simulation core
-  shared by the authoritative host, guest prediction, and offline practice;
-  `js/game/ai.js` drives AI seats; `js/world/*` renders stadium, characters
-  and name tags (all art generated in code — zero binary assets);
-  `js/game/audio.js` synthesizes every sound with WebAudio.
-- **Netcode**: host-authoritative. The room creator's browser simulates at
-  60 Hz and broadcasts 15 Hz snapshots over `ws/v1/realtime`; guests send
-  20 Hz inputs, predict their own footballer, and interpolate everyone else.
-  The server enforces roles, routing, identity and rate limits.
-- **Backend**: the Realtime Rooms subsystem (rooms, seats, friend invites,
-  quick-join matchmaking, AI backfill, results) lives in the StarHermit
-  platform repository and is generic — any realtime game can use it. See
-  `spec.md` §8 for the design.
+  `vendor/three/`. `server.js` is the dependency-free simulation core, loaded
+  as a classic script and re-exported by `js/game/sim.js` / `js/game/ai.js`
+  for offline practice, prediction and the menu backdrop; `js/world/*` renders
+  stadium, characters and name tags in code; `js/game/audio.js` plays the
+  authored clips in `sfx/` (bound through `sfx/manifest.json`) and synthesizes
+  the crowd bed, reverb and any missing clip with WebAudio.
+- **Netcode**: server-authoritative. The platform runs `server.js` at 30 Hz;
+  clients send 30 Hz inputs over `ws/v1/games`, predict their own footballer
+  (render-only) and interpolate everyone else from server-timed snapshots.
+  Realtime Rooms (`/api/v1/realtime`, `ws/v1/realtime`) handle lobby, invites,
+  matchmaking, AI backfill and roster only.
+- **Assets**: `assets/` holds the loading key art and the two club crests;
+  `coverart.png` is the platform cover. See `spec.md` for the full design.
 
 ## Files
 
-- `starhermit.txt` — platform manifest (`slug=football`, no `server=` script:
-  authority lives on the room host, not in the turn-based script sandbox).
-- `spec.md` — full design & implementation spec.
-- `js/`, `css/`, `vendor/three/` — the game.
+- `starhermit.txt` — platform manifest (`launch`, `owner`, `server=server.js`,
+  default `control.*` bindings, `cover`).
+- `spec.md` — the running game design document.
+- `js/`, `css/`, `assets/`, `sfx/`, `vendor/three/` — the game.
+- `tests/` — `npm test` (rules regression) and `npm run test:e2e` (browser playthrough).

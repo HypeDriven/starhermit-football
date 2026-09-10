@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node tests/server-regression.cjs",
     "test:e2e": "node tests/e2e.mjs"
   },
   "devDependencies": {

@@ -240,7 +240,12 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
     for (let t = 0; t < 2; t++) {
       const head = document.createElement('div');
       head.className = 'team-head';
-      head.textContent = t === 0 ? 'BLUE' : 'RED';
+      const crest = document.createElement('img');
+      crest.className = 'crest';
+      crest.src = t === 0 ? 'assets/crest-blue.webp' : 'assets/crest-red.webp';
+      crest.alt = '';
+      head.appendChild(crest);
+      head.appendChild(document.createTextNode(t === 0 ? 'BLUE' : 'RED'));
       head.style.color = t === 0 ? '#5b9bd5' : '#e74c3c';
       rosterEl.appendChild(head);
     }

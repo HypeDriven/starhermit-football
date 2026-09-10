@@ -1,0 +1,20 @@
+[
+  { "name": "kick-pass",          "seconds": 1, "event": "kick.pass",          "prompt": "A soft short football pass, a leather boot brushing a ball on grass, one light thump, close-miked outdoors on a pitch." },
+  { "name": "kick-shot",          "seconds": 1, "event": "kick.shot",          "prompt": "A powerful football shot, a boot striking a ball hard, one deep solid thump with a short leather slap, outdoors on a pitch." },
+  { "name": "ball-bounce",        "seconds": 1, "event": "bounce",             "prompt": "A football bouncing once on firm turf, a single dull hollow bounce, outdoors." },
+  { "name": "tackle-slide",       "seconds": 2, "event": "tackle",             "prompt": "A footballer sliding across grass in a slide tackle, a quick grass scuff with a soft body thud and a short grunt." },
+  { "name": "gk-dive",            "seconds": 2, "event": "dive",               "prompt": "A goalkeeper diving and landing on grass, a rush of movement then a heavy body thud on turf with a short exhale." },
+  { "name": "whistle-short",      "seconds": 1, "event": "whistle.short",      "prompt": "A single sharp referee whistle blast, one short pea whistle peep, in a large open stadium." },
+  { "name": "whistle-long",       "seconds": 3, "event": "whistle.long",       "prompt": "A referee blowing the final whistle three times, three sharp pea whistle blasts in a row, echoing in a large stadium." },
+  { "name": "crowd-cheer",        "seconds": 4, "event": "crowd.cheer",        "prompt": "A large football stadium crowd cheering, a rising swell of thousands of voices and applause that settles back down." },
+  { "name": "crowd-goal",         "seconds": 6, "event": "crowd.goal",         "prompt": "A huge stadium crowd erupting in a roar as a goal is scored, thousands of voices shouting, air horns and whistles, a long sustained roar." },
+  { "name": "crowd-gasp",         "seconds": 2, "event": "crowd.gasp",         "prompt": "A stadium crowd gasping sharply all at once, a short collective intake of breath then a hushed murmur." },
+  { "name": "crowd-ooh",          "seconds": 3, "event": "crowd.ooh",          "prompt": "A football crowd groaning ooh in unison at a near miss, a falling collective moan in a large stadium." },
+  { "name": "crowd-boo",          "seconds": 4, "event": "crowd.boo",          "prompt": "A stadium crowd booing loudly, thousands of people jeering and whistling in disapproval." },
+  { "name": "crowd-anticipation", "seconds": 3, "event": "crowd.anticipation", "prompt": "A stadium crowd rising in anticipation, a growing murmur and rumble of excited voices building up." },
+  { "name": "crowd-matchstart",   "seconds": 6, "event": "crowd.matchStart",   "prompt": "A packed football stadium roaring as the teams walk out onto the pitch, a huge sustained wall of cheering with drums and chanting." },
+  { "name": "injury-cry",         "seconds": 2, "event": "injury",             "prompt": "A footballer crying out in pain and falling onto grass, a short yelp followed by a body thud on turf." },
+  { "name": "footstep-grass",     "seconds": 1, "event": "footstep",           "prompt": "A single running footstep of a football boot on short grass, one quick soft crunch, close-miked." },
+  { "name": "coin-flip",          "seconds": 3, "event": "coin",               "prompt": "A metal coin flicked into the air, spinning with a bright metallic ring, then landing flat on a hard surface." },
+  { "name": "ui-click",           "seconds": 1, "event": "ui",                 "prompt": "A short soft plastic click of a menu button, a single quiet tick." }
+]
