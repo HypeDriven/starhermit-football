@@ -37,4 +37,4 @@ control.right=KeyD+ArrowRight | Turn right
 control.shoot=Space+KeyJ | Shoot (hold) / tap to pass
 control.pass=KeyL | Pass
 control.tackle=KeyK | Slide tackle / pressure
-cover=coverart.png
+cover=cover.jpg
