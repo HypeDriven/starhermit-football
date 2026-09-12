@@ -24,6 +24,7 @@
     <img class="crest" src="assets/crest-red.webp" alt="" aria-hidden="true">
     <span id="match-clock">00:00</span>
   </div>
+  <button id="btn-match-menu" class="hud-menu-btn" aria-label="Match menu" title="Menu (Esc)">☰</button>
   <div id="ball-arrow" class="hidden"><div id="ball-arrow-head">▲</div><div id="ball-arrow-dist"></div></div>
   <div id="power-bar" class="hidden"><div id="power-fill"></div></div>
   <div id="event-banner" class="hidden"></div>
@@ -139,11 +140,16 @@
 
 <!-- Leave-match confirm (Esc in match) -->
 <div id="leave-confirm" class="screen hidden">
-  <h2>LEAVE MATCH?</h2>
-  <div class="muted">An AI player takes over your footballer.</div>
+  <h2 id="match-menu-title">MATCH MENU</h2>
+  <div id="match-menu-note" class="muted">Practice is paused while this menu is open.</div>
+  <div id="match-menu-help" class="muted small">
+    Move: WASD / arrows or the joystick · Shoot: left mouse or SHOOT · Pass: right mouse or PASS · Tackle: middle mouse or TACKLE · Click the pitch for mouse camera.
+  </div>
   <div class="menu-buttons">
-    <button id="btn-leave-yes" class="mbtn danger">LEAVE MATCH</button>
     <button id="btn-leave-no" class="mbtn primary">KEEP PLAYING</button>
+    <button id="btn-match-restart" class="mbtn">RESTART PRACTICE</button>
+    <button id="btn-match-sound" class="mbtn">SOUND: ON</button>
+    <button id="btn-leave-yes" class="mbtn danger">LEAVE MATCH</button>
   </div>
 </div>
 

@@ -819,16 +819,20 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     hud.showHud(false);
   }
 
+  let paused = false; // practice only: the local sim simply stops advancing
   return {
     startPractice,
     startFromRoom,
-    update,
+    update(dt) { if (paused && mode === 'practice') { stadium.update(dt, camera); return; } update(dt); },
     dispose,
     onSnapshot,
     onNetEvent: (ev) => handleNetEvent(ev),
     applyRoster,
     set onFullTime(cb) { onFullTime = cb; },
     get phase() { return phase; },
+    get mode() { return mode; },
+    get paused() { return paused; },
+    set paused(v) { paused = !!v && mode === 'practice'; },
     get sim() { return sim; },
     get myPlayerId() { return myPlayerId; },
   };

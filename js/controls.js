@@ -45,11 +45,29 @@ export function createControlsScreen({ input, audio, onBack }) {
       render();
       hintEl.textContent = 'Click a key to rebind it. Esc cancels. In a match, click the pitch for mouse camera; left mouse shoots, right passes, middle tackles.';
     } catch (e) {
-      listEl.innerHTML = '';
-      hintEl.textContent = e.status === 404
-        ? 'This game declares no remappable controls.'
-        : `Could not load controls: ${e.message}`;
+      // Service unavailable or the game has no remappable controls declared:
+      // still show the built-in defaults and full instructions; saving/resetting
+      // is disabled because nothing can be stored.
+      actions = defaultActions();
+      render(true);
+      hintEl.textContent = (e.status === 404
+        ? 'Remapping is not available for this game on this platform. These are the built-in controls.'
+        : `Control remapping is unavailable right now (${e.message}). These are the built-in controls.`) +
+        ' In a match: WASD/arrows move, Space or J shoots (hold to charge), L passes, K tackles; click the pitch for mouse camera — left mouse shoots, right passes, middle tackles.';
     }
+  }
+
+  // Built-in keymap (mirrors game/input.js DEFAULT_KEYMAP) for offline display.
+  function defaultActions() {
+    return [
+      { action: 'up', label: 'Move forward', codes: ['KeyW', 'ArrowUp'] },
+      { action: 'down', label: 'Move back', codes: ['KeyS', 'ArrowDown'] },
+      { action: 'left', label: 'Turn left', codes: ['KeyA', 'ArrowLeft'] },
+      { action: 'right', label: 'Turn right', codes: ['KeyD', 'ArrowRight'] },
+      { action: 'shoot', label: 'Shoot (hold to charge)', codes: ['Space', 'KeyJ'] },
+      { action: 'pass', label: 'Pass', codes: ['KeyL'] },
+      { action: 'tackle', label: 'Tackle', codes: ['KeyK'] },
+    ].map((a) => ({ ...a, defaultCodes: [...a.codes] }));
   }
 
   function close() {
@@ -69,7 +87,11 @@ export function createControlsScreen({ input, audio, onBack }) {
     return a.codes.length === a.defaultCodes.length && a.codes.every((c, i) => c === a.defaultCodes[i]);
   }
 
-  function render() {
+  let readOnly = false;
+  function render(ro = false) {
+    readOnly = !!ro;
+    saveBtn.disabled = readOnly;
+    resetBtn.disabled = readOnly;
     const conflicts = conflictedCodes();
     listEl.innerHTML = '';
     for (const a of actions) {
@@ -90,10 +112,12 @@ export function createControlsScreen({ input, audio, onBack }) {
         keys.textContent = a.codes.map(keyLabel).join(' / ');
         if (a.codes.some((c) => conflicts.has(c))) row.classList.add('conflict');
       }
+      keys.disabled = readOnly;
       keys.onclick = () => {
+        if (readOnly) return;
         audio.ui();
         capturing = capturing === a.action ? null : a.action;
-        render();
+        render(readOnly);
       };
       row.appendChild(keys);
 
@@ -111,7 +135,7 @@ export function createControlsScreen({ input, audio, onBack }) {
 
       listEl.appendChild(row);
     }
-    saveBtn.disabled = busy || conflicts.size > 0;
+    saveBtn.disabled = readOnly || busy || conflicts.size > 0;
     if (conflicts.size > 0) hintEl.textContent = 'Two actions share a key — rebind one of them to save.';
   }
 

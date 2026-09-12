@@ -82,9 +82,18 @@ export function createFollowCamera(camera) {
     const ax = ndc.x, ay = ndc.y;
     const m = Math.max(Math.abs(ax) / 0.86, Math.abs(ay) / 0.8, 1e-6);
     const ex = ax / m, ey = ay / m;
-    const px = (ex * 0.5 + 0.5) * innerWidth;
-    const py = (-ey * 0.5 + 0.5) * innerHeight;
+    let px = (ex * 0.5 + 0.5) * innerWidth;
+    let py = (-ey * 0.5 + 0.5) * innerHeight;
     arrowEl.classList.remove('hidden');
+    // Keep the whole arrow+label rectangle inside the viewport (and above the
+    // bottom touch controls), not just its anchor point.
+    const r = arrowEl.getBoundingClientRect();
+    const hw = (r.width || 40) / 2, hh = (r.height || 40) / 2;
+    const touch = document.getElementById('touch-ui');
+    const touchVisible = touch && !touch.classList.contains('hidden');
+    const bottomReserve = touchVisible ? Math.min(innerHeight * 0.3, 190) : 0;
+    px = Math.min(Math.max(px, hw + 6), innerWidth - hw - 6);
+    py = Math.min(Math.max(py, hh + 60), innerHeight - hh - 6 - bottomReserve);
     arrowEl.style.left = `${px}px`;
     arrowEl.style.top = `${py}px`;
     const ang = Math.atan2(-(ey), ex) * 180 / Math.PI - 90;

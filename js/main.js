@@ -360,20 +360,38 @@ function exitReplay() {
   showScreen('screen-replays');
 }
 
-// ── in-match leave (Esc) ──
+// ── in-match menu (Esc / ☰): pause (practice), help, sound, restart, leave ──
+function setMatchMenu(open) {
+  const el = $('leave-confirm');
+  el.classList.toggle('hidden', !open);
+  if (!match) return;
+  const practice = match.mode === 'practice';
+  match.paused = open && practice;
+  $('match-menu-title').textContent = practice ? 'PRACTICE PAUSED' : 'MATCH MENU';
+  $('match-menu-note').textContent = practice
+    ? 'The practice match waits while this menu is open.'
+    : 'Online play continues; an AI player takes over if you leave.';
+  $('btn-match-restart').classList.toggle('hidden', !practice);
+  $('btn-match-sound').textContent = `SOUND: ${audio.isMuted() ? 'OFF' : 'ON'}`;
+  $('btn-leave-yes').textContent = practice ? 'BACK TO MENU' : 'LEAVE MATCH';
+  if (open) $('btn-leave-no').focus();
+}
 addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (document.activeElement?.matches?.('input, textarea')) return; // chat input handles Esc itself
-  // First Escape releases desktop mouse-look. A second Escape opens leave.
+  // First Escape releases desktop mouse-look. A second Escape opens the menu.
   if (document.pointerLockElement === canvas) return;
-  if (!match || match.phase === 'done' || !matchRoom) return;
-  $('leave-confirm').classList.toggle('hidden');
+  if (!match || match.phase === 'done') return;
+  setMatchMenu($('leave-confirm').classList.contains('hidden'));
 });
-$('btn-leave-no').onclick = () => { audio.ui(); $('leave-confirm').classList.add('hidden'); };
+$('btn-match-menu').onclick = () => { if (match && match.phase !== 'done') { audio.ui(); setMatchMenu(true); } };
+$('btn-leave-no').onclick = () => { audio.ui(); setMatchMenu(false); };
+$('btn-match-sound').onclick = () => { audio.setMuted(!audio.isMuted()); $('btn-match-sound').textContent = `SOUND: ${audio.isMuted() ? 'OFF' : 'ON'}`; };
+$('btn-match-restart').onclick = () => { audio.ui(); setMatchMenu(false); disposeMatch(); startPractice(); };
 $('btn-leave-yes').onclick = async () => {
   audio.ui();
   const room = matchRoom;
-  $('leave-confirm').classList.add('hidden');
+  setMatchMenu(false);
   if (room) { try { await api.leaveRoom(room.id); } catch { /* already gone */ } }
   activeRoom = null;
   backToMenu();
