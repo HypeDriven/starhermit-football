@@ -6,8 +6,13 @@
 // All geometry and textures are generated in code (canvas textures, primitive
 // geometry merged by hand). No external assets.
 //
+// Graphics settings (js/gfx.js via graphics.js onGraphics) drive the parts
+// with a cost: shadow-map size and a second shadow caster, crowd density,
+// camera flashes + floodlight haze particles, the floodlit environment map
+// for reflections, and the detailed pitch (wear, mow-stripe sheen, blade relief).
+//
 // Usage:
-//   import { buildStadium } from './world/stadium.js?v=7';
+//   import { buildStadium } from './world/stadium.js?v=8';
 //   const stadium = buildStadium(scene, { pitch: { L, W, goalW, goalH, boxD, boxW } });
 //   stadium.update(dt, camera);            // every frame
 //   stadium.crowd.setExcitement(0..1);
@@ -16,6 +21,8 @@
 //   stadium.dispose();
 
 import * as THREE from 'three';
+import { onGraphics, stadiumEnvironment, reducedMotion } from '../graphics.js?v=8';
+import { SHADOW_MAP } from '../gfx.js?v=8';
 
 const DEFAULT_PITCH = { L: 105, W: 68, goalW: 7.32, goalH: 2.44, boxD: 16.5, boxW: 40.32 };
 
@@ -130,7 +137,7 @@ function makeSkyTexture(night) {
   return canvasTexture(c);
 }
 
-function makeGrassTexture(L, W) {
+function makeGrassTexture(L, W, detailed = false) {
   const w = 1024;
   const h = Math.max(2, Math.round((1024 * W) / L));
   const [c, ctx] = makeCanvas(w, h);
@@ -139,6 +146,42 @@ function makeGrassTexture(L, W) {
   for (let i = 0; i < bands; i++) {
     ctx.fillStyle = i % 2 ? '#2f6d31' : '#2a602c';
     ctx.fillRect(Math.floor(i * bw), 0, Math.ceil(bw) + 1, h);
+  }
+  if (detailed) {
+    // broad, soft turf variation so the pitch is not a flat print
+    for (let i = 0; i < 90; i++) {
+      const x = Math.random() * w;
+      const y = Math.random() * h;
+      const r = 30 + Math.random() * 110;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      const tint = Math.random() < 0.5 ? '70,120,40' : '10,40,15';
+      g.addColorStop(0, `rgba(${tint},0.10)`);
+      g.addColorStop(1, `rgba(${tint},0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    // worn, lighter turf in the goalmouths, on the centre spot and the penalty spots
+    const px = w / L;
+    const wear = (mx, mz, rx, rz, a) => {
+      const x = (mx + L / 2) * px;
+      const y = (mz + W / 2) * px;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(1, rz / rx);
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx * px);
+      g.addColorStop(0, `rgba(122,118,70,${a})`);
+      g.addColorStop(0.6, `rgba(100,110,60,${a * 0.45})`);
+      g.addColorStop(1, 'rgba(100,110,60,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(-rx * px, -rx * px, rx * px * 2, rx * px * 2);
+      ctx.restore();
+    };
+    for (const side of [-1, 1]) {
+      wear(side * (L / 2 - 2.2), 0, 4.5, 3.2, 0.42);
+      wear(side * (L / 2 - 8), 0, 5, 7, 0.14);
+      wear(side * (L / 2 - Math.min(11, L * 0.1)), 0, 1.2, 1.2, 0.3);
+    }
+    wear(0, 0, 3, 3, 0.25);
   }
   // per-pixel grass grain noise
   const img = ctx.getImageData(0, 0, w, h);
@@ -151,13 +194,58 @@ function makeGrassTexture(L, W) {
   }
   ctx.putImageData(img, 0, 0);
   // sparse lighter/darker flecks for extra texture
-  for (let i = 0; i < 2600; i++) {
+  for (let i = 0; i < (detailed ? 9000 : 2600); i++) {
     const a = Math.random() * 0.05;
     ctx.fillStyle = Math.random() < 0.5
       ? `rgba(255,255,240,${a})`
       : `rgba(0,20,0,${a})`;
     ctx.fillRect(Math.random() * w, Math.random() * h, 2, 2);
   }
+  return canvasTexture(c);
+}
+
+// Pitch-sized normal map: each mow band leans its blades the opposite way, so
+// the stripes brighten and darken with the view angle under the floodlights,
+// plus fine blade grain for the grazing-light sheen.
+function makeGrassNormal(L, W) {
+  const w = 1024;
+  const h = Math.max(2, Math.round((1024 * W) / L));
+  const [c, ctx] = makeCanvas(w, h);
+  const img = ctx.createImageData(w, h);
+  const d = img.data;
+  const bands = 16;
+  const bw = w / bands;
+  const hgt = new Float32Array(w * h);
+  for (let i = 0; i < hgt.length; i++) hgt[i] = Math.random();
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const band = Math.floor(x / bw) % 2 ? 1 : -1;
+      const hx = hgt[y * w + ((x + 1) % w)] - hgt[i];
+      const hy = hgt[((y + 1) % h) * w + x] - hgt[i];
+      let nx = band * 0.22 - hx * 0.35;
+      let ny = -hy * 0.35;
+      const nz = 1;
+      const len = Math.hypot(nx, ny, nz);
+      d[i * 4] = ((nx / len) * 0.5 + 0.5) * 255;
+      d[i * 4 + 1] = ((ny / len) * 0.5 + 0.5) * 255;
+      d[i * 4 + 2] = ((nz / len) * 0.5 + 0.5) * 255;
+      d[i * 4 + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvasTexture(c, false);
+}
+
+// Soft round sprite for floodlight glow, camera flashes and haze.
+function makeGlowTexture() {
+  const [c, ctx] = makeCanvas(64, 64);
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
   return canvasTexture(c);
 }
 
@@ -339,6 +427,7 @@ export function buildStadium(scene, opts) {
 
   const prevBackground = scene.background;
   const prevFog = scene.fog;
+  const prevEnvironment = scene.environment;
 
   // ── sky + fog ──
   const skyTexNight = makeSkyTexture(true);
@@ -349,6 +438,7 @@ export function buildStadium(scene, opts) {
   });
   const sky = new THREE.Mesh(new THREE.SphereGeometry(380, 24, 14), skyMat);
   sky.renderOrder = -10;
+  sky.userData.noAO = true;
   root.add(sky);
   scene.fog = new THREE.Fog(0x070d18, 130, 420);
 
@@ -371,10 +461,11 @@ export function buildStadium(scene, opts) {
   runoff.receiveShadow = true;
   root.add(runoff);
 
-  const grass = new THREE.Mesh(
-    new THREE.PlaneGeometry(L + 0.6, W + 0.6),
-    new THREE.MeshStandardMaterial({ map: makeGrassTexture(L + 0.6, W + 0.6), roughness: 0.95 })
-  );
+  const grassPlainTex = makeGrassTexture(L + 0.6, W + 0.6);
+  let grassDetailTex = null;   // built on first use (Detail: detailed)
+  let grassNormalTex = null;
+  const grassMat = new THREE.MeshStandardMaterial({ map: grassPlainTex, roughness: 0.95 });
+  const grass = new THREE.Mesh(new THREE.PlaneGeometry(L + 0.6, W + 0.6), grassMat);
   grass.rotation.x = -Math.PI / 2;
   grass.position.y = 0.02;
   grass.receiveShadow = true;
@@ -485,6 +576,7 @@ export function buildStadium(scene, opts) {
       roughness: 0.9,
     })
   );
+  netMesh.userData.noAO = true;
   root.add(netMesh);
 
   // ── stadium bowl: two tiers on four sides + instanced seats + crowd ──
@@ -572,7 +664,13 @@ export function buildStadium(scene, opts) {
   // crowd (subset of seats), with per-instance animation data
   const crowdIdx = [];
   for (let i = 0; i < nSeatPos; i++) if (Math.random() < CROWD_FILL) crowdIdx.push(i);
+  // shuffled so a "sparse" crowd (the first half of the instances) is spread evenly
+  for (let i = crowdIdx.length - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    [crowdIdx[i], crowdIdx[j]] = [crowdIdx[j], crowdIdx[i]];
+  }
   const cN = crowdIdx.length;
+  const sparseN = Math.ceil(cN * 0.5);
   const baseX = new Float32Array(cN);
   const baseY = new Float32Array(cN);
   const baseZ = new Float32Array(cN);
@@ -675,7 +773,7 @@ export function buildStadium(scene, opts) {
     new THREE.MeshBasicMaterial({
       color: 0xaac8ff,
       transparent: true,
-      opacity: 0.05,
+      opacity: 0.028,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       side: THREE.DoubleSide,
@@ -683,7 +781,26 @@ export function buildStadium(scene, opts) {
     })
   );
   coneMesh.renderOrder = 8;
+  coneMesh.userData.noAO = true;
   root.add(coneMesh);
+
+  // bright glow on each lamp bank (HDR, so bloom picks it up when enabled)
+  const glowTex = makeGlowTexture();
+  const lampGlows = [];
+  for (const [cx, cz] of corners) {
+    const tx = cx * (L / 2 + 22);
+    const tz = cz * (W / 2 + 22);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowTex, color: new THREE.Color(1.5, 1.55, 1.7), blending: THREE.AdditiveBlending,
+      depthWrite: false, transparent: true, fog: false,
+    }));
+    const toward = new THREE.Vector3(-tx, -TOWER_H, -tz).normalize().multiplyScalar(1.2);
+    glow.position.set(tx + toward.x, TOWER_H + 1.2 + toward.y, tz + toward.z);
+    glow.scale.setScalar(5.5);
+    glow.renderOrder = 9;
+    root.add(glow);
+    lampGlows.push(glow);
+  }
 
   // ── lights: one shadow-casting spot + corner fills + ambient/hemisphere ──
   const spot = new THREE.SpotLight(0xf2f6ff, SPOT_INTENSITY, 0, 0.75, 0.45, 0);
@@ -691,11 +808,32 @@ export function buildStadium(scene, opts) {
   spot.target.position.set(0, 0, 0);
   spot.castShadow = true;
   spot.shadow.mapSize.set(2048, 2048);
-  spot.shadow.camera.near = 20;
-  spot.shadow.camera.far = 280;
   spot.shadow.bias = -0.0004;
+  spot.shadow.normalBias = 0.02;
   root.add(spot);
   root.add(spot.target);
+
+  // Fit a spot's shadow frustum to the pitch (plus the goals and a margin) so
+  // every shadow-map texel lands on the play area instead of the stands.
+  function fitShadow(light) {
+    const pos = light.position;
+    const dir = new THREE.Vector3().subVectors(light.target.position, pos).normalize();
+    let maxA = 0;
+    let near = Infinity;
+    let far = 0;
+    const q = new THREE.Vector3();
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) for (const y of [0, 3]) {
+      q.set(sx * (L / 2 + 4), y, sz * (W / 2 + 3)).sub(pos);
+      const dist = q.length();
+      near = Math.min(near, dist);
+      far = Math.max(far, dist);
+      maxA = Math.max(maxA, dir.angleTo(q));
+    }
+    light.shadow.focus = Math.min(1, Math.max(0.3, (maxA * 1.04) / light.angle));
+    light.shadow.camera.near = Math.max(1, near * 0.7);
+    light.shadow.camera.far = far * 1.1;
+  }
+  fitShadow(spot);
 
   const fillSpots = [];
   for (const [cx, cz] of [[1, -1], [-1, 1], [-1, -1]]) {
@@ -706,6 +844,12 @@ export function buildStadium(scene, opts) {
     root.add(f.target);
     fillSpots.push(f);
   }
+  // the opposite tower also casts at the top shadow tier: the classic
+  // floodlit double shadow under every player
+  const spot2 = fillSpots[2];
+  spot2.shadow.bias = -0.0004;
+  spot2.shadow.normalBias = 0.02;
+  fitShadow(spot2);
   const hemi = new THREE.HemisphereLight(0x8fb4e8, 0x0e1a12, 0.55);
   const amb = new THREE.AmbientLight(0x223048, 0.35);
   root.add(hemi);
@@ -725,7 +869,8 @@ export function buildStadium(scene, opts) {
   box(ledGeoms, 0.18, bh, segLen, -(L / 2 + ledOff), bh / 2, -(4.5 + segLen / 2));
   const ledBoards = new THREE.Mesh(
     mergeGeoms(ledGeoms),
-    new THREE.MeshBasicMaterial({ map: ledTex })
+    // slightly over-driven so the boards still read as lit LEDs after tone mapping
+    new THREE.MeshBasicMaterial({ map: ledTex, color: new THREE.Color(1.35, 1.35, 1.35) })
   );
   root.add(ledBoards);
 
@@ -754,7 +899,7 @@ export function buildStadium(scene, opts) {
   root.add(tunnelDark);
   const tunnelSign = new THREE.Mesh(
     new THREE.PlaneGeometry(5.4, 1.0),
-    new THREE.MeshBasicMaterial({ map: makeSignTexture() })
+    new THREE.MeshBasicMaterial({ map: makeSignTexture(), color: new THREE.Color(1.25, 1.25, 1.25) })
   );
   tunnelSign.rotateY(Math.PI / 2);
   tunnelSign.position.set(-L / 2 - 1.05, tunH + 0.9, 0);
@@ -805,6 +950,93 @@ export function buildStadium(scene, opts) {
   );
   root.add(flagPoles);
 
+  // ── particles: camera flashes in the stands + haze drifting in the beams ──
+  const FLASHES = 220;
+  const flashPos = new Float32Array(FLASHES * 3);
+  const flashCol = new Float32Array(FLASHES * 3);
+  const flashLife = new Float32Array(FLASHES);
+  for (let i = 0; i < FLASHES; i++) {
+    const k = (Math.random() * cN) | 0;
+    flashPos[i * 3] = baseX[k];
+    flashPos[i * 3 + 1] = baseY[k] + 0.55;
+    flashPos[i * 3 + 2] = baseZ[k];
+  }
+  const flashGeo = new THREE.BufferGeometry();
+  flashGeo.setAttribute('position', new THREE.BufferAttribute(flashPos, 3));
+  const flashColAttr = new THREE.BufferAttribute(flashCol, 3);
+  flashGeo.setAttribute('color', flashColAttr);
+  const flashes = new THREE.Points(flashGeo, new THREE.PointsMaterial({
+    map: glowTex, size: 1.1, vertexColors: true, transparent: true, depthWrite: false,
+    blending: THREE.AdditiveBlending, fog: false,
+  }));
+  flashes.frustumCulled = false;
+  flashes.renderOrder = 7;
+  root.add(flashes);
+
+  const HAZE = 480;
+  const hazePos = new Float32Array(HAZE * 3);
+  const hazeBaseY = new Float32Array(HAZE);
+  const hazePh = new Float32Array(HAZE);
+  for (let i = 0; i < HAZE; i++) {
+    const [cx, cz] = corners[i % 4];
+    const head = new THREE.Vector3(cx * (L / 2 + 22), TOWER_H + 1.2, cz * (W / 2 + 22));
+    const target = new THREE.Vector3(cx * L * 0.15, 0, cz * W * 0.15);
+    const f = 0.12 + Math.random() * 0.7;
+    const p0 = head.clone().lerp(target, f);
+    const r = f * head.distanceTo(target) * 0.25 * Math.sqrt(Math.random());
+    const a = Math.random() * Math.PI * 2;
+    hazePos[i * 3] = p0.x + Math.cos(a) * r;
+    hazeBaseY[i] = p0.y + Math.sin(a) * r * 0.6;
+    hazePos[i * 3 + 1] = hazeBaseY[i];
+    hazePos[i * 3 + 2] = p0.z + Math.sin(a) * r;
+    hazePh[i] = Math.random() * Math.PI * 2;
+  }
+  const hazeGeo = new THREE.BufferGeometry();
+  const hazePosAttr = new THREE.BufferAttribute(hazePos, 3);
+  hazeGeo.setAttribute('position', hazePosAttr);
+  const haze = new THREE.Points(hazeGeo, new THREE.PointsMaterial({
+    map: glowTex, size: 0.32, color: 0x8397bd, transparent: true, opacity: 0.4, depthWrite: false,
+    blending: THREE.AdditiveBlending, fog: false,
+  }));
+  haze.frustumCulled = false;
+  haze.renderOrder = 8;
+  root.add(haze);
+
+  // ── graphics settings ──
+  let particlesOn = false;
+  let detailOn = false;
+  function setShadow(light, size) {
+    light.castShadow = size > 0;
+    if (size > 0 && light.shadow.mapSize.x !== size) {
+      light.shadow.mapSize.set(size, size);
+      light.shadow.map?.dispose();
+      light.shadow.map = null;
+    }
+  }
+  function setDetail(on) {
+    detailOn = on;
+    if (on && !grassDetailTex) {
+      grassDetailTex = makeGrassTexture(L + 0.6, W + 0.6, true);
+      grassNormalTex = makeGrassNormal(L + 0.6, W + 0.6);
+    }
+    grassMat.map = on ? grassDetailTex : grassPlainTex;
+    grassMat.normalMap = on ? grassNormalTex : null;
+    grassMat.normalScale.set(0.9, 0.9);
+    grassMat.roughness = on ? 0.82 : 0.95;
+    grassMat.needsUpdate = true;
+  }
+  function applyGraphics(q) {
+    const size = SHADOW_MAP[q.shadows];
+    setShadow(spot, size);
+    setShadow(spot2, q.shadows === 'high' ? size : 0);
+    crowdMesh.count = q.crowd === 'full' ? cN : sparseN;
+    particlesOn = q.particles === 'on';
+    flashes.visible = haze.visible = particlesOn && night;
+    scene.environment = q.reflections === 'on' ? stadiumEnvironment() : null;
+    scene.environmentIntensity = 0.35;
+    if ((q.detail === 'detailed') !== detailOn || !grassMat.map) setDetail(q.detail === 'detailed');
+  }
+
   // ── animation state + public handle ──
   let t = 0;
   let night = true;
@@ -815,6 +1047,7 @@ export function buildStadium(scene, opts) {
   let cursor = 0;
   const CHUNK = Math.max(1, Math.ceil(cN / 8)); // animate 1/8 of crowd per frame
   const carr = crowdMesh.instanceMatrix.array;
+  const unsubscribeGraphics = onGraphics(applyGraphics);
 
   function update(dt, camera) { // eslint-disable-line no-unused-vars
     const step = Math.min(dt || 0, 0.1);
@@ -830,7 +1063,8 @@ export function buildStadium(scene, opts) {
     const spd = 2.4 + 5.5 * energy;
     const sway = 0.02 * (0.3 + energy);
     const shake = 0.09 * booV;
-    const end = Math.min(cursor + CHUNK, cN);
+    const shown = crowdMesh.count;
+    const end = Math.min(cursor + CHUNK, shown);
     for (let i = cursor; i < end; i++) {
       const o = i * 16;
       const ph = phase[i];
@@ -840,14 +1074,40 @@ export function buildStadium(scene, opts) {
       carr[o + 12] = baseX[i] + Math.sin(t * 1.1 + ph * 1.7) * sway + Math.sin(t * 9.3 + ph * 4.1) * shake * 0.4;
       carr[o + 14] = baseZ[i] + Math.cos(t * 0.9 + ph) * sway;
     }
-    cursor = end >= cN ? 0 : end;
+    cursor = end >= shown ? 0 : end;
     crowdMesh.instanceMatrix.needsUpdate = true;
 
     // LED board scroll
     ledTex.offset.x = (t * 0.025) % 1;
 
-    // floodlight flicker (subtle mains hum)
-    if (night) {
+    const still = reducedMotion();
+
+    // camera flashes: a trickle all match, bursts when the crowd erupts
+    if (flashes.visible) {
+      if (!still) {
+        let spawn = step * (2 + 40 * pulseV + 6 * exc);
+        while (spawn > 0) {
+          if (spawn >= 1 || Math.random() < spawn) flashLife[(Math.random() * FLASHES) | 0] = 0.14;
+          spawn -= 1;
+        }
+      }
+      for (let i = 0; i < FLASHES; i++) {
+        const life = flashLife[i] = Math.max(0, flashLife[i] - step);
+        const v = still ? 0 : (life / 0.14) * 7;
+        flashCol[i * 3] = v;
+        flashCol[i * 3 + 1] = v;
+        flashCol[i * 3 + 2] = v * 1.08;
+      }
+      flashColAttr.needsUpdate = true;
+    }
+    // haze drifts slowly up and down through the beams
+    if (haze.visible && !still) {
+      for (let i = 0; i < HAZE; i++) hazePos[i * 3 + 1] = hazeBaseY[i] + Math.sin(t * 0.25 + hazePh[i]) * 0.8;
+      hazePosAttr.needsUpdate = true;
+    }
+
+    // floodlight flicker (subtle mains hum; steady with reduced motion)
+    if (night && !still) {
       const fl = 0.97 + 0.03 * Math.sin(t * 43.7 + Math.sin(t * 17.3) * 2.0);
       lampMat.emissiveIntensity = 2.4 * fl;
       spot.intensity = SPOT_INTENSITY * fl;
@@ -865,6 +1125,8 @@ export function buildStadium(scene, opts) {
     spot.visible = night;
     for (const f of fillSpots) f.visible = night;
     coneMesh.visible = night;
+    for (const g of lampGlows) g.visible = night;
+    flashes.visible = haze.visible = particlesOn && night;
     lampMat.emissiveIntensity = night ? 2.4 : 0.25;
     skyMat.map = night ? skyTexNight : skyTexDay;
     skyMat.needsUpdate = true;
@@ -875,9 +1137,13 @@ export function buildStadium(scene, opts) {
   }
 
   function dispose() {
+    unsubscribeGraphics();
     scene.remove(root);
     scene.background = prevBackground;
     scene.fog = prevFog;
+    scene.environment = prevEnvironment;
+    // the unused grass variant is not on a material, so free it here
+    for (const tex of [grassPlainTex, grassDetailTex, grassNormalTex]) tex?.dispose();
     root.traverse((obj) => {
       if (obj.geometry) obj.geometry.dispose();
       if (obj.material) {

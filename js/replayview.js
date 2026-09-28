@@ -4,12 +4,12 @@
 // between the 2 fps keyframes with the same math as the live snapshot
 // interpolation in match.js (applyInterp). No net, no input, no audio.
 import * as THREE from 'three';
-import * as api from './api.js?v=7';
-import { pitchFor, roleForSlot, makeRng, BALL_R } from './game/sim.js?v=7';
-import { buildStadium } from './world/stadium.js?v=7';
-import { createPlayerMesh } from './world/player.js?v=7';
-import { createFollowCamera } from './game/camera.js?v=7';
-import { parsePlayerRow, parseBallRow } from './snapformat.js?v=7';
+import * as api from './api.js?v=8';
+import { pitchFor, roleForSlot, makeRng, BALL_R } from './game/sim.js?v=8';
+import { buildStadium } from './world/stadium.js?v=8';
+import { createPlayerMesh } from './world/player.js?v=8';
+import { createFollowCamera } from './game/camera.js?v=8';
+import { parsePlayerRow, parseBallRow } from './snapformat.js?v=8';
 
 const TEAM_KITS = [
   { shirt: '#1f5fb4', shorts: '#f2f2f2', socks: '#1f5fb4', gk: '#e67e22', plate: '#1f5fb4', label: 'BLUE' },
@@ -35,9 +35,12 @@ function makeBall() {
     g.fill();
   }
   const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
   const mesh = new THREE.Mesh(
     new THREE.SphereGeometry(BALL_R, 24, 18),
-    new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55 }),
+    // glossy match ball: clearcoat catches the floodlights (and the stadium reflections)
+    new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.5, clearcoat: 0.9, clearcoatRoughness: 0.12 }),
   );
   mesh.castShadow = true;
   return mesh;

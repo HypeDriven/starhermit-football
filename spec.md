@@ -15,7 +15,7 @@ under "Design intent not yet implemented".
 | Players | 2–22 seats (1–11 per side). Any seat a human does not take is an AI footballer with a name and a personality. |
 | Session | One match = two halves of 3:00 match time (`halfLength` 180 s), plus ~12.5 s of walkout and coin flip and ~4.5 s of full-time celebration: about 7 minutes. |
 | Platforms | Desktop browsers (keyboard + mouse), phones and tablets (touch). Both orientations. |
-| Rendering | three.js (vendored `vendor/three/`), WebGL, one `<canvas>` behind a DOM HUD and DOM screens. All stadium and character art is generated in code; authored assets are the cover art, the loading key art, two club crests and the SFX clips. |
+| Rendering | three.js r176 (vendored `vendor/three/`, with the matching r176 post-processing addons under `vendor/three/addons/`, mapped as `three/addons/`), WebGL, one `<canvas>` behind a DOM HUD and DOM screens, ACES filmic tone mapping, optional post-processing (section 8, Graphics). All stadium and character art is generated in code; authored assets are the cover art, the loading key art, two club crests and the SFX clips. |
 | Authority | `server.js` is both the platform-side match script (Jint sandbox, 30 Hz) and, loaded as a classic `<script>`, the client's simulation core for practice and prediction. |
 
 File map (everything shipped or run from this repository):
@@ -26,6 +26,9 @@ File map (everything shipped or run from this repository):
 | `starhermit.txt` | Platform manifest: `name`, `launch=index.html`, `owner`, `server=server.js`, `control.*` default key bindings, `cover=coverart.png`. |
 | `server.js` | Simulation core (`FootballSim`: pitch, players, ball, AI, injury ceremony) and the platform script (`game.createSession / onPlayerMessage / onTick`, Elo, achievements, replay recording). |
 | `js/main.js` | Boot, renderer, screen state machine, match lifecycle, rejoin/leave prompts, token refresh, render loop. |
+| `js/gfx.js` | Pure graphics quality model: presets, categories, GPU detection (`detectPreset`), `resolve`, `choosePreset`, `presetTier`, `describe`. |
+| `js/graphics.js` | Renderer wiring for the graphics settings: pixel ratio, shadow maps, post chain, adaptive resolution, frame-rate readout, floodlit environment map, persistence; `onGraphics()` subscription for world builders. |
+| `js/settings.js` | Settings panel (Graphics section) and its localized strings. |
 | `js/match.js` | Match controller: world build, walkout → coin flip → play → done, practice stepping, online prediction/interpolation, events → audio/HUD. |
 | `js/game/sim.js`, `js/game/ai.js` | Thin ES-module re-exports of `globalThis.FootballSim`. No logic. |
 | `js/game/input.js` | Keyboard tank steering, contextual shoot/pass key, pointer-lock mouse, touch joystick and buttons, platform key remapping. |
@@ -48,7 +51,7 @@ File map (everything shipped or run from this repository):
 | `assets/` | `keyart-night-stadium.webp` (loading screen), `crest-blue.webp`, `crest-red.webp` (score bar and lobby). |
 | `coverart.png`, `icon.png`, `favicon.svg` | Platform listing art and icons. |
 | `sfx/` | 18 Opus clips, `manifest.txt` (canonical table), `manifest.json` (binding + generation prompts), `manifest.md` (generator output). |
-| `tests/server-regression.cjs`, `tests/e2e.mjs` | `npm test` rules regression; `npm run test:e2e` Playwright playthrough. |
+| `tests/server-regression.cjs`, `tests/gfx.test.mjs`, `tests/e2e.mjs` | `npm test` rules regression + graphics-model unit tests; `npm run test:e2e` Playwright playthrough. |
 
 ## 2. Vision and design pillars
 
@@ -238,14 +241,17 @@ and the server's own `kick` event for that touch is suppressed for 1 s to avoid 
 `main.js showScreen` shows exactly one of: `screen-menu`, `screen-lobby`, `screen-invite`
 (stacked on the lobby), `screen-controls`, `screen-leaderboard`, `screen-replays`,
 `screen-result`, or none (match / replay). Overlays: `#loading` (until the username
-resolves), `#leave-confirm` (Esc in an online match), `#confirm-dialog` (starting anything
-while the server still has you in a room), `#hud`, `#touch-ui`, `#replay-ui`.
+resolves), `#leave-confirm` (the in-match menu: Esc or ☰), `#screen-settings` (SETTINGS
+from the main menu or the in-match menu; it stacks above both and Esc or BACK closes it),
+`#confirm-dialog` (starting anything while the server still has you in a room), `#hud`,
+`#touch-ui`, `#replay-ui`.
 
 ```
 loading → menu ─┬─ practice ──────────────→ match ─→ result ─→ menu
                 ├─ quick / lobby / ranked → lobby ─→ match ─→ result ─→ menu
                 ├─ rejoin ────────────────→ lobby | match
                 ├─ controls / leaderboard → back → menu
+                ├─ settings (also from the in-match menu) → back
                 └─ replays ─→ replay viewer ─→ replays
 ```
 
@@ -293,8 +299,47 @@ Motion: the follow camera is a critically damped lerp (`1 − e^(−6 dt)`), 13 
 15 m / 7.5 m and +4° FOV when sprinting; cinematic framing for walkout (crane from the
 tunnel), coin flip (centre-circle close-up), ceremonies (touchline view) and full time
 (slow orbit). Banners pop in with a 0.35 s scale-up. The crowd sways continuously and
-pulses on goals, boos in place after a leaver. Floodlights flicker ±3 %. Reduced motion is
-not currently honoured (see Known limitations).
+pulses on goals, boos in place after a leaver. Floodlights flicker ±3 %. With
+`prefers-reduced-motion` the flicker, camera flashes and haze drift stop; the remaining
+motion is listed in Known limitations.
+
+**Graphics.** Lighting is one shadow-casting floodlight spot, three fill spots, a
+hemisphere fill and a flat ambient term, rendered with ACES filmic tone mapping into sRGB.
+The spot's shadow frustum is fitted to the pitch plus a margin (focus, near and far computed
+from the pitch corners), so every texel lands on the play area. Surfaces: the match ball is a
+clearcoated physical material; lamp banks carry HDR glow sprites; LED boards and the tunnel
+sign are slightly over-driven so they still read as lit after tone mapping. Optional
+effects: floodlight shadows (1024²–4096²; at the top tier the opposite tower casts too, for
+the floodlit double shadow), GTAO ambient occlusion (the sky dome, cones, nets and sprites
+are excluded from its pre-pass), bloom limited to lamps, camera flashes and hot highlights
+(threshold 1.3 in linear HDR, above the lit pitch lines), a colour grade with vignette, FXAA/SMAA/MSAA, reflections from a
+floodlit-stadium environment map (PMREM of a small HDR scene: four lamp banks, the LED
+ring, turf and night sky), a detailed pitch (turf variation, worn goalmouths and spots, a
+normal map whose mow bands lean opposite ways so the stripes shift with the view angle, and
+blade grain), crowd density (full, or an evenly spread half) and particles (camera flashes in
+the stands that burst on goals, dust drifting in the beams). The Settings panel's
+**Graphics** section offers a quality preset (Auto, chosen from the detected GPU, where
+software renderers get Low and touch devices at most Balanced; Low; Balanced; High; Ultra),
+a render scale (50–200 % of the preset's), a per-effect override for every category ("From
+preset (…)" by default; choosing a preset clears overrides), adaptive resolution (averages
+90 frames, steps the resolution down by 10 % to 60 % when frames take over 26 ms and back up
+by 5 % under 14 ms) and a frame-rate readout (top-left, never over HUD controls), plus a
+summary line "GPU · cost summary · W×H px". Presets:
+
+| Preset | Pixel-ratio cap | Shadows | AO | Bloom | Grade | AA | Reflections | Detail | Crowd | Particles |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Low | 1 | 1024² | off | off | off | MSAA (canvas) | off | plain | sparse | off |
+| Balanced | 1.5 | 2048² | off | on | on | FXAA | on | detailed | full | on |
+| High | 2 | 2048² | on | on | on | SMAA | on | detailed | full | on |
+| Ultra | 2 | 4096² ×2 | high | on | on | MSAA ×4 | on | detailed | full | on |
+
+Pixel ratio = min(devicePixelRatio, cap) × render scale × adaptive scale. The post chain
+(RenderPass → GTAO → UnrealBloom → grade → OutputPass → SMAA/FXAA) is built only when an
+effect needs it and rebuilt when its key changes; Low renders straight to the canvas. Changes
+apply immediately (shadow toggles recompile materials) and persist in `localStorage`
+(`starhermit-football-graphics`). If the post chain cannot be built, the game renders
+without it and the panel says so. The resolved preset and main categories are mirrored on
+`<body>` as `data-gfx-preset`, `data-gfx-bloom`, `data-gfx-shadows`, … for tests.
 
 Visual assets the design calls for: cover art (16:9 night stadium, no text), loading key
 art (the same image), one crest per team, the procedural stadium and rig. No 3D model or
@@ -346,7 +391,10 @@ from direction relative to my facing; M or the HUD button mutes locally and publ
 
 ## 10. Localization
 
-The game ships in English only. Every string is a literal in `index.html`
+The game ships in English only, except the Settings panel: its strings (title, Graphics
+section, every label, tier name, the summary words and the post-processing note) live in a
+table in `js/settings.js` for en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR and
+it-IT, picked from `navigator.language` (by region, then language; en-US otherwise). Every other string is a literal in `index.html`
 (labels, buttons, hints) and in the JS modules (banners such as "GOAL!", "HALF TIME",
 "BLUE KICKS OFF"; status lines; chat notices; achievement names in `server.js`). There is no
 string table, no language detection and no `lang` switch; `<html lang="en">` is fixed. The
@@ -406,11 +454,13 @@ disabled or hidden. Conventions follow https://wiki.starhermit.com/ (relative `/
   server-side. The games socket reconnects with 250 ms → 15 s backoff and re-syncs.
 - **Intro hold**: the script freezes formation and clock for 13 s after session creation so
   the walkout and coin flip (12.5 s) cannot be played through by AI.
-- **Persistence**: `localStorage` for mute and voice preferences; everything else lives on
+- **Persistence**: `localStorage` for mute, voice and graphics preferences; everything else lives on
   the platform (rooms, sessions, ratings, replays, control overrides).
-- **Performance budget**: one shadow-casting spot plus fills, instanced seats and crowd
-  (80 % of seat positions filled), pixel ratio capped at 2 (desktop) / 1.5 (touch), fixed
-  60 Hz sim step with a 0.25 s accumulator cap, no post-processing. Snapshot size is
+- **Performance budget**: set by the graphics preset (section 8). Low — the Auto choice
+  on software GL — uses a 1024² shadow map, half the crowd, pixel ratio 1 and no
+  post-processing, which is cheaper than the pre-settings renderer (2048² shadows, full
+  crowd, pixel ratio up to 2). Instanced seats and crowd (80 % of seat positions filled),
+  fixed 60 Hz sim step with a 0.25 s accumulator cap. Snapshot size is
   ~0.5–3 KB; the archived session for a 2×3 min match stays under the 900-frame cap.
 - **e2e**: `tests/e2e.mjs` serves the repo from an embedded static server (`PORT` env pins
   the port), launches headless Chrome on SwiftShader, and plays a full 1v1 practice match
@@ -426,8 +476,17 @@ summary, replay frames every 15 ticks with the snapshot row shape, `kickoff` and
 events, and a 4-seat roster; a 2×60 s match rates in the right direction; a forced 0–0 is a
 rated draw; an abandoned match carries no ratings.
 
+`tests/gfx.test.mjs` (`node --test`, part of `npm test`) covers `detectPreset` on sample GPU
+strings (software → Low, discrete → High, touch capped at Balanced), `resolve` with Auto,
+explicit presets, overrides, invalid tiers and the 50–200 % scale clamp, and `choosePreset`
+clearing overrides.
+
 `npm run test:e2e` asserts, at 1280×800 and 390×844: offline status text, QUICK PLAY /
-CREATE LOBBY disabled and platform screens hidden, the voice toggle persists, PRACTICE
+CREATE LOBBY disabled and platform screens hidden, the voice toggle persists, SETTINGS opens
+the Graphics panel with every control on screen, Auto reports Low on SwiftShader, Low then
+High apply (`data-gfx-preset`, SMAA in the summary), a bloom override applies, both survive
+a reload, choosing Ultra clears the override and renders cleanly, Low is chosen for the
+match, the in-match ☰ menu opens Settings and returns to play, PRACTICE
 starts (touch UI visible on mobile), the clock leaves 00:00 after the intro, the match
 reaches 2nd 03:00, the result shows VICTORY / DEFEAT / DRAW with a score and possession, and
 MAIN MENU returns. Any page error or console error (other than GPU noise and offline `/api`
@@ -460,7 +519,10 @@ shoot, pass, camera and the ball arrow through on-screen feedback without a manu
 ## 16. Known limitations
 
 - No localisation: English-only literals (section 10).
-- No reduced-motion mode; camera sway, crowd motion and banner pops always play.
+- Reduced motion only stills the ambient effects (flicker, flashes, haze); camera sway,
+  crowd motion and banner pops always play.
+- The canvas is created with MSAA, so the Anti-aliasing "Off" tier only removes
+  anti-aliasing when the post-processing chain is running.
 - `audio.setMuted` exists but no menu control calls it; mute can only be set via
   `localStorage`. Voice has a mic toggle; game sound does not.
 - Ranked vs AI is never rated (one team has no humans) despite the button name.
@@ -475,7 +537,7 @@ shoot, pass, camera and the ball arrow through on-screen feedback without a manu
 - Ship the nine locales through a string table with a locale picked from the launch
   token's profile or `navigator.language`.
 - A SOUND toggle on the menu (bound to `audio.setMuted`) and `prefers-reduced-motion`
-  handling that stills the crowd sway, camera sprint FOV and banner animation.
+  handling that also stills the crowd sway, camera sprint FOV and banner animation.
 - Show the crests on the result card and on the LED boards (a FLUX board strip would replace
   the procedural sponsor names).
 - `aria-live` region mirroring HUD banners.

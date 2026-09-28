@@ -2,7 +2,9 @@
  * StarHermit Football — end-to-end UI playthrough (dev only, not shipped).
  *
  * Drives the REAL visible UI in headless Chrome via playwright-core:
- *   menu (offline mode) → team size + voice settings → PRACTICE vs AI →
+ *   menu (offline mode) → team size + voice settings → Settings › Graphics
+ *   (Low → High, bloom override, reload persistence, Ultra, back to Low) →
+ *   PRACTICE vs AI → in-match menu › Settings →
  *   walkout → coin flip → a full 1v1 match played with real keyboard input
  *   (desktop) / real touch input on the on-screen joystick + buttons (mobile)
  *   → FULL TIME result screen → back to menu.
@@ -110,6 +112,53 @@ async function runPass(browser, label, contextOpts, drive) {
     await page.locator('#opt-voice').click(); // restore
   });
 
+  // Graphics settings through the real panel: preset switch, one override,
+  // persistence across a reload, Ultra renders without console noise, then
+  // Low for the (software-rendered) match that follows.
+  const gfxAttr = (k) => page.evaluate((key) => document.body.dataset[key], k);
+  const pick = async (sel, value) => {
+    await page.selectOption(sel, value);
+    await page.waitForTimeout(300);
+  };
+  await step('settings: graphics preset + override apply live', async () => {
+    await page.locator('#btn-settings').click();
+    await page.waitForSelector('#screen-settings:not(.hidden)', { timeout: 10000 });
+    for (const id of ['#gfx-preset', '#gfx-scale', '#gfx-shadows', '#gfx-bloom', '#gfx-adaptive', '#gfx-fps', '#btn-settings-back']) {
+      const box = await page.locator(id).boundingBox();
+      const vp = page.viewportSize();
+      if (!box || box.x < 0 || box.x + box.width > vp.width + 1) throw new Error(`${id} cut off: ${JSON.stringify(box)}`);
+    }
+    const auto = await page.locator('#gfx-preset option[value="auto"]').textContent();
+    if (!/Low/.test(auto)) throw new Error(`software GPU should auto-detect Low, got: ${auto}`);
+    await pick('#gfx-preset', 'low');
+    if (await gfxAttr('gfxPreset') !== 'low') throw new Error('Low preset not applied');
+    await pick('#gfx-preset', 'high');
+    if (await gfxAttr('gfxPreset') !== 'high') throw new Error('High preset not applied');
+    if (await gfxAttr('gfxBloom') !== 'on') throw new Error('High preset should enable bloom');
+    await page.waitForFunction(() => /SMAA/.test(document.getElementById('gfx-summary').textContent), null, { timeout: 15000 });
+    await pick('#gfx-bloom', 'off');
+    if (await gfxAttr('gfxBloom') !== 'off') throw new Error('bloom override not applied');
+    await page.screenshot({ path: SHOT('settings', label) });
+  });
+
+  await step('settings: graphics choice survives reload', async () => {
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForSelector('#loading.hidden', { state: 'attached', timeout: 30000 });
+    if (await gfxAttr('gfxPreset') !== 'high' || await gfxAttr('gfxBloom') !== 'off') throw new Error('graphics settings lost on reload');
+    await page.locator('#btn-settings').click();
+    await page.waitForSelector('#screen-settings:not(.hidden)', { timeout: 10000 });
+    if (await page.inputValue('#gfx-preset') !== 'high') throw new Error('panel does not show saved preset');
+    if (await page.inputValue('#gfx-bloom') !== 'off') throw new Error('panel does not show saved override');
+    // choosing a preset clears overrides; Ultra must render cleanly too
+    await pick('#gfx-preset', 'ultra');
+    if (await page.inputValue('#gfx-bloom') !== 'preset' || await gfxAttr('gfxBloom') !== 'on') throw new Error('preset did not clear override');
+    await page.waitForTimeout(4000);
+    await pick('#gfx-preset', 'low');
+    if (drive.touch) await page.locator('#btn-settings-back').tap();
+    else await page.keyboard.press('Escape');
+    await page.waitForSelector('#screen-settings.hidden', { state: 'attached', timeout: 10000 });
+  });
+
   await step('start practice (team size 1)', async () => {
     await page.selectOption('#team-size', '1');
     await page.click('#btn-practice');
@@ -128,6 +177,19 @@ async function runPass(browser, label, contextOpts, drive) {
       null, { timeout: 10 * 60 * 1000 },
     );
     await page.screenshot({ path: SHOT('kickoff', label) });
+  });
+
+  await step('in-match menu opens Settings', async () => {
+    const tap = async (sel) => (drive.touch ? page.locator(sel).tap() : page.locator(sel).click());
+    await tap('#btn-match-menu');
+    await page.waitForSelector('#leave-confirm:not(.hidden)', { timeout: 10000 });
+    await tap('#btn-match-settings');
+    await page.waitForSelector('#screen-settings:not(.hidden)', { timeout: 10000 });
+    if (await page.inputValue('#gfx-preset') !== 'low') throw new Error('in-match settings lost the preset');
+    await tap('#btn-settings-back');
+    await page.waitForSelector('#screen-settings.hidden', { state: 'attached', timeout: 10000 });
+    await tap('#btn-leave-no');
+    await page.waitForSelector('#leave-confirm.hidden', { state: 'attached', timeout: 10000 });
   });
 
   await step('play full match to FULL TIME', async () => {

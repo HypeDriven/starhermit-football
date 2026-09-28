@@ -6,9 +6,9 @@
 <title>StarHermit Football</title>
 <link rel="icon" type="image/png" href="favicon.png">
 <!-- Keep this version in sync with local ES-module imports when deploying. -->
-<link rel="stylesheet" href="css/style.css?v=8">
+<link rel="stylesheet" href="css/style.css?v=9">
 <script type="importmap">
-{ "imports": { "three": "./vendor/three/three.module.min.js" } }
+{ "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }
 </script>
 </head>
 <body>
@@ -66,6 +66,7 @@
       <button id="btn-controls" class="mbtn">CONTROLS</button>
       <button id="btn-leaderboard" class="mbtn">LEADERBOARD</button>
       <button id="btn-replays" class="mbtn">REPLAYS</button>
+      <button id="btn-settings" class="mbtn">SETTINGS</button>
     </div>
     <div id="menu-team-size">Team size
       <select id="team-size"></select> per side
@@ -149,8 +150,21 @@
     <button id="btn-leave-no" class="mbtn primary">KEEP PLAYING</button>
     <button id="btn-match-restart" class="mbtn">RESTART PRACTICE</button>
     <button id="btn-match-sound" class="mbtn">SOUND: ON</button>
+    <button id="btn-match-settings" class="mbtn">SETTINGS</button>
     <button id="btn-leave-yes" class="mbtn danger">LEAVE MATCH</button>
   </div>
+</div>
+
+<!-- Settings (main menu + in-match menu): Graphics section, built by js/settings.js -->
+<div id="screen-settings" class="screen hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+  <h2 id="settings-title">SETTINGS</h2>
+  <div class="settings-panel">
+    <h3 id="gfx-heading">Graphics</h3>
+    <div id="gfx-rows"></div>
+    <div id="gfx-summary" class="muted small" aria-live="polite"></div>
+    <div id="gfx-note" class="small hidden"></div>
+  </div>
+  <div class="menu-buttons"><button id="btn-settings-back" class="mbtn primary">BACK</button></div>
 </div>
 
 <!-- Generic confirm (e.g. starting a new game while still in a room) -->
@@ -164,7 +178,7 @@
 </div>
 
 <!-- Shared sim core + server script: classic script, must load before modules -->
-<script src="server.js?v=7"></script>
-<script type="module" src="js/main.js?v=7"></script>
+<script src="server.js?v=8"></script>
+<script type="module" src="js/main.js?v=8"></script>
 </body>
 </html>

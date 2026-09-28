@@ -1,38 +1,39 @@
 // main.js — boot, screens state machine, renderer, match lifecycle.
 import * as THREE from 'three';
-import * as api from './api.js?v=7';
-import { createAudio } from './game/audio.js?v=7';
-import { createInput } from './game/input.js?v=7';
-import { createHud } from './hud.js?v=7';
-import { createMatchController } from './match.js?v=7';
-import { createLobby } from './lobby.js?v=7';
-import { createNetClient, createGameClient } from './net.js?v=7';
-import { createMenuScene } from './menuScene.js?v=7';
-import { createVoice } from './voice.js?v=7';
-import { createControlsScreen } from './controls.js?v=7';
-import { createLeaderboardScreen } from './leaderboard.js?v=7';
-import { createReplaysScreen } from './replays.js?v=7';
-import { createReplayViewer } from './replayview.js?v=7';
+import * as api from './api.js?v=8';
+import { createAudio } from './game/audio.js?v=8';
+import { createInput } from './game/input.js?v=8';
+import { createHud } from './hud.js?v=8';
+import { createMatchController } from './match.js?v=8';
+import { createLobby } from './lobby.js?v=8';
+import { createNetClient, createGameClient } from './net.js?v=8';
+import { createMenuScene } from './menuScene.js?v=8';
+import { createVoice } from './voice.js?v=8';
+import { createControlsScreen } from './controls.js?v=8';
+import { createLeaderboardScreen } from './leaderboard.js?v=8';
+import { createReplaysScreen } from './replays.js?v=8';
+import { createReplayViewer } from './replayview.js?v=8';
+import { createGraphics } from './graphics.js?v=8';
+import { createSettingsPanel } from './settings.js?v=8';
 
 const $ = (id) => document.getElementById(id);
 
 // ── renderer ──
+// Pixel ratio, shadows, tone mapping and post-processing are owned by the
+// graphics settings (graphics.js / gfx.js) and applied live.
 const canvas = $('gl');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const isMobile = matchMedia('(pointer: coarse)').matches;
-renderer.setPixelRatio(Math.min(devicePixelRatio, isMobile ? 1.5 : 2));
-renderer.setSize(innerWidth, innerHeight);
+renderer.setSize(innerWidth, innerHeight, false);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 800);
 camera.position.set(0, 20, -30);
+const graphics = createGraphics({ renderer, scene, camera, isTouch: isMobile });
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
 });
 
 // ── services ──
@@ -192,6 +193,7 @@ function setupMenu() {
   if (!auth.online) replaysBtn.classList.add('hidden');
   replaysBtn.onclick = () => { audio.ui(); showScreen('screen-replays'); replaysScreen.open(); };
 
+  $('btn-settings').onclick = () => { audio.ui(); settingsPanel.open(); };
   $('btn-rejoin').onclick = () => { audio.ui(); rejoinActiveRoom(); };
   $('btn-invite').onclick = () => { audio.ui(); lobby.inviteFriends(); };
   $('btn-share').onclick = () => { audio.ui(); lobby.copyInviteLink(); };
@@ -378,6 +380,7 @@ function setMatchMenu(open) {
 }
 addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  if (settingsPanel.isOpen()) { settingsPanel.close(); return; } // Esc backs out of Settings first
   if (document.activeElement?.matches?.('input, textarea')) return; // chat input handles Esc itself
   // First Escape releases desktop mouse-look. A second Escape opens the menu.
   if (document.pointerLockElement === canvas) return;
@@ -386,6 +389,7 @@ addEventListener('keydown', (e) => {
 });
 $('btn-match-menu').onclick = () => { if (match && match.phase !== 'done') { audio.ui(); setMatchMenu(true); } };
 $('btn-leave-no').onclick = () => { audio.ui(); setMatchMenu(false); };
+$('btn-match-settings').onclick = () => { audio.ui(); settingsPanel.open(); };
 $('btn-match-sound').onclick = () => { audio.setMuted(!audio.isMuted()); $('btn-match-sound').textContent = `SOUND: ${audio.isMuted() ? 'OFF' : 'ON'}`; };
 $('btn-match-restart').onclick = () => { audio.ui(); setMatchMenu(false); disposeMatch(); startPractice(); };
 $('btn-leave-yes').onclick = async () => {
@@ -406,6 +410,7 @@ lobby = createLobby({
 });
 const controlsScreen = createControlsScreen({ input, audio, onBack: () => showScreen('screen-menu') });
 const leaderboardScreen = createLeaderboardScreen({ audio, onBack: () => showScreen('screen-menu') });
+const settingsPanel = createSettingsPanel({ graphics, audio });
 const replaysScreen = createReplaysScreen({ audio, onWatch: openReplay, onBack: () => showScreen('screen-menu') });
 showScreen('screen-menu');
 api.resolveUsername().finally(() => {
@@ -437,7 +442,7 @@ function loop() {
   } else {
     menuScene.update(dt);
   }
-  renderer.render(scene, camera);
+  graphics.render(dt);
 }
 loop();
 
