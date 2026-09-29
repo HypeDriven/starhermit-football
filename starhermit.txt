@@ -4,6 +4,7 @@
 # Format: key=value lines; '#' comments and blank lines are ignored.
 
 name=Football
+description=Dribble, pass, tackle, and shoot in fast-paced 3D football matches with human and AI teammates.
 
 # The platform assigns this game a uid and uses it as the game's slug — the same
 # value as its <uid>.starhermit.com address. Nothing here can set it: a name a
