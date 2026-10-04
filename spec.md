@@ -39,8 +39,9 @@ File map (everything shipped or run from this repository):
 | `js/world/player.js`, `js/world/animator.js` | Procedural jointed footballer (kits, numbers, skin and hair variety) and its phase-driven animation. |
 | `js/world/nametags.js` | Camera-facing nickname plates. |
 | `js/world/officials.js` | Referee, two stretcher carriers and the stretcher for the injury ceremony. |
-| `js/net.js` | WebSocket clients: rooms socket (roster/presence), games socket (inputs up, snapshots down, reconnect), voice relay socket. |
-| `js/api.js` | Platform REST client: launch token, profiles, rooms, controls, sessions, leaderboards, replays, chat, voice. |
+| `js/net.js` | WebSocket clients: rooms socket (roster/presence), games socket over `StarHermit.connect` (inputs up, snapshots down, reconnect), voice relay socket. |
+| `js/api.js`, `starhermit-sdk.js` | Platform client over the shared StarHermit SDK: launch token, sign-in, invite link, profiles, settings KV, rooms, controls, sessions, achievements, leaderboards, replays, chat, voice. |
+| `js/achievements.js`, `js/platform-i18n.js` | ACHIEVEMENTS screen; localized account-surface strings. |
 | `js/lobby.js` | Lobby screen: create, quick play, ranked vs AI, invites, seat moves, backfill countdown, invite links. |
 | `js/controls.js`, `js/leaderboard.js`, `js/replays.js` | The Controls, Leaderboard and Replays screens. |
 | `js/replayview.js` | Render-only 3D playback of an archived match. |
@@ -51,7 +52,7 @@ File map (everything shipped or run from this repository):
 | `assets/` | `keyart-night-stadium.webp` (loading screen), `crest-blue.webp`, `crest-red.webp` (score bar and lobby). |
 | `coverart.png`, `icon.png`, `favicon.svg` | Platform listing art and icons. |
 | `sfx/` | 18 Opus clips, `manifest.txt` (canonical table), `manifest.json` (binding + generation prompts), `manifest.md` (generator output). |
-| `tests/server-regression.cjs`, `tests/gfx.test.mjs`, `tests/e2e.mjs` | `npm test` rules regression + graphics-model unit tests; `npm run test:e2e` Playwright playthrough. |
+| `tests/server-regression.cjs`, `tests/gfx.test.mjs`, `tests/platform.test.mjs`, `tests/e2e.mjs` | `npm test` rules regression + graphics-model + platform-client unit tests; `npm run test:e2e` Playwright playthrough. |
 
 ## 2. Vision and design pillars
 
@@ -419,27 +420,46 @@ list rows ellipsise names.
 
 ## 12. StarHermit integration
 
-Uses: launch tokens (`#game_token=`, `game_scope` claim = slug, reminted every 45 min via
-`POST /games/{slug}/launch-token`); profiles (`GET /users/{id}/profile`, nickname first,
-avatars via `GET /users/{id}/avatar`); friends (`GET /me/friends`); Realtime Rooms
-(`/api/v1/realtime/rooms` create / get / mine / invites / accept / decline / open / seats /
-quick-join / start / leave, and `ws/v1/realtime` for roster pushes); the scripted-games
-runtime (`server=server.js`, `game.tickRateHz = 30`, `ws/v1/games?sessionId=`, `cmd`
-frames with `realtime: true`, `ctx.room`, `ctx.presence`, `ctx.inputs`, `result`,
-`eloUpdates`, `playerStates`, `achievements`, `game.replays = true`); leaderboards
-(`GET /games/{slug}` for `leaderboardId` and `me`, `GET /leaderboards/{id}/entries`);
-replays (`GET /games/{slug}/replays/mine`, `/replays/{sessionId}`); sessions
-(`GET /games/{slug}/sessions/{id}` for `chatConversationId`); chat REST
-(`/chat/conversations/{id}/messages`, polled every 5 s); voice rooms and relay
-(`/voice/rooms`, `ws/v1/voice`); per-user control bindings
-(`GET/PUT/DELETE /games/{slug}/controls`). Achievement unlocks arrive as
-`{ type: 'achievement' }` frames and show as a HUD banner.
+All platform traffic goes through the shared client `starhermit-sdk.js` (loaded by `index.html`
+before the module graph; `api.initAuth()` calls `StarHermit.init()` at boot). `js/api.js` keeps the
+game's named endpoints on top of `StarHermit.api` (same-origin `/api`, Bearer, one renewal + retry on
+401) and `js/net.js` takes its socket URLs from the SDK.
+
+Uses: launch tokens (`#game_token=<jwt>[&session_id=]` library launch or `#access_token=<jwt>` sign-in
+return, stripped from the URL; `game_scope` claim = slug; renewed by the SDK via
+`POST /games/{slug}/launch-token`); sign-in (**SIGN IN WITH STARHERMIT** on the menu, only on
+`<slug>.starhermit.com` without a token); profiles (nickname first with a `Player <id>` fallback,
+avatars via `GET /users/{id}/avatar`); the share link (**INVITE A FRIEND** on the menu and **COPY
+INVITE LINK** in the lobby copy `https://dashboard.starhermit.com/game-invite/<user>/<slug>`);
+friends (`GET /me/friends`); Realtime Rooms (`/api/v1/realtime/rooms` create / get / mine / invites /
+accept / decline / open / seats / quick-join / start / leave, and `ws/v1/realtime` for roster
+pushes); the scripted-games runtime (`server=server.js`, `game.tickRateHz = 30`, gameplay through
+`StarHermit.connect` on `ws/v1/games?sessionId=` with reconnect, `cmd` frames whose input carries
+`realtime: true` in the payload and the envelope, `ctx.room`, `ctx.presence`, `ctx.inputs`, `result`,
+`eloUpdates`, `playerStates`, `achievements`, `game.replays = true`); an invite-accept launch's
+`session_id` rejoins that match when its room is playing; leaderboards (`GET /games/{slug}` for
+`leaderboardId` and `me`, `GET /leaderboards/{id}/entries`); achievements (`GET
+/games/{slug}/achievements` on the **ACHIEVEMENTS** screen — the server-declared catalog with locked /
+unlocked rows — plus the HUD banner on `achievement` frames); replays (`GET
+/games/{slug}/replays/mine`, `/replays/{sessionId}`); sessions (`GET /games/{slug}/sessions/{id}` for
+`chatConversationId`); chat REST (`/chat/conversations/{id}/messages`, polled every 5 s); voice rooms
+and relay (`/voice/rooms`, `ws/v1/voice`); per-user control bindings (`GET/PUT/DELETE
+/games/{slug}/controls`, applied at launch and edited on the CONTROLS screen); the per-player
+settings KV (`graphics` — the Graphics settings object —, `muted`, `voice`; platform values are
+applied at launch and every change is patched).
+
+When renewal is refused the SDK signs out: the menu drops to offline practice, platform buttons hide,
+the status line says so and sign-in is offered again where available. Account-surface strings
+(sign-in, invite, toasts, achievements screen) are localized in the nine locales
+(`js/platform-i18n.js`).
 
 Does not use: the peer relay (`ws/v1/relay`), chat WebSocket, presence outside rooms,
-host-submitted results (`POST /rooms/{id}/result`), or any platform storage beyond
-`playerStates`. Without a token the client is offline: PRACTICE only, platform buttons
-disabled or hidden. Conventions follow https://wiki.starhermit.com/ (relative `/api` and
-`/ws` paths, launch-token scope fencing, script return contract).
+host-submitted results (`POST /rooms/{id}/result`), platform matchmaking queues (quick play uses
+Realtime Rooms quick-join), or cloud saves (the client keeps no progress of its own — ratings and
+records live in the script's `playerStates`). Without a token the client is offline: PRACTICE only,
+platform buttons disabled or hidden, and no request is made. Conventions follow
+https://wiki.starhermit.com/ (relative `/api` and `/ws` paths, launch-token scope fencing, script
+return contract).
 
 ## 13. Technical architecture
 
@@ -479,7 +499,11 @@ rated draw; an abandoned match carries no ratings.
 `tests/gfx.test.mjs` (`node --test`, part of `npm test`) covers `detectPreset` on sample GPU
 strings (software → Low, discrete → High, touch capped at Balanced), `resolve` with Auto,
 explicit presets, overrides, invalid tiers and the 50–200 % scale clamp, and `choosePreset`
-clearing overrides.
+clearing overrides. `tests/platform.test.mjs` (also in `npm test`) loads `js/api.js` and the
+`js/net.js` game socket on the real SDK with a stubbed fetch / WebSocket: token read and URL
+scrub, nickname, settings get / patch, controls, achievements, invite link, the quick-join 404
+fallback, `sync` on open with snapshot / event / achievement routing and the realtime input
+envelope, sign-out on refused renewal, and zero requests standalone.
 
 `npm run test:e2e` asserts, at 1280×800 and 390×844: offline status text, QUICK PLAY /
 CREATE LOBBY disabled and platform screens hidden, the voice toggle persists, SETTINGS opens
@@ -489,8 +513,11 @@ a reload, choosing Ultra clears the override and renders cleanly, Low is chosen 
 match, the in-match ☰ menu opens Settings and returns to play, PRACTICE
 starts (touch UI visible on mobile), the clock leaves 00:00 after the intro, the match
 reaches 2nd 03:00, the result shows VICTORY / DEFEAT / DRAW with a score and possession, and
-MAIN MENU returns. Any page error or console error (other than GPU noise and offline `/api`
-404s) fails the run. On this box (software GL) a full run takes roughly 70 minutes (two
+MAIN MENU returns; the offline passes must make no `/api` request. A signed-in pass (390×844,
+`#game_token=` against mocked platform routes) checks the token left the URL, the nickname line,
+sign-in hidden, the synced voice preference, INVITE A FRIEND copying the share link, the
+ACHIEVEMENTS screen (one unlocked, one locked row), and the settings PATCH after toggling voice.
+Any page error or console error (other than GPU noise) fails the run. On this box (software GL) a full run takes roughly 70 minutes (two
 real 2×3 min matches at ≤ 0.1 s of sim per frame), so it is run on demand rather than in
 every pass; the last full pass on the current build reached kick-off and played the first
 half on desktop with zero page or console errors before it was stopped at the time budget.

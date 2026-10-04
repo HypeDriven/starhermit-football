@@ -8,9 +8,12 @@
 // server-authoritative match. Client -> server: {type:'cmd', data:{...}}
 // ('sync' on open/reconnect, 'input' at ~30 Hz). Server -> client:
 // {type:'game', data:{type:'snap'|'ev', ...}} and {type:'presence', ...}.
-// Reconnects with exponential backoff (250ms → 500ms → 1s … cap 15s) until closed.
+// The games socket is the SDK's StarHermit.connect (reconnect with exponential
+// backoff, stops on 4403/4404); socket URLs come from the SDK so they always
+// carry the current, renewed launch token.
+import * as api from './api.js?v=9';
 
-export function createNetClient({ roomId, getToken }) {
+export function createNetClient({ roomId }) {
   let ws = null;
   let connected = false;
   let handlers = {};
@@ -18,9 +21,7 @@ export function createNetClient({ roomId, getToken }) {
   function connect(h) {
     handlers = h || {};
     return new Promise((resolve, reject) => {
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      const url = `${proto}://${location.host}/ws/v1/realtime?roomId=${encodeURIComponent(roomId)}&access_token=${encodeURIComponent(getToken())}`;
-      ws = new WebSocket(url);
+      ws = new WebSocket(api.realtimeSocketUrl(roomId));
       ws.onopen = () => { connected = true; resolve(); };
       ws.onerror = () => { if (!connected) reject(new Error('WebSocket connection failed')); };
       ws.onclose = (e) => { connected = false; handlers.onClose?.(e); };
@@ -60,7 +61,7 @@ export function createNetClient({ roomId, getToken }) {
 // roster/presence and directed WebRTC signaling. Server → client frames are
 // {event:'voice.*', data:{…}}; client → server: {type:'rtc'|'mute'|...}.
 // Binary audio frames exist for native clients; the web client never sends any.
-export function createVoiceClient({ roomId, getToken }) {
+export function createVoiceClient({ roomId }) {
   let ws = null;
   let handlers = {};
   let connected = false;
@@ -68,9 +69,7 @@ export function createVoiceClient({ roomId, getToken }) {
   function connect(h) {
     handlers = h || {};
     return new Promise((resolve, reject) => {
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      const url = `${proto}://${location.host}/ws/v1/voice?roomId=${encodeURIComponent(roomId)}&access_token=${encodeURIComponent(getToken())}`;
-      ws = new WebSocket(url);
+      ws = new WebSocket(api.voiceSocketUrl(roomId));
       ws.onopen = () => { connected = true; resolve(); };
       ws.onerror = () => { if (!connected) reject(new Error('Voice socket connection failed')); };
       ws.onclose = (e) => { connected = false; handlers.onClose?.(e); };
@@ -100,93 +99,53 @@ export function createVoiceClient({ roomId, getToken }) {
   };
 }
 
-export function createGameClient({ sessionId, getToken }) {
-  let ws = null;
+export function createGameClient({ sessionId }) {
+  let conn = null;
   let handlers = {};
   let disposed = false;
-  let attempts = 0;
-  let reconnectTimer = null;
-
-  function wsUrl() {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    return `${proto}://${location.host}/ws/v1/games?sessionId=${encodeURIComponent(sessionId)}&access_token=${encodeURIComponent(getToken())}`;
-  }
 
   function connect(h) {
     handlers = h || {};
+    disposed = false;
     return new Promise((resolve, reject) => {
       let settled = false;
-      disposed = false;
-      openOnce(() => { if (!settled) { settled = true; resolve(); } },
-               () => { if (!settled) { settled = true; reject(new Error('Games socket connection failed')); } });
+      conn = api.connectGame(sessionId, {
+        onOpen: () => {
+          conn.send({ type: 'sync' }); // full snapshot comes back to us only
+          if (!settled) { settled = true; resolve(); } else handlers.onResync?.();
+        },
+        onGame: (d) => {
+          if (!d) return;
+          if (d.type === 'snap') handlers.onSnapshot?.(d);
+          else if (d.type === 'ev') handlers.onEvent?.(d.ev);
+        },
+        onPresence: (m) => handlers.onPresence?.(m),
+        // server-authoritative achievement unlock, addressed to the earning player
+        onAchievement: (a) => handlers.onAchievement?.(a),
+        onError: (e) => handlers.onError?.(e),
+        onAbandoned: () => { if (!disposed) { disposed = true; handlers.onClose?.(); } },
+        onClose: (code) => {
+          if (!settled) { settled = true; conn.close(); reject(new Error('Games socket connection failed')); return; }
+          if (disposed) { handlers.onClose?.(); return; }
+          // 4403/4404: the platform refused the session — no reconnect follows.
+          if (code === 4403 || code === 4404) { disposed = true; handlers.onClose?.(); return; }
+          handlers.onReconnecting?.();
+        },
+      });
     });
-  }
-
-  function openOnce(onOpen, onFirstFail) {
-    if (disposed) return;
-    let sock;
-    try { sock = new WebSocket(wsUrl()); } catch { scheduleReconnect(); return; }
-    ws = sock;
-    let opened = false;
-    sock.onopen = () => {
-      opened = true;
-      attempts = 0;
-      sendCmd({ type: 'sync' }); // full snapshot comes back to us only
-      onOpen?.();
-    };
-    sock.onmessage = (m) => route(m);
-    sock.onerror = () => { if (!opened) onFirstFail?.(); /* close follows */ };
-    sock.onclose = () => {
-      if (ws !== sock) return;
-      ws = null;
-      if (!disposed) scheduleReconnect();
-      else handlers.onClose?.();
-    };
-  }
-
-  function scheduleReconnect() {
-    if (disposed) return;
-    const delay = Math.min(15000, 250 * Math.pow(2, attempts++));
-    handlers.onReconnecting?.(delay);
-    reconnectTimer = setTimeout(() => openOnce(handlers.onResync), delay);
-  }
-
-  function route(m) {
-    let msg;
-    try { msg = JSON.parse(m.data); } catch { return; }
-    if (msg.type === 'game' && msg.data) {
-      const d = msg.data;
-      if (d.type === 'snap') handlers.onSnapshot?.(d);
-      else if (d.type === 'ev') handlers.onEvent?.(d.ev);
-      return;
-    }
-    if (msg.type === 'presence') { handlers.onPresence?.(msg); return; }
-    // server-authoritative achievement unlock, addressed to the earning player
-    if (msg.type === 'achievement') { handlers.onAchievement?.(msg.data); return; }
-    if (msg.type === 'error') handlers.onError?.(msg.error);
-  }
-
-  function sendCmd(data) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'cmd', data }));
-    }
   }
 
   return {
     connect,
     // input: {seq, mx, mz, sprint, pass, shoot, tackle} — caller throttles.
-    // Drop stale movement under backpressure, but never discard an action edge.
-    sendInput: (input) => {
-      const action = input.pass || input.shoot > 0 || input.tackle;
-      if (!action && ws?.bufferedAmount > 32768) return;
-      sendCmd({ type: 'input', realtime: true, ...input });
-    },
+    // realtime:true (envelope and payload) opts into platform tick batching.
+    sendInput: (input) => { conn?.send({ type: 'input', realtime: true, ...input }, true); },
     close: () => {
+      if (disposed) return;
       disposed = true;
-      clearTimeout(reconnectTimer);
-      try { ws?.close(); } catch {}
-      if (!ws) handlers.onClose?.();
+      if (conn?.open) conn.close();
+      else { conn?.close(); handlers.onClose?.(); }
     },
-    get connected() { return !!ws && ws.readyState === WebSocket.OPEN; },
+    get connected() { return !!conn?.open; },
   };
 }

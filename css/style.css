@@ -349,3 +349,19 @@ body {
   #screen-settings h2 { font-size: 1.1rem; }
   .gfx-row { min-height: 2rem; }
 }
+
+/* ── Achievements (platform catalog + my unlocks) ── */
+#ach-list {
+  display: flex; flex-direction: column; gap: 0.4rem;
+  width: min(440px, 92vw); max-height: 52vh; overflow-y: auto;
+}
+.ach-row {
+  display: flex; align-items: center; gap: 0.8rem;
+  background: var(--panel); border: 1px solid #2c3e50; border-radius: 8px; padding: 0.5rem 0.8rem;
+}
+.ach-row.locked { opacity: 0.55; }
+.ach-row .ach-icon { font-size: 1.3rem; }
+.ach-row .ach-text { flex: 1; min-width: 0; }
+.ach-row .ach-name { font-weight: 700; }
+.ach-row .ach-desc { color: #93a1b0; font-size: 0.85rem; }
+.ach-row .ach-state { font-size: 0.8rem; color: var(--accent); white-space: nowrap; }

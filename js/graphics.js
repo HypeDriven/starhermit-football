@@ -18,7 +18,7 @@ import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
-import { detectPreset, resolve, describe, choosePreset, SHADOW_MAP } from './gfx.js?v=8';
+import { detectPreset, resolve, describe, choosePreset, SHADOW_MAP } from './gfx.js?v=9';
 
 const STORE_KEY = 'starhermit-football-graphics';
 const listeners = new Set();
@@ -176,6 +176,7 @@ export function createGraphics({ renderer, scene, camera, isTouch = false }) {
 
   function persist() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(saved)); } catch { /* storage unavailable */ }
+    self.onPersist?.(saved);
   }
 
   function showFps(on) {
@@ -277,8 +278,16 @@ export function createGraphics({ renderer, scene, camera, isTouch = false }) {
 
   apply();
 
-  return {
+  const self = {
     render,
+    /** Adopt a saved settings object from the platform (no persist callback). */
+    adopt(next) {
+      saved = { ...next };
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(saved)); } catch { /* storage unavailable */ }
+      apply();
+    },
+    /** Called with the saved object after every player change (settings sync). */
+    onPersist: null,
     /** Raw saved settings (for the panel's selects). */
     saved: () => ({ ...saved }),
     resolved: () => q,
@@ -309,4 +318,5 @@ export function createGraphics({ renderer, scene, camera, isTouch = false }) {
       };
     },
   };
+  return self;
 }

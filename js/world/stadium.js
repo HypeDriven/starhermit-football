@@ -12,7 +12,7 @@
 // for reflections, and the detailed pitch (wear, mow-stripe sheen, blade relief).
 //
 // Usage:
-//   import { buildStadium } from './world/stadium.js?v=8';
+//   import { buildStadium } from './world/stadium.js?v=9';
 //   const stadium = buildStadium(scene, { pitch: { L, W, goalW, goalH, boxD, boxW } });
 //   stadium.update(dt, camera);            // every frame
 //   stadium.crowd.setExcitement(0..1);
@@ -21,8 +21,8 @@
 //   stadium.dispose();
 
 import * as THREE from 'three';
-import { onGraphics, stadiumEnvironment, reducedMotion } from '../graphics.js?v=8';
-import { SHADOW_MAP } from '../gfx.js?v=8';
+import { onGraphics, stadiumEnvironment, reducedMotion } from '../graphics.js?v=9';
+import { SHADOW_MAP } from '../gfx.js?v=9';
 
 const DEFAULT_PITCH = { L: 105, W: 68, goalW: 7.32, goalH: 2.44, boxD: 16.5, boxW: 40.32 };
 

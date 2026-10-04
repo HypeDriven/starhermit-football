@@ -48,9 +48,24 @@ const MIME = {
   '.glb': 'model/gltf-binary', '.woff2': 'font/woff2', '.ts': 'video/mp2t',
   '.webp': 'image/webp',
 };
+// StarHermit platform mocks for the signed-in pass; offline passes must make no /api call.
+const apiLog = [];
+function platformMock(req, res, p) {
+  apiLog.push(`${req.method} ${p}`);
+  const json = (b, st = 200) => { res.writeHead(st, { 'content-type': 'application/json' }); res.end(JSON.stringify(b)); };
+  if (p.endsWith('/profile')) return json({ username: 'raw_user', nickname: 'Golazo' });
+  if (p.endsWith('/settings') && req.method === 'GET') return json({ settings: { voice: false } });
+  if (p.endsWith('/settings')) return json({ settings: {} });
+  if (p.endsWith('/controls')) return json({ actions: [] });
+  if (p.endsWith('/achievements')) return json([{ key: 'first-goal', name: 'First goal', description: 'Score in a match', unlocked: true }, { key: 'hat-trick', name: 'Hat-trick', description: 'Three goals in one match' }]);
+  if (p.endsWith('/realtime/rooms/mine')) return json(null);
+  if (p.endsWith('/realtime/rooms/invites')) return json([]);
+  return json({ error: 'not found' }, 404);
+}
 const server = http.createServer(async (req, res) => {
   try {
     let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+    if (p.startsWith('/api/')) return platformMock(req, res, p);
     if (p === '/') p = '/index.html';
     const file = normalize(join(ROOT, p));
     if (!file.startsWith(normalize(ROOT))) throw new Error('path escape');
@@ -99,7 +114,7 @@ async function runPass(browser, label, contextOpts, drive) {
   await step('platform-only features gated offline', async () => {
     if (!(await page.locator('#btn-quick').isDisabled())) throw new Error('QUICK PLAY enabled offline');
     if (!(await page.locator('#btn-lobby').isDisabled())) throw new Error('CREATE LOBBY enabled offline');
-    for (const id of ['#btn-solo', '#btn-leaderboard', '#btn-replays', '#btn-controls']) {
+    for (const id of ['#btn-solo', '#btn-leaderboard', '#btn-replays', '#btn-controls', '#btn-achievements', '#btn-invite-link', '#btn-signin']) {
       if (await page.locator(id).isVisible()) throw new Error(`${id} visible offline`);
     }
   });
@@ -329,6 +344,52 @@ const mobileDrive = (base) => {
   };
 };
 
+// Signed-in launch (#game_token) against the platform mocks: nickname, synced
+// voice preference, invite link through the visible menu button, achievements.
+async function signedInPass(browser, base) {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  page.on('console', (m) => { if (m.type() === 'error' && !browserNoise.test(m.text())) errors.push(`console: ${m.text()}`); });
+  await page.addInitScript(() => {
+    window.__copied = [];
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (t) => { window.__copied.push(t); } } });
+  });
+  const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const token = 'h.' + b64u({ sub: 'u-striker-1', game_scope: 'football-test', exp: Math.floor(Date.now() / 1000) + 3600 }) + '.s';
+  try {
+    await page.goto(`${base}#game_token=${token}`, { waitUntil: 'load' });
+    await page.waitForSelector('#loading.hidden', { state: 'attached', timeout: 30000 });
+    if (new URL(page.url()).hash) throw new Error('launch token left in the URL');
+    const user = await page.textContent('#menu-user');
+    if (!/Signed in as Golazo/.test(user)) throw new Error(`expected nickname, got: ${user}`);
+    if (await page.locator('#btn-signin').isVisible()) throw new Error('sign-in shown while signed in');
+    await page.waitForFunction(() => !document.getElementById('opt-voice').checked);
+    await page.locator('#btn-invite-link').click();
+    await page.waitForFunction(() => window.__copied.length === 1);
+    const link = await page.evaluate(() => window.__copied[0]);
+    if (!/\/game-invite\/u-striker-1\/football-test$/.test(link)) throw new Error(`bad invite link ${link}`);
+    if (!/Invite link copied/.test(await page.textContent('#menu-status'))) throw new Error('no invite confirmation');
+    await page.screenshot({ path: SHOT('menu', 'signed-in') });
+    await page.locator('#btn-achievements').click();
+    await page.waitForSelector('.ach-row');
+    const rows = await page.locator('.ach-row').count();
+    if (rows !== 2 || await page.locator('.ach-row.locked').count() !== 1) throw new Error(`achievement rows ${rows}`);
+    await page.screenshot({ path: SHOT('achievements', 'signed-in') });
+    await page.locator('#btn-ach-back').click();
+    await page.waitForSelector('#screen-menu:not(.hidden)');
+    await page.locator('#opt-voice').click();
+    await page.waitForFunction(() => true);
+    for (let i = 0; i < 30 && !apiLog.some((l) => l.startsWith('PATCH ') && l.endsWith('/settings')); i++) await page.waitForTimeout(100);
+    if (!apiLog.some((l) => l.startsWith('PATCH ') && l.endsWith('/settings'))) throw new Error('voice toggle not synced');
+    console.log('ok - [signed-in] nickname, synced voice pref, invite link, achievements screen, settings patch');
+  } finally {
+    await context.close();
+  }
+  if (errors.length) throw new Error('[signed-in] page errors:\n' + errors.join('\n'));
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 let browser;
 try {
@@ -344,6 +405,9 @@ try {
     args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
   });
 
+  await signedInPass(browser, base);
+  apiLog.length = 0; // the offline passes below must not add any
+
   await runPass(browser, 'desktop', {
     viewport: { width: 1280, height: 800 },
     deviceScaleFactor: 0.5, // software-GL accommodation; CSS layout unchanged
@@ -354,6 +418,8 @@ try {
     hasTouch: true,
     deviceScaleFactor: 1,
   }, mobileDrive(base));
+
+  if (apiLog.length) throw new Error(`offline passes made platform calls: ${apiLog.join(', ')}`);
 
   console.log('\nE2E PASS — both viewport passes completed with no page errors');
 } finally {

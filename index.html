@@ -11,6 +11,7 @@
 { "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }
 </script>
 <script src="browser-guard.js"></script>
+<script src="starhermit-sdk.js"></script>
 </head>
 <body>
 <canvas id="gl"></canvas>
@@ -59,6 +60,7 @@
     <h1 class="logo">STARHERMIT <span>FOOTBALL</span></h1>
     <div id="menu-user" class="muted"></div>
     <div class="menu-buttons">
+      <button id="btn-signin" class="mbtn primary hidden">SIGN IN WITH STARHERMIT</button>
       <button id="btn-rejoin" class="mbtn primary hidden">REJOIN MATCH</button>
       <button id="btn-quick" class="mbtn primary">QUICK PLAY</button>
       <button id="btn-lobby" class="mbtn">CREATE LOBBY</button>
@@ -67,6 +69,8 @@
       <button id="btn-controls" class="mbtn">CONTROLS</button>
       <button id="btn-leaderboard" class="mbtn">LEADERBOARD</button>
       <button id="btn-replays" class="mbtn">REPLAYS</button>
+      <button id="btn-achievements" class="mbtn">ACHIEVEMENTS</button>
+      <button id="btn-invite-link" class="mbtn hidden">INVITE A FRIEND</button>
       <button id="btn-settings" class="mbtn">SETTINGS</button>
     </div>
     <div id="menu-team-size">Team size
@@ -130,6 +134,13 @@
     <div class="menu-buttons"><button id="btn-replays-back" class="mbtn">BACK</button></div>
   </div>
 
+  <div id="screen-achievements" class="screen hidden">
+    <h2 id="ach-title">ACHIEVEMENTS</h2>
+    <div id="ach-list"></div>
+    <div class="muted small" id="ach-hint"></div>
+    <div class="menu-buttons"><button id="btn-ach-back" class="mbtn">BACK</button></div>
+  </div>
+
   <div id="screen-result" class="screen hidden">
     <h2 id="result-title">FULL TIME</h2>
     <div id="result-score"></div>
@@ -179,7 +190,7 @@
 </div>
 
 <!-- Shared sim core + server script: classic script, must load before modules -->
-<script src="server.js?v=8"></script>
-<script type="module" src="js/main.js?v=8"></script>
+<script src="server.js?v=9"></script>
+<script type="module" src="js/main.js?v=9"></script>
 </body>
 </html>

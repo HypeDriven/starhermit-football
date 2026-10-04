@@ -1,20 +1,22 @@
 // main.js — boot, screens state machine, renderer, match lifecycle.
 import * as THREE from 'three';
-import * as api from './api.js?v=8';
-import { createAudio } from './game/audio.js?v=8';
-import { createInput } from './game/input.js?v=8';
-import { createHud } from './hud.js?v=8';
-import { createMatchController } from './match.js?v=8';
-import { createLobby } from './lobby.js?v=8';
-import { createNetClient, createGameClient } from './net.js?v=8';
-import { createMenuScene } from './menuScene.js?v=8';
-import { createVoice } from './voice.js?v=8';
-import { createControlsScreen } from './controls.js?v=8';
-import { createLeaderboardScreen } from './leaderboard.js?v=8';
-import { createReplaysScreen } from './replays.js?v=8';
-import { createReplayViewer } from './replayview.js?v=8';
-import { createGraphics } from './graphics.js?v=8';
-import { createSettingsPanel } from './settings.js?v=8';
+import * as api from './api.js?v=9';
+import { createAudio } from './game/audio.js?v=9';
+import { createInput } from './game/input.js?v=9';
+import { createHud } from './hud.js?v=9';
+import { createMatchController } from './match.js?v=9';
+import { createLobby } from './lobby.js?v=9';
+import { createNetClient, createGameClient } from './net.js?v=9';
+import { createMenuScene } from './menuScene.js?v=9';
+import { createVoice } from './voice.js?v=9';
+import { createControlsScreen } from './controls.js?v=9';
+import { createLeaderboardScreen } from './leaderboard.js?v=9';
+import { createReplaysScreen } from './replays.js?v=9';
+import { createReplayViewer } from './replayview.js?v=9';
+import { createGraphics } from './graphics.js?v=9';
+import { createSettingsPanel } from './settings.js?v=9';
+import { createAchievementsScreen } from './achievements.js?v=9';
+import { platformStrings } from './platform-i18n.js?v=9';
 
 const $ = (id) => document.getElementById(id);
 
@@ -52,7 +54,7 @@ let activeRoom = null;   // room the server says we're still a participant of
 let matchRoom = null;    // room the current match is played in (for Esc-leave)
 
 // ── screens ──
-const screens = ['screen-menu', 'screen-lobby', 'screen-invite', 'screen-controls', 'screen-leaderboard', 'screen-replays', 'screen-result'];
+const screens = ['screen-menu', 'screen-lobby', 'screen-invite', 'screen-controls', 'screen-leaderboard', 'screen-replays', 'screen-achievements', 'screen-result'];
 function showScreen(id) {
   for (const s of screens) $(s).classList.toggle('hidden', s !== id);
   if (!id) for (const s of screens) $(s).classList.add('hidden');
@@ -125,12 +127,28 @@ function rejoinActiveRoom() {
   onMatchReady(room, { isRejoin: true });
 }
 
-function setupMenu() {
-  $('menu-user').textContent = auth.online
+// Menu state that follows the sign-in state (launch, sign-in return, or the
+// SDK signing out when token renewal is refused).
+function applyAuthToMenu() {
+  const online = api.getAuth().online;
+  const t = platformStrings();
+  $('menu-user').textContent = online
     ? `Signed in as ${api.getAuth().username}`
     : 'Offline mode — practice only (launch via StarHermit for multiplayer)';
-  $('btn-quick').disabled = !auth.online;
-  $('btn-lobby').disabled = !auth.online;
+  $('btn-quick').disabled = !online;
+  $('btn-lobby').disabled = !online;
+  const signIn = $('btn-signin');
+  signIn.textContent = t.signIn.toLocaleUpperCase();
+  signIn.classList.toggle('hidden', !api.canSignIn());
+  const invite = $('btn-invite-link');
+  invite.textContent = t.invite.toLocaleUpperCase();
+  invite.classList.toggle('hidden', !online);
+  for (const id of ['btn-solo', 'btn-leaderboard', 'btn-replays', 'btn-achievements']) $(id).classList.toggle('hidden', !online);
+  $('btn-controls').classList.toggle('hidden', input.isTouch || !online);
+}
+
+function setupMenu() {
+  applyAuthToMenu();
 
   const sel = $('team-size');
   for (let i = 1; i <= 11; i++) {
@@ -152,7 +170,6 @@ function setupMenu() {
   };
   // Ranked solo vs AI — an online platform match, so it needs a launch token.
   const soloBtn = $('btn-solo');
-  if (!auth.online) soloBtn.classList.add('hidden');
   soloBtn.onclick = async () => {
     audio.ui(); audio.resume();
     if (!(await confirmLeaveActiveRoom())) return;
@@ -180,18 +197,29 @@ function setupMenu() {
   // Remappable desktop controls (spec §5.6/§8.8): saved per user on the platform,
   // so the button needs a launch token; touch layouts have nothing to remap.
   const controlsBtn = $('btn-controls');
-  if (input.isTouch || !auth.online) controlsBtn.classList.add('hidden');
   controlsBtn.onclick = () => { audio.ui(); showScreen('screen-controls'); controlsScreen.open(); };
 
   // Platform leaderboard (rating + ranked entries) — needs a launch token.
   const lbBtn = $('btn-leaderboard');
-  if (!auth.online) lbBtn.classList.add('hidden');
   lbBtn.onclick = () => { audio.ui(); showScreen('screen-leaderboard'); leaderboardScreen.open(); };
 
   // Archived replays of my online matches — also platform-only.
   const replaysBtn = $('btn-replays');
-  if (!auth.online) replaysBtn.classList.add('hidden');
   replaysBtn.onclick = () => { audio.ui(); showScreen('screen-replays'); replaysScreen.open(); };
+
+  // Server-declared achievements with my unlock state — platform-only.
+  $('btn-achievements').onclick = () => { audio.ui(); showScreen('screen-achievements'); achievementsScreen.open(); };
+  // Sign in (only offered on <slug>.starhermit.com without a token) and the
+  // share link that friends the recipient and invites them back.
+  $('btn-signin').onclick = () => { audio.ui(); api.signIn(); };
+  $('btn-invite-link').onclick = async () => {
+    audio.ui();
+    const link = api.inviteLink();
+    if (!link) return;
+    const t = platformStrings();
+    try { await navigator.clipboard.writeText(link); setStatus(t.inviteCopied); }
+    catch { setStatus(t.inviteFailed); }
+  };
 
   $('btn-settings').onclick = () => { audio.ui(); settingsPanel.open(); };
   $('btn-rejoin').onclick = () => { audio.ui(); rejoinActiveRoom(); };
@@ -276,10 +304,9 @@ async function onMatchReady(room, { isRejoin = false } = {}) {
   matchRoom = room;
   const m = ensureMatch();
 
-  // gameplay transport: server-authoritative games socket. Read the token
-  // live — the 45-minute remint replaces it, and a reconnect must not use
-  // the captured (by then expired) one.
-  const gameNet = createGameClient({ sessionId, getToken: () => api.getAuth().token });
+  // gameplay transport: server-authoritative games socket (SDK connect; each
+  // reconnect uses the current, renewed launch token).
+  const gameNet = createGameClient({ sessionId });
   try {
     await gameNet.connect({
       onSnapshot: (snap) => m.onSnapshot(snap),
@@ -293,7 +320,7 @@ async function onMatchReady(room, { isRejoin = false } = {}) {
   }
 
   // realtime rooms socket stays for roster pushes (name/AI flag changes)
-  const lobbyNet = createNetClient({ roomId: room.id, getToken: () => api.getAuth().token });
+  const lobbyNet = createNetClient({ roomId: room.id });
   lobbyNet.connect({
     onRoster: (parts) => m.applyRoster(parts),
   }).catch(() => { /* ancillary — snapshots carry the same data */ });
@@ -411,13 +438,57 @@ lobby = createLobby({
 const controlsScreen = createControlsScreen({ input, audio, onBack: () => showScreen('screen-menu') });
 const leaderboardScreen = createLeaderboardScreen({ audio, onBack: () => showScreen('screen-menu') });
 const settingsPanel = createSettingsPanel({ graphics, audio });
+const achievementsScreen = createAchievementsScreen({ audio, onBack: () => showScreen('screen-menu') });
 const replaysScreen = createReplaysScreen({ audio, onWatch: openReplay, onBack: () => showScreen('screen-menu') });
 showScreen('screen-menu');
 api.resolveUsername().finally(() => {
   setupMenu();
   refreshActiveRoom();
+  resumeLaunchSession();
   $('loading').classList.add('hidden');
 });
+
+// Renewal refused (or signed out): drop to offline practice, re-offer sign-in.
+api.onAuthChange?.((state) => {
+  auth.online = api.getAuth().online;
+  if (state.signedIn) return;
+  applyAuthToMenu();
+  $('btn-rejoin').classList.add('hidden');
+  activeRoom = null;
+  setStatus(platformStrings().signedOut);
+});
+
+// Invite-accept launches carry #session_id: rejoin that match's room when it is live.
+async function resumeLaunchSession() {
+  const sid = api.launchSessionId();
+  if (!sid || !auth.online) return;
+  try {
+    const detail = await api.getSession(sid);
+    const roomId = detail?.roomId ?? detail?.realtimeRoomId;
+    if (!roomId) return;
+    const room = await api.getRoom(roomId);
+    if (room && (room.status === 'Playing' || room.status === 'playing') && room.gameSessionId === sid) {
+      activeRoom = room;
+      audio.resume();
+      onMatchReady(room, { isRejoin: true });
+    }
+  } catch { /* not resumable: the menu stands */ }
+}
+
+// Player preferences in the platform settings KV (graphics, sound, voice):
+// platform values win over local defaults at launch; every change is patched.
+if (auth.online) {
+  api.getSettings().then((p) => {
+    if (p?.graphics && typeof p.graphics === 'object') graphics.adopt(p.graphics);
+    if (typeof p?.muted === 'boolean') baseSetMuted(p.muted);
+    if (typeof p?.voice === 'boolean') { baseSetVoice(p.voice); $('opt-voice').checked = p.voice; }
+  }).catch(() => {});
+  graphics.onPersist = (saved) => api.patchSettings({ graphics: saved });
+}
+const baseSetMuted = audio.setMuted.bind(audio);
+audio.setMuted = (m) => { baseSetMuted(m); api.patchSettings({ muted: !!m }); };
+const baseSetVoice = voice.setEnabled.bind(voice);
+voice.setEnabled = (v) => { baseSetVoice(v); api.patchSettings({ voice: !!v }); };
 
 // apply the player's saved bindings at launch (spec §5.6); 404 = game declares
 // no controls, offline = defaults — either way the built-in keymap stands
@@ -449,17 +520,6 @@ loop();
 // audio unlock on first gesture
 addEventListener('pointerdown', () => audio.resume(), { once: true });
 addEventListener('keydown', () => audio.resume(), { once: true });
-
-// refresh the launch token before its 60-minute expiry. Retry every minute on
-// failure: an expired game-scoped token can no longer remint, so one swallowed
-// failure must not take the whole session permanently offline.
-function scheduleTokenRefresh(delay = 45 * 60 * 1000) {
-  setTimeout(async () => {
-    try { await api.remintLaunchToken(); scheduleTokenRefresh(); }
-    catch { scheduleTokenRefresh(60 * 1000); }
-  }, delay);
-}
-if (auth.online) scheduleTokenRefresh();
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
