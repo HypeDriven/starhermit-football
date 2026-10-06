@@ -245,7 +245,7 @@ and the server's own `kick` event for that touch is suppressed for 1 s to avoid 
 resolves), `#leave-confirm` (the in-match menu: Esc or ☰), `#screen-settings` (SETTINGS
 from the main menu or the in-match menu; it stacks above both and Esc or BACK closes it),
 `#confirm-dialog` (starting anything while the server still has you in a room), `#hud`,
-`#touch-ui`, `#replay-ui`.
+`#touch-ui`, `#replay-ui`. On a short landscape phone (height ≤ 520 px) the main menu lays its buttons out in three columns with a compact logo so they all show on the first screen.
 
 ```
 loading → menu ─┬─ practice ──────────────→ match ─→ result ─→ menu

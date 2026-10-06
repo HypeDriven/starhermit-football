@@ -377,3 +377,14 @@ body {
 .ach-row .ach-name { font-weight: 700; }
 .ach-row .ach-desc { color: #93a1b0; font-size: 0.85rem; }
 .ach-row .ach-state { font-size: 0.8rem; color: var(--accent); white-space: nowrap; }
+
+/* Phone landscape: the menu fits without scrolling (three button columns, compact logo). */
+@media (max-height: 520px) and (orientation: landscape) {
+  #screen-menu { gap: 0.45rem; padding: 0.5rem; }
+  #screen-menu .logo { font-size: 1.7rem; }
+  #screen-menu .menu-buttons {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: min(760px, 96vw); gap: 0.45rem;
+  }
+  #screen-menu .mbtn { min-height: 44px; padding: 0.4rem 0.6rem; font-size: 0.85rem; }
+}
