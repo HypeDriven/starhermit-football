@@ -12,7 +12,7 @@
 // for reflections, and the detailed pitch (wear, mow-stripe sheen, blade relief).
 //
 // Usage:
-//   import { buildStadium } from './world/stadium.js?v=9';
+//   import { buildStadium } from './world/stadium.js?v=10';
 //   const stadium = buildStadium(scene, { pitch: { L, W, goalW, goalH, boxD, boxW } });
 //   stadium.update(dt, camera);            // every frame
 //   stadium.crowd.setExcitement(0..1);
@@ -21,8 +21,8 @@
 //   stadium.dispose();
 
 import * as THREE from 'three';
-import { onGraphics, stadiumEnvironment, reducedMotion } from '../graphics.js?v=9';
-import { SHADOW_MAP } from '../gfx.js?v=9';
+import { onGraphics, stadiumEnvironment, reducedMotion } from '../graphics.js?v=10';
+import { SHADOW_MAP } from '../gfx.js?v=10';
 
 const DEFAULT_PITCH = { L: 105, W: 68, goalW: 7.32, goalH: 2.44, boxD: 16.5, boxW: 40.32 };
 
@@ -897,6 +897,7 @@ export function buildStadium(scene, opts) {
   tunnelDark.rotateY(Math.PI / 2);
   tunnelDark.position.set(tunX - tunD / 2 + 0.56, (tunH - 0.3) / 2, 0);
   root.add(tunnelDark);
+  let tunnelFade = 1;
   const tunnelSign = new THREE.Mesh(
     new THREE.PlaneGeometry(5.4, 1.0),
     new THREE.MeshBasicMaterial({ map: makeSignTexture(), color: new THREE.Color(1.25, 1.25, 1.25) })
@@ -1056,6 +1057,23 @@ export function buildStadium(scene, opts) {
     pulseV *= Math.exp(-2.0 * step);
     booV *= Math.exp(-0.9 * step); // anger lingers longer than joy
     const energy = Math.min(1, exc + pulseV);
+
+    // The follow camera backs up over the tunnel when the player faces up-pitch
+    // near the west goal; its roof would then hide the player, so fade it out
+    // while the camera is above and behind the tunnel mouth.
+    if (camera) {
+      const behind = camera.position.x < -L / 2 - 1.2 && camera.position.y > tunH + 0.5;
+      const want = behind ? 0.15 : 1;
+      if (tunnelFade !== want) {
+        tunnelFade += (want - tunnelFade) * Math.min(1, step * 8);
+        if (Math.abs(tunnelFade - want) < 0.01) tunnelFade = want;
+        for (const m of [tunnel.material, tunnelDark.material]) {
+          if (m.transparent !== tunnelFade < 1) { m.transparent = tunnelFade < 1; m.needsUpdate = true; }
+          m.opacity = tunnelFade;
+          m.depthWrite = tunnelFade === 1;
+        }
+      }
+    }
 
     // crowd sway/bounce (rotating subset, cheap matrix translation writes)
     // boo: the joyful bounce is damped and a fast jittery shake takes over

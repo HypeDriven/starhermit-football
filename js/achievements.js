@@ -1,8 +1,8 @@
 // achievements.js — platform achievements screen: the game's catalog (declared
 // by server.js, unlocked only by the server) with my unlock state. Pure DOM +
 // api.js, same shape as leaderboard.js.
-import * as api from './api.js?v=9';
-import { platformStrings } from './platform-i18n.js?v=9';
+import * as api from './api.js?v=10';
+import { platformStrings } from './platform-i18n.js?v=10';
 
 export function createAchievementsScreen({ audio, onBack }) {
   const screen = document.getElementById('screen-achievements');

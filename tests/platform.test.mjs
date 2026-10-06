@@ -28,7 +28,7 @@ async function load(href, routes = {}) {
     return hit ? new Response(JSON.stringify(hit[1]), { status: 200 }) : new Response('', { status: 404 });
   };
   globalThis.StarHermit = SDK.create({ window: win, fetch, WebSocket: FakeSocket, setTimeout: (fn, ms) => { const t = setTimeout(fn, ms); t.unref?.(); return t; } });
-  const api = await import(`../js/api.js?v=9&case=${++n}`);
+  const api = await import(`../js/api.js?v=10&case=${++n}`);
   return { api, calls, win, sh: globalThis.StarHermit };
 }
 
@@ -60,7 +60,7 @@ test('launch token, nickname, settings KV, controls, achievements', async () => 
 test('game socket: SDK connect, sync on open, snapshots, realtime input envelope', async () => {
   const { api } = await load('https://football-id.starhermit.com/#game_token=' + TOKEN);
   api.initAuth();
-  const { createGameClient } = await import('../js/net.js?v=9');
+  const { createGameClient } = await import('../js/net.js?v=10');
   const got = { snaps: [], evs: [], ach: [] };
   const client = createGameClient({ sessionId: 'sess-1' });
   const ready = client.connect({ onSnapshot: (s) => got.snaps.push(s), onEvent: (e) => got.evs.push(e), onAchievement: (a) => got.ach.push(a), onClose: () => { got.closed = true; } });

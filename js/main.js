@@ -1,22 +1,22 @@
 // main.js — boot, screens state machine, renderer, match lifecycle.
 import * as THREE from 'three';
-import * as api from './api.js?v=9';
-import { createAudio } from './game/audio.js?v=9';
-import { createInput } from './game/input.js?v=9';
-import { createHud } from './hud.js?v=9';
-import { createMatchController } from './match.js?v=9';
-import { createLobby } from './lobby.js?v=9';
-import { createNetClient, createGameClient } from './net.js?v=9';
-import { createMenuScene } from './menuScene.js?v=9';
-import { createVoice } from './voice.js?v=9';
-import { createControlsScreen } from './controls.js?v=9';
-import { createLeaderboardScreen } from './leaderboard.js?v=9';
-import { createReplaysScreen } from './replays.js?v=9';
-import { createReplayViewer } from './replayview.js?v=9';
-import { createGraphics } from './graphics.js?v=9';
-import { createSettingsPanel } from './settings.js?v=9';
-import { createAchievementsScreen } from './achievements.js?v=9';
-import { platformStrings } from './platform-i18n.js?v=9';
+import * as api from './api.js?v=10';
+import { createAudio } from './game/audio.js?v=10';
+import { createInput } from './game/input.js?v=10';
+import { createHud } from './hud.js?v=10';
+import { createMatchController } from './match.js?v=10';
+import { createLobby } from './lobby.js?v=10';
+import { createNetClient, createGameClient } from './net.js?v=10';
+import { createMenuScene } from './menuScene.js?v=10';
+import { createVoice } from './voice.js?v=10';
+import { createControlsScreen } from './controls.js?v=10';
+import { createLeaderboardScreen } from './leaderboard.js?v=10';
+import { createReplaysScreen } from './replays.js?v=10';
+import { createReplayViewer } from './replayview.js?v=10';
+import { createGraphics } from './graphics.js?v=10';
+import { createSettingsPanel } from './settings.js?v=10';
+import { createAchievementsScreen } from './achievements.js?v=10';
+import { platformStrings } from './platform-i18n.js?v=10';
 
 const $ = (id) => document.getElementById(id);
 

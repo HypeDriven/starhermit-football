@@ -256,7 +256,8 @@ loading → menu ─┬─ practice ──────────────�
                 └─ replays ─→ replay viewer ─→ replays
 ```
 
-Layout: every screen is a centred flex column with `overflow-y: auto`, buttons
+Layout: every screen is a centred flex column (`justify-content: safe center`, so a menu
+taller than the viewport scrolls from its top instead of clipping it) with `overflow-y: auto`, buttons
 `min(320px, 80vw)` wide, lists `min(440–560px, 92vw)` with `max-height` 44–52 vh so long
 rosters and leaderboards scroll inside the panel. The score bar is top-centre at
 `max(10px, env(safe-area-inset-top))`; joystick, touch buttons, power bar, mouse hint, chat
@@ -267,6 +268,13 @@ phones: the joystick and buttons keep 5–6 % margins so thumbs do not cover the
 Must never be cut off: the score bar and clock, the ball arrow (clamped to 86 % / 80 % of
 the viewport), the power bar, the three touch buttons and the joystick, the result title and
 score, and the primary button of every screen.
+Below 480 px wide the score bar shrinks slightly and centres in the space left of the menu
+button. Large screens: `ui-scale.js` sets `--ui-scale` (1 up to a 1600×1000 viewport, then
+`min(w/1600, h/1000)`, max 2.5) and every DOM UI layer (screens, HUD, touch UI, replay bar,
+menus, settings, dialogs, FPS meter) is CSS-zoomed by it with vw/vh lengths divided by it;
+the full-viewport WebGL canvas is not zoomed and the ball arrow / joystick maths convert
+between visual and zoomed px. Secondary screen text carries a dark text shadow for legibility
+over the live stadium.
 
 ## 8. Art direction
 
@@ -296,8 +304,9 @@ masts with additive light cones; rounded-rectangle name plates. Typography: "Seg
 system-ui; the logo is 800 weight with 0.12 em tracking and a green glow; screen titles and
 buttons are uppercase with 0.08–0.15 em tracking; the clock uses tabular numerals.
 
-Motion: the follow camera is a critically damped lerp (`1 − e^(−6 dt)`), 13 m back and 7 m up,
-15 m / 7.5 m and +4° FOV when sprinting; cinematic framing for walkout (crane from the
+Motion: the follow camera is a critically damped lerp (`1 − e^(−6 dt)`), 13 m back and 7 m up
+(when it backs up over the west tunnel the tunnel fades to 15 % opacity so its roof never hides
+the player), 15 m / 7.5 m and +4° FOV when sprinting; cinematic framing for walkout (crane from the
 tunnel), coin flip (centre-circle close-up), ceremonies (touchline view) and full time
 (slow orbit). Banners pop in with a 0.35 s scale-up. The crowd sways continuously and
 pulses on goals, boos in place after a leaver. Floodlights flicker ±3 %. With

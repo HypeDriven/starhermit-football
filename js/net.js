@@ -11,7 +11,7 @@
 // The games socket is the SDK's StarHermit.connect (reconnect with exponential
 // backoff, stops on 4403/4404); socket URLs come from the SDK so they always
 // carry the current, renewed launch token.
-import * as api from './api.js?v=9';
+import * as api from './api.js?v=10';
 
 export function createNetClient({ roomId }) {
   let ws = null;

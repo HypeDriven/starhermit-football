@@ -5,7 +5,7 @@
 //
 // The rest of the game's UI is English-only; this panel's strings are
 // localized for the supported locales, picked from navigator.language.
-import { PRESETS, CATEGORIES, presetTier } from './gfx.js?v=9';
+import { PRESETS, CATEGORIES, presetTier } from './gfx.js?v=10';
 
 const STRINGS = {
   'en-US': {

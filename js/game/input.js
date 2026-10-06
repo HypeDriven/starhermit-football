@@ -138,7 +138,9 @@ export function createInput() {
     joyEl.addEventListener('pointercancel', end);
 
     function moveJoy(e) {
-      let dx = e.clientX - joy.cx, dy = e.clientY - joy.cy;
+      // pointer deltas are visual px; the joystick lives in the CSS-zoomed touch layer
+      const z = (window.UIScale && UIScale.value) || 1;
+      let dx = (e.clientX - joy.cx) / z, dy = (e.clientY - joy.cy) / z;
       const d = Math.hypot(dx, dy);
       if (d > R) { dx = dx / d * R; dy = dy / d * R; }
       joy.x = dx / R; joy.y = dy / R;

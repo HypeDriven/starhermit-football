@@ -1,7 +1,7 @@
 // platform-i18n.js — localized strings for the StarHermit account surface
 // (sign-in, invite link, sign-out notice, achievements screen), picked from
 // navigator.language like the Settings panel.
-import { pickLocale } from './settings.js?v=9';
+import { pickLocale } from './settings.js?v=10';
 
 const STRINGS = {
   'en-US': {

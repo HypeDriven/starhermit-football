@@ -1,8 +1,8 @@
 // Procedural footballer factory: ~1.8m jointed character built from primitives.
 // Group origin at the feet, character faces +x when group.rotation.y = 0.
 import * as THREE from 'three';
-import { createNameTag } from './nametags.js?v=9';
-import { applyPose } from './animator.js?v=9';
+import { createNameTag } from './nametags.js?v=10';
+import { applyPose } from './animator.js?v=10';
 
 // ---------------------------------------------------------------------------
 // Shared geometry cache (one set for all players)

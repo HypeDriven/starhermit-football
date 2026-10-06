@@ -18,7 +18,7 @@ import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
-import { detectPreset, resolve, describe, choosePreset, SHADOW_MAP } from './gfx.js?v=9';
+import { detectPreset, resolve, describe, choosePreset, SHADOW_MAP } from './gfx.js?v=10';
 
 const STORE_KEY = 'starhermit-football-graphics';
 const listeners = new Set();

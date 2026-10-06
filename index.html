@@ -6,10 +6,11 @@
 <title>StarHermit Football</title>
 <link rel="icon" type="image/png" href="favicon.png">
 <!-- Keep this version in sync with local ES-module imports when deploying. -->
-<link rel="stylesheet" href="css/style.css?v=9">
+<link rel="stylesheet" href="css/style.css?v=10">
 <script type="importmap">
 { "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }
 </script>
+<script src="ui-scale.js"></script>
 <script src="browser-guard.js"></script>
 <script src="starhermit-sdk.js"></script>
 </head>
@@ -190,7 +191,7 @@
 </div>
 
 <!-- Shared sim core + server script: classic script, must load before modules -->
-<script src="server.js?v=9"></script>
-<script type="module" src="js/main.js?v=9"></script>
+<script src="server.js?v=10"></script>
+<script type="module" src="js/main.js?v=10"></script>
 </body>
 </html>

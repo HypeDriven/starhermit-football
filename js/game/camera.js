@@ -91,11 +91,14 @@ export function createFollowCamera(camera) {
     const hw = (r.width || 40) / 2, hh = (r.height || 40) / 2;
     const touch = document.getElementById('touch-ui');
     const touchVisible = touch && !touch.classList.contains('hidden');
-    const bottomReserve = touchVisible ? Math.min(innerHeight * 0.3, 190) : 0;
-    px = Math.min(Math.max(px, hw + 6), innerWidth - hw - 6);
-    py = Math.min(Math.max(py, hh + 60), innerHeight - hh - 6 - bottomReserve);
-    arrowEl.style.left = `${px}px`;
-    arrowEl.style.top = `${py}px`;
+    // The HUD is CSS-zoomed by UIScale on large screens: clamp in visual px, then
+    // convert back to the zoomed layer's own px for left/top.
+    const z = (window.UIScale && UIScale.value) || 1;
+    const bottomReserve = touchVisible ? Math.min(innerHeight * 0.3, 190 * z) : 0;
+    px = Math.min(Math.max(px, hw + 6 * z), innerWidth - hw - 6 * z);
+    py = Math.min(Math.max(py, hh + 60 * z), innerHeight - hh - 6 * z - bottomReserve);
+    arrowEl.style.left = `${px / z}px`;
+    arrowEl.style.top = `${py / z}px`;
     const ang = Math.atan2(-(ey), ex) * 180 / Math.PI - 90;
     arrowHead.style.transform = `rotate(${ang}deg)`;
     const d = Math.hypot(ball.x - target.x, ball.z - target.z);
