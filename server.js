@@ -1418,6 +1418,23 @@ function computeAchievements(state, winner) {
   return null;
 }
 
+// The game's own match-goals leaderboard (leaderboards.json): at full time
+// every human who finished the match (still seated, not gone/standin) posts
+// the goals their team scored. The board keeps each player's best match.
+function computeGoalScores(state) {
+  var teamSize = state.match.teamSize;
+  var score = state.match.score;
+  var docs = state.playerDocs || {};
+  var board = {}, any = false;
+  for (var pid in state.seats) {
+    var seat = state.seats[pid];
+    if (!seat.userId || seat.gone || seat.standin || !docs[seat.userId]) continue;
+    board[seat.userId] = score[(+pid) < teamSize ? 0 : 1];
+    any = true;
+  }
+  return any ? { 'match-goals': board } : null;
+}
+
 function pendingForSeat(state, pid, kind) {
   for (var i = 0; i < state.pendingCeremonies.length; i++) {
     var r = state.pendingCeremonies[i];
@@ -1833,6 +1850,8 @@ globalThis.game = {
         }
         var grants = computeAchievements(state, winner);
         if (grants) done.achievements = grants;
+        var goalScores = computeGoalScores(state);
+        if (goalScores) done.scores = goalScores;
         return done;
       }
     }

@@ -24,7 +24,8 @@ File map (everything shipped or run from this repository):
 |---|---|
 | `index.html` | Shell: canvas, HUD, replay bar, touch controls, every DOM screen and dialog. Loads `server.js` then `js/main.js`. |
 | `starhermit.txt` | Platform manifest: `name`, `launch=index.html`, `owner`, `server=server.js`, `control.*` default key bindings, `cover=coverart.png`. |
-| `server.js` | Simulation core (`FootballSim`: pitch, players, ball, AI, injury ceremony) and the platform script (`game.createSession / onPlayerMessage / onTick`, Elo, achievements, replay recording). |
+| `server.js` | Simulation core (`FootballSim`: pitch, players, ball, AI, injury ceremony) and the platform script (`game.createSession / onPlayerMessage / onTick`, Elo, achievements, match-goals scores, replay recording). |
+| `leaderboards.json` | The game's own leaderboard (`match-goals`), created by the owner tooling. |
 | `js/main.js` | Boot, renderer, screen state machine, match lifecycle, rejoin/leave prompts, token refresh, render loop. |
 | `js/gfx.js` | Pure graphics quality model: presets, categories, GPU detection (`detectPreset`), `resolve`, `choosePreset`, `presetTier`, `describe`. |
 | `js/graphics.js` | Renderer wiring for the graphics settings: pixel ratio, shadow maps, post chain, adaptive resolution, frame-rate readout, floodlit environment map, persistence; `onGraphics()` subscription for world builders. |
@@ -175,6 +176,13 @@ abandoned match. Example from the regression test: 1400 vs 1200 draw → 1392 / 
 **Achievements** (`computeAchievements`): `debut` (finish a match, 10), `first-win` (25),
 `goalscorer` (15), `hat-trick` (three goals, 50), `clean-sheet` (win conceding 0, 40).
 Granted at full time to humans still seated.
+
+**Match-goals leaderboard** (`computeGoalScores`, declared in `leaderboards.json`: `match-goals`,
+"Most goals in a match", integer, higher is better, 0–99): at full time every human still seated
+posts the goals their team scored through the returned `scores`; the board keeps each player's best
+match. Abandoned matches and offline Practice post nothing, so a solo player earns it with
+**Ranked vs AI**. After an online match the result card shows "Leaderboard rank: #N" under the stats
+(read from `StarHermit.leaderboard('match-goals')`), or "Score not posted to the leaderboard."
 
 **RNG**: mulberry32 stored as `{ seed, counter }` so a JSON round-trip continues the stream.
 Practice seeds from `Math.random()`; online from `floor(ctx.random × 2^31 − 1)`. AI names are
@@ -445,7 +453,7 @@ accept / decline / open / seats / quick-join / start / leave, and `ws/v1/realtim
 pushes); the scripted-games runtime (`server=server.js`, `game.tickRateHz = 30`, gameplay through
 `StarHermit.connect` on `ws/v1/games?sessionId=` with reconnect, `cmd` frames whose input carries
 `realtime: true` in the payload and the envelope, `ctx.room`, `ctx.presence`, `ctx.inputs`, `result`,
-`eloUpdates`, `playerStates`, `achievements`, `game.replays = true`); an invite-accept launch's
+`eloUpdates`, `playerStates`, `achievements`, `scores`, `game.replays = true`); an invite-accept launch's
 `session_id` rejoins that match when its room is playing; leaderboards (`GET /games/{slug}` for
 `leaderboardId` and `me`, `GET /leaderboards/{id}/entries`); achievements (`GET
 /games/{slug}/achievements` on the **ACHIEVEMENTS** screen — the server-declared catalog with locked /
@@ -467,7 +475,7 @@ available. When the reason is an expired session a **SESSION EXPIRED** dialog ex
 play stopped and offers **BACK TO STARHERMIT** (relaunches through the StarHermit launcher, or
 sign-in for sign-in launches; if the browser refuses, the status line says to reopen the game from
 the library) or **PLAY OFFLINE**. Account-surface strings (sign-in, invite, toasts, session-expired
-dialog, achievements screen) are localized in the nine locales (`js/platform-i18n.js`).
+dialog, achievements screen, the result card's leaderboard line) are localized in the nine locales (`js/platform-i18n.js`).
 
 Does not use: the peer relay (`ws/v1/relay`), chat WebSocket, presence outside rooms,
 host-submitted results (`POST /rooms/{id}/result`), platform matchmaking queues (quick play uses

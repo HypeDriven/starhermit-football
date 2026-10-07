@@ -208,6 +208,7 @@ body {
 #lobby-timer { font-size: 1.1rem; }
 #result-score { font-size: clamp(2.4rem, calc(9vw / var(--ui-scale, 1)), 4.5rem); font-weight: 800; }
 #result-stats { color: #b9c6d2; text-align: center; line-height: 1.7; }
+#result-lb { color: #ffd76a; text-align: center; margin-top: 6px; text-shadow: 0 1px 3px rgba(0,0,0,0.95); }
 
 /* ── HUD ── */
 #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }

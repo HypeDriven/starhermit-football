@@ -697,7 +697,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
       case 'abandoned-draw': {
         audio.whistle('long');
         hud.banner('MATCH ABANDONED — DRAW', 4200);
-        finishMatch(-1);
+        finishMatch(-1, true);
         break;
       }
     }
@@ -773,7 +773,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     hud.setScore(sim.score[0], sim.score[1]);
   }
 
-  function finishMatch(winner = null) {
+  function finishMatch(winner = null, abandoned = false) {
     if (phase === 'done') return;
     phase = 'done';
     hud.setPower(0);
@@ -784,6 +784,8 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
         stats: mode === 'practice' ? sim.stats : null, // server owns online stats
         myTeam: sim.players[myPlayerId].team,
         winner: w,
+        online: mode === 'online',
+        abandoned,
       });
     }, 4500);
   }

@@ -1,0 +1,3 @@
+{
+  "match-goals": { "name": "Most goals in a match", "scoreType": "integer", "sortDirection": "desc", "minScore": 0, "maxScore": 99 }
+}

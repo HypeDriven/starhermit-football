@@ -109,6 +109,8 @@ function runMatch(opts) {
 
   assert.strictEqual(state.summary.status, 'finished', 'summary.status');
   assert(state.summary.moveCount > 0, 'summary.moveCount');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(ret.scores)),
+    { 'match-goals': { u1: r.score[0], u2: r.score[1] } }, 'match-goals: each human posts their team goals');
 
   const frames = state.replay.frames;
   assert(frames.length > 0, 'replay frames empty');
@@ -166,6 +168,7 @@ function runMatch(opts) {
   assert.strictEqual(ret.result.draw, true, 'abandoned draw flag');
   assert(!('eloUpdates' in ret), 'abandoned must not carry eloUpdates');
   assert(!('playerStates' in ret), 'abandoned must not carry playerStates');
+  assert(!('scores' in ret), 'abandoned must not post scores');
   assert.strictEqual(state.summary.status, 'finished', 'abandoned summary finished');
   console.log('scenario 3 (abandoned): OK  no eloUpdates/playerStates, result.draw=true');
 }

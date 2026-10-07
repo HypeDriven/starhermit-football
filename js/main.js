@@ -356,7 +356,31 @@ function showResult(result) {
   } else {
     $('result-stats').innerHTML = '';
   }
+  showMatchRank(result);
   showScreen('screen-result');
+}
+
+// Online matches: server.js posts each finisher's team goals to the
+// match-goals board; show the signed-in player's rank there.
+let rankSeq = 0;
+async function showMatchRank(result) {
+  const line = $('result-lb');
+  const seq = ++rankSeq;
+  const s = globalThis.StarHermit;
+  line.hidden = true;
+  if (!result.online || !s?.signedIn) return;
+  const t = platformStrings();
+  line.hidden = false;
+  if (result.winner === -1 && result.abandoned) { line.textContent = t.lbNotPosted; return; }
+  line.textContent = t.lbPosting;
+  let mine = null;
+  for (let i = 0; i < 8 && !mine && seq === rankSeq; i++) {
+    if (i) await new Promise((r) => setTimeout(r, 1500));
+    const r = await s.leaderboard('match-goals', { pageSize: 100 }).catch(() => null);
+    mine = (r?.items || []).find((e) => e.userId === s.userId);
+  }
+  if (seq !== rankSeq) return;
+  line.textContent = mine ? t.lbRank.replace('{rank}', mine.rank) : t.lbNotPosted;
 }
 
 function backToMenu() {

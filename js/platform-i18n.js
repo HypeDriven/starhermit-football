@@ -13,6 +13,7 @@ const STRINGS = {
     signedOut: 'Signed out of StarHermit — practice is still available.',
     achievements: 'Achievements', achLoading: 'Loading…', achEmpty: 'No achievements are available yet.',
     achFailed: 'Could not load achievements.', achUnlocked: 'Unlocked', achLocked: 'Locked', back: 'Back',
+    lbPosting: 'Posting to the leaderboard…', lbRank: 'Leaderboard rank: #{rank}', lbPosted: 'Score posted to the leaderboard.', lbNotPosted: 'Score not posted to the leaderboard.',
   },
   'en-GB': {},
   'es-419': {
@@ -23,6 +24,7 @@ const STRINGS = {
     signedOut: 'Se cerró la sesión de StarHermit; la práctica sigue disponible.',
     achievements: 'Logros', achLoading: 'Cargando…', achEmpty: 'Todavía no hay logros disponibles.',
     achFailed: 'No se pudieron cargar los logros.', achUnlocked: 'Desbloqueado', achLocked: 'Bloqueado', back: 'Volver',
+    lbPosting: 'Publicando en la clasificación…', lbRank: 'Puesto en la clasificación: #{rank}', lbPosted: 'Resultado publicado en la clasificación.', lbNotPosted: 'El resultado no se publicó en la clasificación.',
   },
   'es-ES': {
     expiredTitle: 'Sesión caducada', expiredText: 'Tu sesión de StarHermit ha caducado y el juego en línea se ha detenido. Vuelve a StarHermit para iniciar una sesión nueva o sigue jugando al modo práctica sin conexión.',
@@ -32,6 +34,7 @@ const STRINGS = {
     signedOut: 'Se ha cerrado la sesión de StarHermit; el modo práctica sigue disponible.',
     achievements: 'Logros', achLoading: 'Cargando…', achEmpty: 'Todavía no hay logros disponibles.',
     achFailed: 'No se han podido cargar los logros.', achUnlocked: 'Desbloqueado', achLocked: 'Bloqueado', back: 'Volver',
+    lbPosting: 'Publicando en la clasificación…', lbRank: 'Puesto en la clasificación: #{rank}', lbPosted: 'Resultado publicado en la clasificación.', lbNotPosted: 'El resultado no se ha publicado en la clasificación.',
   },
   'de-DE': {
     expiredTitle: 'Sitzung abgelaufen', expiredText: 'Deine StarHermit-Sitzung ist abgelaufen, daher wurde das Online-Spiel beendet. Kehre zu StarHermit zurück, um eine neue Sitzung zu starten, oder spiele offline im Training weiter.',
@@ -41,6 +44,7 @@ const STRINGS = {
     signedOut: 'Von StarHermit abgemeldet – das Training ist weiterhin verfügbar.',
     achievements: 'Erfolge', achLoading: 'Wird geladen…', achEmpty: 'Noch keine Erfolge verfügbar.',
     achFailed: 'Erfolge konnten nicht geladen werden.', achUnlocked: 'Freigeschaltet', achLocked: 'Gesperrt', back: 'Zurück',
+    lbPosting: 'Wird in die Bestenliste eingetragen …', lbRank: 'Platz in der Bestenliste: #{rank}', lbPosted: 'Ergebnis in die Bestenliste eingetragen.', lbNotPosted: 'Ergebnis nicht in die Bestenliste eingetragen.',
   },
   'fr-FR': {
     expiredTitle: 'Session expirée', expiredText: 'Ta session StarHermit a expiré et le jeu en ligne s’est arrêté. Retourne sur StarHermit pour ouvrir une nouvelle session, ou continue l’entraînement hors ligne.',
@@ -50,6 +54,7 @@ const STRINGS = {
     signedOut: 'Déconnecté de StarHermit : l’entraînement reste disponible.',
     achievements: 'Succès', achLoading: 'Chargement…', achEmpty: 'Aucun succès disponible pour le moment.',
     achFailed: 'Impossible de charger les succès.', achUnlocked: 'Débloqué', achLocked: 'Verrouillé', back: 'Retour',
+    lbPosting: 'Envoi au classement…', lbRank: 'Rang au classement : #{rank}', lbPosted: 'Score inscrit au classement.', lbNotPosted: 'Score non inscrit au classement.',
   },
   'fr-CA': {
     expiredTitle: 'Session expirée', expiredText: 'Ta session StarHermit a expiré et le jeu en ligne s’est arrêté. Retourne sur StarHermit pour ouvrir une nouvelle session, ou continue la pratique hors ligne.',
@@ -59,6 +64,7 @@ const STRINGS = {
     signedOut: 'Déconnecté de StarHermit : la pratique reste disponible.',
     achievements: 'Succès', achLoading: 'Chargement…', achEmpty: 'Aucun succès disponible pour l’instant.',
     achFailed: 'Impossible de charger les succès.', achUnlocked: 'Débloqué', achLocked: 'Verrouillé', back: 'Retour',
+    lbPosting: 'Envoi au classement…', lbRank: 'Rang au classement : #{rank}', lbPosted: 'Pointage inscrit au classement.', lbNotPosted: 'Pointage non inscrit au classement.',
   },
   'pt-BR': {
     expiredTitle: 'Sessão expirada', expiredText: 'Sua sessão do StarHermit expirou e o jogo online parou. Volte ao StarHermit para iniciar uma nova sessão ou continue treinando offline.',
@@ -68,6 +74,7 @@ const STRINGS = {
     signedOut: 'Você saiu do StarHermit — o treino continua disponível.',
     achievements: 'Conquistas', achLoading: 'Carregando…', achEmpty: 'Ainda não há conquistas disponíveis.',
     achFailed: 'Não foi possível carregar as conquistas.', achUnlocked: 'Desbloqueada', achLocked: 'Bloqueada', back: 'Voltar',
+    lbPosting: 'Enviando para o ranking…', lbRank: 'Posição no ranking: #{rank}', lbPosted: 'Placar registrado no ranking.', lbNotPosted: 'Placar não registrado no ranking.',
   },
   'it-IT': {
     expiredTitle: 'Sessione scaduta', expiredText: 'La tua sessione StarHermit è scaduta e il gioco online si è interrotto. Torna su StarHermit per avviare una nuova sessione o continua ad allenarti offline.',
@@ -77,6 +84,7 @@ const STRINGS = {
     signedOut: 'Disconnesso da StarHermit: l’allenamento resta disponibile.',
     achievements: 'Obiettivi', achLoading: 'Caricamento…', achEmpty: 'Nessun obiettivo ancora disponibile.',
     achFailed: 'Impossibile caricare gli obiettivi.', achUnlocked: 'Sbloccato', achLocked: 'Bloccato', back: 'Indietro',
+    lbPosting: 'Invio alla classifica…', lbRank: 'Posizione in classifica: #{rank}', lbPosted: 'Punteggio registrato in classifica.', lbNotPosted: 'Punteggio non registrato in classifica.',
   },
 };
 
