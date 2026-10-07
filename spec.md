@@ -494,7 +494,9 @@ return contract).
 - **e2e**: `tests/e2e.mjs` serves the repo from an embedded static server (`PORT` env pins
   the port), launches headless Chrome on SwiftShader, and plays a full 1v1 practice match
   twice — desktop with real key presses, mobile with CDP touch events on the joystick and
-  buttons — synchronising on the visible `#match-clock`.
+  buttons — synchronising on the visible `#match-clock`. CDP exists only in Chromium; in
+  other browsers the joystick-drag and held-shot bursts are skipped with a logged note and
+  the mobile pass drives the match with taps (pass/tackle) instead.
 
 ## 14. Testing and acceptance criteria
 

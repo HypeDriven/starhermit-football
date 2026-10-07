@@ -302,9 +302,24 @@ const desktopDrive = (base) => ({
 });
 
 const mobileDrive = (base) => {
-  let cdp = null;
+  // Raw multi-phase touches (joystick drag, held shot) go through CDP
+  // Input.dispatchTouchEvent, which only Chromium has. Elsewhere (Firefox)
+  // those bursts are skipped with a note and the drive falls back to taps.
+  let cdp = null, cdpMissing = false;
+  const hasCdp = async (page) => {
+    if (cdp) return true;
+    if (cdpMissing) return false;
+    try {
+      if (typeof page.context().newCDPSession !== 'function') throw new Error('no newCDPSession');
+      cdp = await page.context().newCDPSession(page);
+      return true;
+    } catch (e) {
+      cdpMissing = true;
+      console.log(`  [mobile] note: CDP unavailable in this browser (${String(e.message || e).split('\n')[0]}); skipping joystick drag + held-shot touch bursts, using taps only`);
+      return false;
+    }
+  };
   const touch = async (page, type, points) => {
-    cdp = cdp || await page.context().newCDPSession(page);
     await cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points });
   };
   const hold = async (page, sel, ms) => {
@@ -319,7 +334,10 @@ const mobileDrive = (base) => {
     base,
     touch: true,
     async playBurst(page) {
-      const roll = Math.random();
+      let roll = Math.random();
+      if (roll < 0.5 || (roll >= 0.7 && roll < 0.9)) {
+        if (!(await hasCdp(page))) roll = roll < 0.5 ? 0.6 : 0.95; // tap pass / tackle instead
+      }
       if (roll < 0.5) {
         // drag the on-screen joystick up (run toward play), hold, release
         const box = await page.locator('#joystick').boundingBox();
