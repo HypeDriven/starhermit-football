@@ -19,6 +19,9 @@ body {
 #hud, #replay-ui, #touch-ui, #screens, #loading, #leave-confirm, #confirm-dialog, #screen-settings, #fps-meter { zoom: var(--ui-scale, 1); }
 .hidden { display: none !important; }
 #leave-confirm, #confirm-dialog { position: fixed; inset: 0; z-index: 30; }
+/* modal over the menu: opaque enough that the menu underneath doesn't bleed through */
+#confirm-dialog { background: rgba(5,7,12,0.88); }
+#confirm-text { max-width: 34rem; text-align: center; line-height: 1.5; }
 #screen-settings { position: fixed; inset: 0; z-index: 40; background: rgba(5,7,12,0.8); justify-content: safe center; gap: 0.9rem; }
 .muted { color: #93a1b0; }
 /* screens sit straight on the live 3D stadium: keep secondary text legible over bright stands,

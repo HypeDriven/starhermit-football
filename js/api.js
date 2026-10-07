@@ -25,6 +25,15 @@ export function getAuth() {
 export function onAuthChange(fn) { return sh()?.on('auth', fn); }
 export const canSignIn = () => !!sh()?.canSignIn();
 export const signIn = () => !!sh()?.signIn();
+/**
+ * Before reopening a socket the game manages itself (voice relay): a failed
+ * reconnect may be an expired token (refused before the upgrade, seen only as
+ * 1006), so renew first. 'renewed' → rebuild the URL; 'retry' → back off and
+ * call again (never reopen the old URL); 'relaunch' → signed out, stop.
+ */
+export const renewForReconnect = () => (sh()?.renewForReconnect ? sh().renewForReconnect() : Promise.resolve('relaunch'));
+/** Back to the StarHermit launcher (or sign-in) for a fresh token; call from a click. */
+export const relaunch = () => !!sh()?.relaunch();
 /** Share link that friends the recipient and invites them back (null signed out). */
 export const inviteLink = (query) => (getAuth().online ? sh().inviteLink(query) : null);
 
@@ -137,5 +146,5 @@ export const setVoiceMute = (roomId, muted) => req('POST', `/api/v1/voice/rooms/
 // ── sockets (URLs carry the current token; the SDK keeps it renewed) ──
 export const realtimeSocketUrl = (roomId) => sh().realtime.socketUrl(roomId);
 export const voiceSocketUrl = (roomId) => sh().voice.socketUrl(roomId);
-/** Gameplay socket with reconnect (SDK): handlers onOpen/onGame/onPresence/onAchievement/onError/onClose. */
+/** Gameplay socket with reconnect (SDK renews the token first): handlers onOpen/onGame/onPresence/onAchievement/onError/onClose/onAuthLost. */
 export const connectGame = (sessionId, handlers) => sh().connect(sessionId, handlers);

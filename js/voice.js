@@ -20,7 +20,7 @@
 // tracks at source, remotely by zeroing a muted peer's gain (roster `muted`
 // flags and voice.mute_changed events). Toggle with M or the HUD mic button.
 import * as api from './api.js?v=10';
-import { createVoiceClient } from './net.js?v=10';
+import { createVoiceClient, reconnectWithRenewal } from './net.js?v=10';
 
 const LS_KEY = 'starhermit-football-voice';
 const ICE_SERVERS = [{ urls: ['stun:stun.l.google.com:19302'] }];
@@ -224,24 +224,38 @@ export function createVoice() {
     // WS drop = implicit server-side leave, so re-join before reconnecting.
     await api.joinVoiceRoom(voiceRoomId);
     if (!live(s)) return;
-    const net = createVoiceClient({ roomId: voiceRoomId, getToken: () => api.getAuth().token });
+    const net = createVoiceClient({ roomId: voiceRoomId });
     voiceNet = net;
     await net.connect({
       onEvent: onVoiceEvent,
       onClose: () => {
         if (!live(s) || voiceNet !== net) return;
-        if (++wsRetries > 5) { console.warn('voice: relay reconnects exhausted'); return; }
-        setTimeout(() => { if (live(s)) reconnect(s); }, 2000);
+        scheduleReconnect(s);
       },
     });
     if (!live(s)) { net.close(); return; }
     wsRetries = 0;
   }
 
+  function scheduleReconnect(s) {
+    if (++wsRetries > 5) { console.warn('voice: relay reconnects exhausted'); return; }
+    setTimeout(() => { if (live(s)) reconnect(s); }, 2000);
+  }
+
   async function reconnect(s) {
-    // rebuild the mesh from the fresh roster; stale peer state is discarded
-    for (const id of [...peers.keys()]) dropPeer(id);
-    try { await connectWs(s); } catch { /* onClose retry chain handles it */ }
+    // A drop may be an expired launch token (the relay refuses it before the
+    // upgrade, seen only as 1006), and the same URL can never recover: renew
+    // first, then open a fresh URL built from the current token.
+    await reconnectWithRenewal({
+      reopen: async () => {
+        if (!live(s)) return;
+        // rebuild the mesh from the fresh roster; stale peer state is discarded
+        for (const id of [...peers.keys()]) dropPeer(id);
+        try { await connectWs(s); } catch { /* onClose retry chain handles it */ }
+      },
+      retry: () => { if (live(s)) scheduleReconnect(s); }, // renewal hiccup: back off, never reopen the old URL
+      stop: () => { if (live(s)) hangup(); }, // signed out — main.js offers the relaunch prompt
+    });
   }
 
   // ── match lifecycle ───────────────────────────────────────────────────────

@@ -457,10 +457,17 @@ and relay (`/voice/rooms`, `ws/v1/voice`); per-user control bindings (`GET/PUT/D
 settings KV (`graphics` — the Graphics settings object —, `muted`, `voice`; platform values are
 applied at launch and every change is patched).
 
-When renewal is refused the SDK signs out: the menu drops to offline practice, platform buttons hide,
-the status line says so and sign-in is offered again where available. Account-surface strings
-(sign-in, invite, toasts, achievements screen) are localized in the nine locales
-(`js/platform-i18n.js`).
+Every socket reconnect renews the launch token first (an expired token is refused before the
+upgrade and looks like a plain 1006 drop): the games socket through `StarHermit.connect`, the voice
+relay through `StarHermit.renewForReconnect()` before it re-joins and opens a URL built from the
+current token; a transient renewal failure backs off without reopening the old URL. When renewal is
+refused the SDK signs out: a live match ends back at the menu, voice hangs up, the menu drops to
+offline practice, platform buttons hide, the status line says so and sign-in is offered again where
+available. When the reason is an expired session a **SESSION EXPIRED** dialog explains that online
+play stopped and offers **BACK TO STARHERMIT** (relaunches through the StarHermit launcher, or
+sign-in for sign-in launches; if the browser refuses, the status line says to reopen the game from
+the library) or **PLAY OFFLINE**. Account-surface strings (sign-in, invite, toasts, session-expired
+dialog, achievements screen) are localized in the nine locales (`js/platform-i18n.js`).
 
 Does not use: the peer relay (`ws/v1/relay`), chat WebSocket, presence outside rooms,
 host-submitted results (`POST /rooms/{id}/result`), platform matchmaking queues (quick play uses

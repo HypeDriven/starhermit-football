@@ -9,9 +9,24 @@
 // ('sync' on open/reconnect, 'input' at ~30 Hz). Server -> client:
 // {type:'game', data:{type:'snap'|'ev', ...}} and {type:'presence', ...}.
 // The games socket is the SDK's StarHermit.connect (reconnect with exponential
-// backoff, stops on 4403/4404); socket URLs come from the SDK so they always
-// carry the current, renewed launch token.
+// backoff, stops on 4403/4404, renews the launch token before every reconnect
+// and reports onAuthLost when renewal is refused); socket URLs come from the
+// SDK at open time so they always carry the current, renewed launch token.
 import * as api from './api.js?v=10';
+
+/**
+ * Reopen a game-managed socket (voice relay) after a drop. A failed reconnect
+ * may be an expired launch token — refused before the upgrade, reported only
+ * as 1006 — so the token is renewed first and the socket is reopened with a
+ * URL built from the current token. 'retry' backs off without touching the
+ * old URL; 'relaunch' (signed out) stops for good.
+ */
+export async function reconnectWithRenewal({ reopen, retry, stop }) {
+  const r = await api.renewForReconnect();
+  if (r === 'renewed') return reopen();
+  if (r === 'retry') return retry();
+  return stop();
+}
 
 export function createNetClient({ roomId }) {
   let ws = null;
@@ -124,6 +139,13 @@ export function createGameClient({ sessionId }) {
         onAchievement: (a) => handlers.onAchievement?.(a),
         onError: (e) => handlers.onError?.(e),
         onAbandoned: () => { if (!disposed) { disposed = true; handlers.onClose?.(); } },
+        // Renewal refused before a reconnect: the SDK signed out and stopped
+        // the socket for good — the caller offers the relaunch prompt.
+        onAuthLost: () => {
+          if (disposed) return;
+          disposed = true;
+          if (handlers.onAuthLost) handlers.onAuthLost(); else handlers.onClose?.();
+        },
         onClose: (code) => {
           if (!settled) { settled = true; conn.close(); reject(new Error('Games socket connection failed')); return; }
           if (disposed) { handlers.onClose?.(); return; }

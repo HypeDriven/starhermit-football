@@ -17,6 +17,7 @@ import { createGraphics } from './graphics.js?v=10';
 import { createSettingsPanel } from './settings.js?v=10';
 import { createAchievementsScreen } from './achievements.js?v=10';
 import { platformStrings } from './platform-i18n.js?v=10';
+import { offerRelaunch } from './session-expiry.js?v=10';
 
 const $ = (id) => document.getElementById(id);
 
@@ -79,7 +80,7 @@ async function refreshActiveRoom() {
 }
 
 // In-game modal confirm (replaces window.confirm — no browser chrome).
-function uiConfirm({ title, text, yes, no }) {
+function uiConfirm({ title, text, yes, no, primaryYes = false }) {
   return new Promise((resolve) => {
     $('confirm-title').textContent = title;
     $('confirm-text').textContent = text;
@@ -88,6 +89,9 @@ function uiConfirm({ title, text, yes, no }) {
     const noBtn = $('btn-confirm-no');
     yesBtn.textContent = yes;
     noBtn.textContent = no;
+    yesBtn.classList.toggle('danger', !primaryYes);
+    yesBtn.classList.toggle('primary', primaryYes);
+    noBtn.classList.toggle('primary', !primaryYes);
     const done = (v) => {
       dlg.classList.add('hidden');
       yesBtn.onclick = noBtn.onclick = null;
@@ -313,6 +317,9 @@ async function onMatchReady(room, { isRejoin = false } = {}) {
       onEvent: (ev) => m.onNetEvent(ev),
       onAchievement: (a) => { if (a?.name) hud.banner(`Achievement unlocked: ${a.name}`, 4000); },
       onClose: () => { if (match && match.phase !== 'done') { setStatus('Connection lost'); backToMenu(); } },
+      // token renewal refused: the SDK signed out (the auth listener shows the
+      // relaunch prompt) and the socket stopped for good
+      onAuthLost: () => { if (match) backToMenu(); },
     });
   } catch (e) {
     setStatus(`Could not connect: ${e.message}`);
@@ -456,7 +463,18 @@ api.onAuthChange?.((state) => {
   $('btn-rejoin').classList.add('hidden');
   activeRoom = null;
   setStatus(platformStrings().signedOut);
+  if (state.reason === 'expired') promptRelaunch();
 });
+
+// Launch token expired and can no longer be renewed: offer a fresh launch
+// from StarHermit (the button click carries the gesture the launcher frame needs).
+async function promptRelaunch() {
+  const t = platformStrings();
+  const up = (x) => x.toLocaleUpperCase();
+  const r = await offerRelaunch(
+    (o) => uiConfirm({ ...o, title: up(o.title), yes: up(o.yes), no: up(o.no), primaryYes: true }), t);
+  if (r === 'refused') setStatus(t.relaunchFailed);
+}
 
 // Invite-accept launches carry #session_id: rejoin that match's room when it is live.
 async function resumeLaunchSession() {
