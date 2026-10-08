@@ -96,7 +96,10 @@ export const resetControls = () => req('DELETE', gamePath('/controls'));
 // ── realtime rooms (see spec.md §8) ──
 export const createRoom = (cfg) => req('POST', '/api/v1/realtime/rooms', cfg);
 export const getRoom = (id) => req('GET', `/api/v1/realtime/rooms/${id}`);
-export const getMyRoom = () => req('GET', '/api/v1/realtime/rooms/mine');
+// The caller's non-Closed room, or null. /rooms/joined answers [] rather than
+// the 404 /rooms/mine gives when idle (a console error on every menu load).
+export const getMyRoom = () => req('GET', '/api/v1/realtime/rooms/joined')
+  .then((rooms) => (rooms || []).find((r) => r.status !== 'Closed') || null);
 export const inviteToRoom = (id, toUserId) => req('POST', `/api/v1/realtime/rooms/${id}/invites`, { toUserId });
 export const getRoomInvites = () => req('GET', '/api/v1/realtime/rooms/invites');
 export const acceptRoomInvite = (inviteId) => req('POST', `/api/v1/realtime/rooms/invites/${inviteId}/accept`);

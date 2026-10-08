@@ -210,7 +210,7 @@ the mirror `rejoin` ceremony. When every human seat is gone the match ends as
 | QUICK PLAY | launch token | `POST /realtime/rooms/quick-join`; on 404 creates and opens a room. 30 s fill window, AI backfill, then the platform starts the scripted session. |
 | CREATE LOBBY | launch token | Creates a closed room; INVITE FRIENDS (friends list), COPY INVITE LINK (`dashboard.starhermit.com/game-invite/<user>/<slug>`), host clicks empty seats to move themself, FIND MATCH opens the room and starts the 30 s countdown. |
 | RANKED vs AI | launch token | A room with `aiPlayers = 2 × teamSize − 1` started at once: server-authoritative, rated only if both teams have humans (so in practice unrated), archived as a replay. |
-| REJOIN MATCH / RETURN TO LOBBY | an active room on the server | Shown when `GET /rooms/mine` returns a room; rejoin skips the intro and resyncs from snapshots. |
+| REJOIN MATCH / RETURN TO LOBBY | an active room on the server | Shown when `GET /rooms/joined` lists a non-Closed room; rejoin skips the intro and resyncs from snapshots. |
 | LEADERBOARD | launch token | My rating and W/L/D from `GET /games/{slug}`; ranked entries, 20 per page, friends-only filter. |
 | REPLAYS | launch token | Last 20 finished online matches; WATCH plays the archived 2 fps log with play/pause, seek and an orbiting ball camera. |
 | CONTROLS | launch token, non-touch | Rebind the seven actions; saved per user on the platform. |

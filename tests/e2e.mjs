@@ -58,7 +58,7 @@ function platformMock(req, res, p) {
   if (p.endsWith('/settings')) return json({ settings: {} });
   if (p.endsWith('/controls')) return json({ actions: [] });
   if (p.endsWith('/achievements')) return json([{ key: 'first-goal', name: 'First goal', description: 'Score in a match', unlocked: true }, { key: 'hat-trick', name: 'Hat-trick', description: 'Three goals in one match' }]);
-  if (p.endsWith('/realtime/rooms/mine')) return json(null);
+  if (p.endsWith('/realtime/rooms/joined')) return json([]);
   if (p.endsWith('/realtime/rooms/invites')) return json([]);
   return json({ error: 'not found' }, 404);
 }
