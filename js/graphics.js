@@ -272,8 +272,8 @@ export function createGraphics({ renderer, scene, camera, isTouch = false }) {
       postKey = key;
       buildPost(w, h);
     }
-    if (composer) composer.render(dt);
-    else renderer.render(scene, camera);
+    if (composer) (globalThis.GameOptions ? globalThis.GameOptions.draw(composer.renderer, () => composer.render(dt)) : composer.render(dt));
+    else (globalThis.GameOptions ? globalThis.GameOptions.draw(renderer, () => renderer.render(scene, camera)) : renderer.render(scene, camera));
   }
 
   apply();

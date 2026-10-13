@@ -107,7 +107,7 @@ export function createAudio() {
     ];
 
     for (const v of voices) {
-      const src = ctx.createBufferSource();
+      const src = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createBufferSource(), null) : ctx.createBufferSource());
       src.buffer = noiseBuffer;
       src.loop = true;
       src.playbackRate.value = rand(0.85, 1.15);
@@ -132,7 +132,7 @@ export function createAudio() {
       tail.connect(crowdBedGain);
 
       // Slow LFO on filter frequency.
-      const lfoF = ctx.createOscillator();
+      const lfoF = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator());
       lfoF.type = 'sine';
       lfoF.frequency.value = rand(0.04, 0.11);
       const lfoFG = ctx.createGain();
@@ -142,7 +142,7 @@ export function createAudio() {
       lfoF.start();
 
       // Slow LFO on gain, different rate, so the bed breathes.
-      const lfoG = ctx.createOscillator();
+      const lfoG = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator());
       lfoG.type = 'sine';
       lfoG.frequency.value = rand(0.03, 0.09);
       const lfoGG = ctx.createGain();
@@ -181,7 +181,7 @@ export function createAudio() {
     if (!buf) return false;
     o = o || {};
     const t = ctx.currentTime + (o.delay || 0) + 0.001;
-    const src = ctx.createBufferSource();
+    const src = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createBufferSource(), event) : ctx.createBufferSource());
     src.buffer = buf;
     src.playbackRate.value = o.rate || 1;
     const g = ctx.createGain();
@@ -242,7 +242,7 @@ export function createAudio() {
 
   // Enveloped noise burst through a filter.
   function noiseBurst(dest, t, o) {
-    const src = ctx.createBufferSource();
+    const src = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createBufferSource(), null) : ctx.createBufferSource());
     src.buffer = noiseBuffer;
     src.playbackRate.value = o.rate || 1;
 
@@ -267,7 +267,7 @@ export function createAudio() {
 
   // Enveloped oscillator tone with optional pitch glide.
   function tone(dest, t, o) {
-    const osc = ctx.createOscillator();
+    const osc = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator());
     osc.type = o.wave || 'sine';
     osc.frequency.setValueAtTime(o.freq, t);
     if (o.freqEnd)
@@ -411,7 +411,7 @@ export function createAudio() {
       if (playClip('injury', sfxBus, { rate: rand(0.95, 1.05), gain: 0.8, pan })) return;
       // Human-ish yelp: band-passed sawtooth, pitch drops as the cry dies.
       for (const det of [-7, 5]) {
-        const osc = ctx.createOscillator();
+        const osc = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator());
         osc.type = 'sawtooth';
         osc.frequency.setValueAtTime(rand(520, 640), t);
         osc.frequency.exponentialRampToValueAtTime(rand(240, 300), t + 0.28);
@@ -484,10 +484,10 @@ export function createAudio() {
       for (let i = 0; i < blasts; i++) {
         const blastDur = (kind === 'long' ? rand(0.3, 0.42) : rand(0.35, 0.5)) * 1;
         for (const off of [-9, 8]) {
-          const osc = ctx.createOscillator();
+          const osc = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator());
           osc.type = 'square';
           osc.frequency.value = base + off;
-          const vib = ctx.createOscillator();
+          const vib = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator());
           vib.type = 'sine';
           vib.frequency.value = vibRate;
           const vibG = ctx.createGain();
@@ -624,7 +624,7 @@ export function createAudio() {
         // Falling 'oooh': lowpassed sawtooth cluster gliding down.
         const startF = rand(210, 250);
         for (const det of [-14, 0, 13]) {
-          const osc = ctx.createOscillator();
+          const osc = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator());
           osc.type = 'sawtooth';
           osc.frequency.setValueAtTime(startF + rand(-6, 6), t);
           osc.frequency.exponentialRampToValueAtTime(rand(120, 150), t + dur * 0.85);
@@ -669,7 +669,7 @@ export function createAudio() {
         // darker and quieter than the ooh.
         const startF = rand(150, 180);
         for (const det of [-16, -5, 6, 15]) {
-          const osc = ctx.createOscillator();
+          const osc = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(ctx.createOscillator(), null) : ctx.createOscillator());
           osc.type = 'sawtooth';
           osc.frequency.setValueAtTime(startF + rand(-5, 5), t);
           osc.frequency.exponentialRampToValueAtTime(rand(85, 105), t + dur * 0.9);
