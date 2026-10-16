@@ -14,6 +14,9 @@
 <script src="ui-scale.js"></script>
 <script src="browser-guard.js"></script>
 <script src="starhermit-sdk.js"></script>
+<script src="sh-language.js"></script>
+<script src="js/i18n/strings.js?v=10"></script>
+<script src="js/i18n/i18n.js?v=10"></script>
 </head>
 <body>
 <canvas id="gl"></canvas>
@@ -59,7 +62,7 @@
 <!-- ══ Menu / lobby screens ══ -->
 <div id="screens">
   <div id="screen-menu" class="screen">
-    <h1 class="logo">STARHERMIT <span>FOOTBALL</span></h1>
+    <h1 class="logo" data-i18n-skip>STARHERMIT <span>FOOTBALL</span></h1>
     <div id="menu-user" class="muted"></div>
     <div class="menu-buttons">
       <button id="btn-signin" class="mbtn primary hidden">SIGN IN WITH STARHERMIT</button>
@@ -152,7 +155,7 @@
   </div>
 </div>
 
-<div id="loading"><div class="logo small-logo">STARHERMIT FOOTBALL</div><div id="loading-msg">Loading…</div></div>
+<div id="loading"><div class="logo small-logo" data-i18n-skip>STARHERMIT FOOTBALL</div><div id="loading-msg">Loading…</div></div>
 
 <!-- Leave-match confirm (Esc in match) -->
 <div id="leave-confirm" class="screen hidden">

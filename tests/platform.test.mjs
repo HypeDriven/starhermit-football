@@ -76,13 +76,14 @@ test('game socket: SDK connect, sync on open, snapshots, realtime input envelope
   ws.push({ type: 'achievement', data: { name: 'Hat-trick' } });
   assert.equal(got.snaps[0].tick, 3); assert.equal(got.evs[0].type, 'goal'); assert.equal(got.ach[0].name, 'Hat-trick');
   client.sendInput({ seq: 1, mx: 0, mz: 1 });
-  assert.deepEqual(ws.sent[1], { type: 'cmd', data: { type: 'input', realtime: true, seq: 1, mx: 0, mz: 1 }, realtime: true });
+  assert.deepEqual(ws.sent[1], { type: 'cmd', data: { type: 'input', realtime: true, seq: 1, mx: 0, mz: 1 } });
   client.close();
   assert.equal(got.closed, true);
 });
 
 test('renewal refused signs out to offline practice', async () => {
-  const { api, sh } = await load('https://football-id.starhermit.com/#game_token=' + TOKEN);
+  // Sign-in is offered only on the game's own UUID host.
+  const { api, sh } = await load('https://0b9d6f2e-3c4a-4e5b-9a7c-1d2e3f405162.starhermit.com/#game_token=' + TOKEN);
   api.initAuth();
   const seen = []; api.onAuthChange((s) => seen.push(s.signedIn));
   sh.signOut('expired');
@@ -98,7 +99,7 @@ const flaky = () => new Response('', { status: 503 });
 
 test('game socket reconnect renews the token first and reopens with the new one', async () => {
   const { api, calls } = await load('https://football-id.starhermit.com/#game_token=' + TOKEN,
-    { 'POST /api/v1/games/football-id/launch-token': { token: TOKEN2 } }, { fastTimers: true });
+    { 'POST /api/v1/games/football-id/launch-token': { token: TOKEN2 }, 'GET /api/v1/games/football-id/sessions/sess-1': { sessionId: 'sess-1', status: 'active' } }, { fastTimers: true });
   api.initAuth();
   const { createGameClient } = await import('../js/net.js?v=10');
   const client = createGameClient({ sessionId: 'sess-1' });
@@ -199,4 +200,44 @@ test('standalone: offline, no network calls', async () => {
   assert.equal(await api.getDisplayName('x'), 'Player');
   assert.equal(api.inviteLink(), null);
   assert.equal(calls.length, 0);
+});
+
+test('game socket: pending terms consent ends the match like auth loss', async () => {
+  const { api } = await load('https://football-id.starhermit.com/#game_token=' + TOKEN,
+    { 'POST /api/v1/games/football-id/launch-token': () => new Response(JSON.stringify({ error: 'terms_acceptance_required' }), { status: 403 }) }, { fastTimers: true });
+  api.initAuth();
+  const { createGameClient } = await import('../js/net.js?v=10');
+  const client = createGameClient({ sessionId: 'sess-1' });
+  let terms = 0, closed = 0;
+  const ready = client.connect({ onTermsRequired: () => { terms++; }, onClose: () => { closed++; } });
+  const first = FakeSocket.last; first.open(); await ready;
+  first.readyState = 3; first.onclose({ code: 1006 });
+  for (let i = 0; i < 20 && !terms; i++) await tick();
+  assert.equal(terms, 1);
+  assert.equal(FakeSocket.last, first, 'no reconnect without consent');
+});
+
+test('game socket: a finished session ends the reconnect loop with onUnavailable', async () => {
+  const { api } = await load('https://football-id.starhermit.com/#game_token=' + TOKEN,
+    { 'POST /api/v1/games/football-id/launch-token': { token: TOKEN2 }, 'GET /api/v1/games/football-id/sessions/sess-1': { sessionId: 'sess-1', status: 'finished' } }, { fastTimers: true });
+  api.initAuth();
+  const { createGameClient } = await import('../js/net.js?v=10');
+  const client = createGameClient({ sessionId: 'sess-1' });
+  let gone = null;
+  const ready = client.connect({ onUnavailable: (e) => { gone = e; } });
+  const first = FakeSocket.last; first.open(); await ready;
+  first.readyState = 3; first.onclose({ code: 1006 });
+  for (let i = 0; i < 20 && !gone; i++) await tick();
+  assert.equal(gone?.status, 410);
+  assert.equal(FakeSocket.last, first, 'the finished session is not reopened');
+});
+
+test('voice relay: terms-required stops and asks for consent', async () => {
+  const { api } = await load('https://football-id.starhermit.com/#game_token=' + TOKEN,
+    { 'POST /api/v1/games/football-id/launch-token': () => new Response(JSON.stringify({ error: 'terms_acceptance_required' }), { status: 403 }) });
+  api.initAuth();
+  const { reconnectWithRenewal } = await import('../js/net.js?v=10');
+  const seen = [];
+  await reconnectWithRenewal({ reopen: () => seen.push('reopen'), retry: () => seen.push('retry'), stop: () => seen.push('stop'), terms: () => seen.push('terms') });
+  assert.deepEqual(seen, ['terms']);
 });

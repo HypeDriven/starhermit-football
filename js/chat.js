@@ -6,6 +6,7 @@
 // renders the tail into a small HUD panel (bottom-left, inside #hud).
 // Like voice, chat is best-effort: any failure degrades to a muted status
 // line or silence — the match itself never depends on it.
+import { T, N } from './i18n/t.js?v=10';
 import * as api from './api.js?v=10';
 
 const POLL_MS = 5000;
@@ -37,7 +38,7 @@ export function createMatchChat({ sessionId, myUserId }) {
   input.id = 'match-chat-input';
   input.type = 'text';
   input.maxLength = 300;
-  input.placeholder = 'Press T to chat';
+  input.placeholder = N('Press T to chat');
   input.autocomplete = 'off';
   panel.append(list, input);
   document.getElementById('hud').appendChild(panel);
@@ -103,7 +104,7 @@ export function createMatchChat({ sessionId, myUserId }) {
     } catch {
       if (++pollFails >= FAILS_BEFORE_NOTICE && !outageShown) {
         outageShown = true;
-        addSystemLine('chat unavailable');
+        addSystemLine(N('chat unavailable'));
       }
     }
   }
@@ -116,7 +117,7 @@ export function createMatchChat({ sessionId, myUserId }) {
     const now = Date.now();
     while (sendTimes.length && now - sendTimes[0] > 60000) sendTimes.shift();
     if (now - lastSendAt < MIN_SEND_GAP_MS || sendTimes.length >= MAX_SENDS_PER_MIN) {
-      addSystemLine('slow down…');
+      addSystemLine(N('slow down…'));
       return;
     }
     lastSendAt = now;
@@ -125,7 +126,7 @@ export function createMatchChat({ sessionId, myUserId }) {
       const m = await api.sendChatMessage(convId, text);
       if (m && m.id != null) { messages.set(m.id, m); rebuild(); }
     } catch (e) {
-      addSystemLine(e?.status === 429 ? 'slow down — chat rate limit' : 'message not sent');
+      addSystemLine(e?.status === 429 ? N('slow down — chat rate limit') : N('message not sent'));
     }
   }
 

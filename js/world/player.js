@@ -221,9 +221,20 @@ export function createPlayerMesh(opts = {}) {
   const rl = buildLeg(-1);
 
   // Name tag floats above the head (~2.2m).
-  const tag = createNameTag(opts.name || '', { color: opts.nameColor || kit.shirt, isYou: !!opts.isYou });
+  let tag = createNameTag(opts.name || '', { color: opts.nameColor || kit.shirt, isYou: !!opts.isYou });
   tag.position.y = 2.2;
   group.add(tag);
+  // Redraw the tag with a new label (e.g. "You" after a language change).
+  function setName(name) {
+    const next = createNameTag(name || '', { color: opts.nameColor || kit.shirt, isYou: !!opts.isYou });
+    next.position.y = tag.position.y;
+    next.visible = tag.visible;
+    group.remove(tag);
+    tag.material.map.dispose();
+    tag.material.dispose();
+    group.add(next);
+    tag = next;
+  }
 
   const joints = {
     root, pelvis, torso, head,
@@ -289,5 +300,5 @@ export function createPlayerMesh(opts = {}) {
     tag.material.dispose();
   }
 
-  return { group, update, setNameVisible, dispose };
+  return { group, update, setNameVisible, setName, dispose };
 }

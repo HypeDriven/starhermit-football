@@ -50,11 +50,17 @@ const MIME = {
 };
 // StarHermit platform mocks for the signed-in pass; offline passes must make no /api call.
 const apiLog = [];
-function platformMock(req, res, p) {
+// Platform state the Language pass reads back.
+const mock = { language: 'en', settings: {}, reports: [] };
+const readBody = (req) => new Promise((resolve) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => resolve(b)); });
+async function platformMock(req, res, p) {
   apiLog.push(`${req.method} ${p}`);
   const json = (b, st = 200) => { res.writeHead(st, { 'content-type': 'application/json' }); res.end(JSON.stringify(b)); };
+  if (p === '/api/v1/me/language') return json({ preferredLanguage: mock.language });
+  if (/\/settings\/[^/]+$/.test(p) && req.method === 'PUT') { mock.settings[p.split('/').pop()] = JSON.parse(await readBody(req)).value; return json({}); }
+  if (/\/reports$/.test(p) && req.method === 'POST') { mock.reports.push(JSON.parse(await readBody(req))); return json({ id: 'r1', kind: 'bug', status: 'open', createdAt: new Date().toISOString() }, 201); }
   if (p.endsWith('/profile')) return json({ username: 'raw_user', nickname: 'Golazo' });
-  if (p.endsWith('/settings') && req.method === 'GET') return json({ settings: { voice: false } });
+  if (p.endsWith('/settings') && req.method === 'GET') return json({ settings: { voice: false, ...mock.settings } });
   if (p.endsWith('/settings')) return json({ settings: {} });
   if (p.endsWith('/controls')) return json({ actions: [] });
   if (p.endsWith('/achievements')) return json([{ key: 'first-goal', name: 'First goal', description: 'Score in a match', unlocked: true }, { key: 'hat-trick', name: 'Hat-trick', description: 'Three goals in one match' }]);
@@ -408,6 +414,108 @@ async function signedInPass(browser, base) {
   if (errors.length) throw new Error('[signed-in] page errors:\n' + errors.join('\n'));
 }
 
+// Language: with the StarHermit preferred language fr-CA, Automatic resolves to
+// fr-CA; choosing Italian in Settings re-renders in place and saves
+// ui.language; Report a problem posts a bug report; German fits the viewport;
+// a practice match keeps running when the language changes from its menu.
+async function languagePass(browser, base, label, contextOpts) {
+  const context = await browser.newContext(contextOpts);
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  page.on('console', (m) => { if (['error', 'warning'].includes(m.type()) && !browserNoise.test(m.text())) errors.push(`console ${m.type()}: ${m.text()}`); });
+  const shot = (s) => `${process.env.SHOT_DIR || '/tmp'}/football-e2e-${s}-${label}.png`;
+  const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const token = 'h.' + b64u({ sub: 'u-striker-1', game_scope: 'football-test', exp: Math.floor(Date.now() / 1000) + 3600 }) + '.s';
+  const fits = (scope) => page.evaluate((sel) => {
+    if (document.documentElement.scrollWidth > window.innerWidth + 1) return 'page scrolls sideways';
+    const bad = [...document.querySelectorAll(`${sel} button, ${sel} h2, ${sel} h3, ${sel} label, ${sel} div.muted, ${sel} span`)].find((el) => {
+      const r = el.getBoundingClientRect();
+      if (!r.width || !el.offsetParent || el.closest('.game-options-controls')) return false;
+      return r.right > window.innerWidth + 1 || r.left < -1 || (el.scrollWidth > el.clientWidth + 2 && getComputedStyle(el).overflow === 'hidden');
+    });
+    return bad ? 'cut off: ' + bad.textContent.trim().slice(0, 80) : '';
+  }, scope);
+  const tap = (sel) => page.locator(sel).click();
+  const clockSecs = async () => { const m = /(\d{2}):(\d{2})/.exec(await page.textContent('#match-clock')); return m ? +m[1] * 60 + +m[2] : -1; };
+  mock.language = 'fr-CA'; mock.settings = {}; mock.reports = [];
+  try {
+    await page.goto('about:blank');
+    await page.goto(`${base}#game_token=${token}`, { waitUntil: 'load' });
+    await page.waitForSelector('#loading.hidden', { state: 'attached', timeout: 30000 });
+    await page.waitForFunction(() => document.documentElement.lang === 'fr-CA', null, { timeout: 15000 });
+    await page.waitForFunction(() => document.getElementById('btn-quick').textContent === 'PARTIE RAPIDE');
+    await tap('#btn-settings');
+    const choice = page.locator('[data-game-language="choice"]');
+    await choice.scrollIntoViewIfNeeded();
+    const auto = await choice.locator('option').first().textContent();
+    if (!/^Automatique — Français \(Canada\)$/.test(auto)) throw new Error('Automatic label not resolved: ' + auto);
+    const select = await choice.elementHandle();
+    await choice.selectOption('it-IT');
+    await page.waitForFunction(() => document.documentElement.lang === 'it-IT');
+    await page.waitForFunction(() => /Salvato/.test(document.querySelector('[data-game-language="status"]').textContent));
+    if (mock.settings['ui.language']?.choice !== 'it-IT') throw new Error('ui.language not saved: ' + JSON.stringify(mock.settings));
+    if (await page.textContent('#settings-title') !== 'IMPOSTAZIONI') throw new Error('settings title not re-rendered');
+    if (await page.textContent('#gfx-heading') !== 'Grafica') throw new Error('graphics heading not re-rendered');
+    if (await page.textContent('#btn-quick') !== 'PARTITA RAPIDA') throw new Error('menu not re-rendered');
+    if (!await select.evaluate((n) => n.isConnected)) throw new Error('shared Language select was redrawn');
+    await page.locator('[data-game-report="title"]').scrollIntoViewIfNeeded();
+    await page.fill('[data-game-report="title"]', 'Test report');
+    await page.click('[data-game-report="send"]');
+    await page.waitForFunction(() => /Grazie/.test(document.querySelector('[data-game-report="status"]').textContent));
+    if (mock.reports[0]?.kind !== 'bug') throw new Error('report not posted: ' + JSON.stringify(mock.reports));
+    await page.screenshot({ path: shot('language') });
+    await choice.selectOption('de-DE');
+    await page.waitForFunction(() => document.documentElement.lang === 'de-DE');
+    let fit = await fits('#screen-settings');
+    if (fit) throw new Error('German settings: ' + fit);
+    await page.screenshot({ path: shot('language-de-settings'), fullPage: true });
+    await tap('#btn-settings-back');
+    fit = await fits('#screen-menu');
+    if (fit) throw new Error('German menu: ' + fit);
+    await page.screenshot({ path: shot('language-de-menu') });
+    // A practice match keeps running across a language change made from its menu.
+    await page.selectOption('#team-size', '1');
+    await tap('#btn-practice');
+    await page.waitForSelector('#hud:not(.hidden)', { timeout: 30000 });
+    await page.waitForFunction(() => { const m = /(\d{2}):(\d{2})/.exec(document.getElementById('match-clock').textContent); return m && +m[1] * 60 + +m[2] > 0; }, null, { timeout: 90000 });
+    await tap('#btn-match-menu');
+    await page.waitForSelector('#leave-confirm:not(.hidden)');
+    if (await page.textContent('#btn-leave-no') !== 'WEITERSPIELEN') throw new Error('match menu not in German');
+    fit = await fits('#leave-confirm');
+    if (fit) throw new Error('German match menu: ' + fit);
+    await page.screenshot({ path: shot('language-de-match-menu') });
+    const before = await clockSecs();
+    await tap('#btn-match-settings');
+    await choice.scrollIntoViewIfNeeded();
+    await choice.selectOption('fr-FR');
+    await page.waitForFunction(() => document.documentElement.lang === 'fr-FR');
+    await tap('#btn-settings-back');
+    if (await page.textContent('#match-menu-title') !== 'ENTRAÎNEMENT EN PAUSE') throw new Error('match menu title not re-rendered');
+    if (await page.textContent('#btn-leave-no') !== 'CONTINUER') throw new Error('match menu buttons not re-rendered');
+    await tap('#btn-leave-no');
+    await page.waitForFunction((b) => {
+      const m = /(\d{2}):(\d{2})/.exec(document.getElementById('match-clock').textContent);
+      return m && /^1re /.test(document.getElementById('match-clock').textContent) && +m[1] * 60 + +m[2] > b;
+    }, before, { timeout: 30000 });
+    if (before < 1) throw new Error('match clock did not run');
+    await tap('#btn-match-menu');
+    await tap('#btn-match-settings');
+    await choice.scrollIntoViewIfNeeded();
+    await choice.selectOption('auto');
+    await page.waitForFunction(() => document.documentElement.lang === 'fr-CA');
+    if (mock.settings['ui.language']?.choice !== 'auto') throw new Error('auto not saved');
+    await tap('#btn-settings-back');
+    await tap('#btn-leave-yes');
+    await page.waitForSelector('#screen-menu:not(.hidden)');
+    console.log(`ok - [${label}] Language: Automatic follows the StarHermit preferred language; live switch mid-match; ui.language; report a problem`);
+  } finally {
+    mock.language = 'en';
+    await context.close();
+  }
+  if (errors.length) throw new Error(`[${label} language] page errors:\n` + errors.join('\n'));
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 let browser;
 try {
@@ -423,15 +531,22 @@ try {
     args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
   });
 
-  await signedInPass(browser, base);
+  // E2E_PASSES=signed-in,language,desktop,mobile (default: all) picks passes;
+  // the two match passes take tens of minutes on software GL.
+  const passes = new Set((process.env.E2E_PASSES || 'signed-in,language,desktop,mobile').split(','));
+  if (passes.has('signed-in')) await signedInPass(browser, base);
+  if (passes.has('language')) {
+    await languagePass(browser, base, 'desktop', { viewport: { width: 1280, height: 800 }, deviceScaleFactor: 0.5 });
+    await languagePass(browser, base, 'mobile', { viewport: { width: 390, height: 844 }, hasTouch: true });
+  }
   apiLog.length = 0; // the offline passes below must not add any
 
-  await runPass(browser, 'desktop', {
+  if (passes.has('desktop')) await runPass(browser, 'desktop', {
     viewport: { width: 1280, height: 800 },
     deviceScaleFactor: 0.5, // software-GL accommodation; CSS layout unchanged
   }, desktopDrive(base));
 
-  await runPass(browser, 'mobile', {
+  if (passes.has('mobile')) await runPass(browser, 'mobile', {
     viewport: { width: 390, height: 844 },
     hasTouch: true,
     deviceScaleFactor: 1,

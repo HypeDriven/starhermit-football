@@ -19,6 +19,7 @@
 // WebRTC P2P, so mute is enforced client-side — locally by disabling the mic
 // tracks at source, remotely by zeroing a muted peer's gain (roster `muted`
 // flags and voice.mute_changed events). Toggle with M or the HUD mic button.
+import { T, N } from './i18n/t.js?v=10';
 import * as api from './api.js?v=10';
 import { createVoiceClient, reconnectWithRenewal } from './net.js?v=10';
 
@@ -56,7 +57,7 @@ export function createVoice() {
   function renderMicBtn() {
     micBtn.classList.toggle('hidden', !active);
     micBtn.classList.toggle('muted', muted);
-    micBtn.textContent = muted ? 'MIC OFF · M' : 'MIC ON · M';
+    micBtn.textContent = muted ? N('MIC OFF · M') : N('MIC ON · M');
   }
 
   function setMuted(m) {
@@ -255,6 +256,8 @@ export function createVoice() {
       },
       retry: () => { if (live(s)) scheduleReconnect(s); }, // renewal hiccup: back off, never reopen the old URL
       stop: () => { if (live(s)) hangup(); }, // signed out — main.js offers the relaunch prompt
+      // updated terms pending: stop like auth loss; main.js shows the terms prompt
+      terms: () => { if (live(s)) hangup(); document.dispatchEvent(new CustomEvent('fb-terms-required')); },
     });
   }
 

@@ -1,6 +1,7 @@
 // replays.js — archived replays of my online matches: date, sides, score, and
 // a WATCH button that opens the 3D replay viewer. Pure DOM + api.js, same
 // shape as leaderboard.js.
+import { T, N } from './i18n/t.js?v=10';
 import * as api from './api.js?v=10';
 
 export function createReplaysScreen({ audio, onWatch, onBack }) {
@@ -18,7 +19,7 @@ export function createReplaysScreen({ audio, onWatch, onBack }) {
       render(items || []);
     } catch (e) {
       listEl.innerHTML = '';
-      hintEl.textContent = `Could not load replays: ${e.message}`;
+      hintEl.textContent = T('Could not load replays: {error}', { error: e.message });
     }
   }
 
@@ -38,7 +39,7 @@ export function createReplaysScreen({ audio, onWatch, onBack }) {
       row.className = 'replay-row';
       const when = r.finishedAt ? new Date(r.finishedAt) : null;
       const date = when && !isNaN(when)
-        ? when.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        ? when.toLocaleString(globalThis.FBI18N?.lang, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         : '—';
       const score = r.result && r.result.score ? `${r.result.score[0]} – ${r.result.score[1]}` : '–';
       row.innerHTML =
@@ -52,7 +53,7 @@ export function createReplaysScreen({ audio, onWatch, onBack }) {
         namesEl.title = sides;
       });
       const btn = document.createElement('button');
-      btn.textContent = 'WATCH';
+      btn.textContent = N('WATCH');
       btn.onclick = () => { audio.ui(); onWatch(r.sessionId); };
       row.appendChild(btn);
       listEl.appendChild(row);

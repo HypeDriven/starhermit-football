@@ -30,6 +30,7 @@ File map (everything shipped or run from this repository):
 | `js/gfx.js` | Pure graphics quality model: presets, categories, GPU detection (`detectPreset`), `resolve`, `choosePreset`, `presetTier`, `describe`. |
 | `js/graphics.js` | Renderer wiring for the graphics settings: pixel ratio, shadow maps, post chain, adaptive resolution, frame-rate readout, floodlit environment map, persistence; `onGraphics()` subscription for world builders. |
 | `js/settings.js` | Settings panel (Graphics section) and its localized strings. |
+| `sh-language.js`, `js/i18n/` | Game language: the shared StarHermit language resolver (unmodified copy of `tools/sh-language.js`); `strings.js` translation tables; `i18n.js` engine (`window.FBI18N`, DOM observer, `fb-language` event); `t.js` module helpers `T` / `N`. |
 | `js/match.js` | Match controller: world build, walkout → coin flip → play → done, practice stepping, online prediction/interpolation, events → audio/HUD. |
 | `js/game/sim.js`, `js/game/ai.js` | Thin ES-module re-exports of `globalThis.FootballSim`. No logic. |
 | `js/game/input.js` | Keyboard tank steering, contextual shoot/pass key, pointer-lock mouse, touch joystick and buttons, platform key remapping. |
@@ -409,17 +410,42 @@ from direction relative to my facing; M or the HUD button mutes locally and publ
 
 ## 10. Localization
 
-The game ships in English only, except the Settings panel: its strings (title, Graphics
-section, every label, tier name, the summary words and the post-processing note) live in a
-table in `js/settings.js` for en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR and
-it-IT, picked from `navigator.language` (by region, then language; en-US otherwise). Every other string is a literal in `index.html`
-(labels, buttons, hints) and in the JS modules (banners such as "GOAL!", "HALF TIME",
-"BLUE KICKS OFF"; status lines; chat notices; achievement names in `server.js`). There is no
-string table, no language detection and no `lang` switch; `<html lang="en">` is fixed. The
-required nine locales (en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR, it-IT) are
-not present — see Known limitations and Design intent. Layout already tolerates ~30 %
-longer strings: buttons wrap inside `min(320px, 80vw)`, banners scale with `clamp()`, and
-list rows ellipsise names.
+Every player-facing string of the client ships in nine locales: **en-US, en-GB, es-419, es-ES,
+de-DE, fr-FR, fr-CA, pt-BR, it-IT**.
+
+- **Tables.** English source strings are the keys (menu buttons keep the UPPERCASE style in every
+  language). `js/i18n/strings.js` holds rows of [English, es-419, de-DE, fr-FR, pt-BR, it-IT]; en-GB,
+  es-ES and fr-CA list only their differences and otherwise fall back to en-US, es-419 and fr-FR.
+  The Settings panel keeps its own table in `js/settings.js` and the account strings theirs in
+  `js/platform-i18n.js` (sign-in, invite, session-expired and updated-terms prompts, achievements
+  screen, leaderboard line); both read the game language. "StarHermit Football", player names,
+  key names and the achievement names the server script declares stay as they are.
+- **How it is applied.** `js/i18n/i18n.js` runs a MutationObserver over `<body>` that translates
+  every text node and every `aria-label` / `title` / `placeholder` / `alt` whose whole English text
+  is a key, remembers the key and re-translates it in place on a language change (`data-i18n-skip`
+  marks the logo). Modules write fixed text through `N('…')` (left to the observer) and assembled
+  text through `T('…', vars)` (banners such as "{team} KICKS OFF", the match clock "1st {time}",
+  status lines, lobby countdown and player counts), re-rendered on the `fb-language` event. The local
+  player's canvas name tag ("You") is redrawn in the new language.
+- **Settings → Language → Game language** (rendered by the shared `game-options.js` from the
+  `sh-language.js` instance inside the Settings panel's Graphics rows) offers **Automatic —
+  <resolved language>** plus the nine locales by native name, with a status line (Saved to account /
+  Saved on this device / Account sync unavailable). It is reachable from the menu's SETTINGS and from
+  the in-match ☰ menu's SETTINGS.
+- **Resolution** (`sh-language.js`): explicit game choice → for Automatic, the StarHermit account's
+  `preferredLanguage` (`GET /api/v1/me/language`, signed in only) → `navigator.languages` → en-US.
+  Tags map to the nearest shipped locale (`es-MX → es-419`, `en-AU → en-GB`, `fr → fr-FR`,
+  `pt-PT → pt-BR`). The choice (`auto` or a locale) is stored per player in
+  `localStorage['football.language.<user|guest>']` and, when signed in, in the per-player settings
+  key `ui.language` as `{ choice }`; a failed settings read never overwrites it and the game never
+  writes the platform preference. Offline play makes no language request. `?lang=<tag>` forces a
+  locale for the page load (QA links) and hides the selector.
+- **Live switching.** A change applies immediately without touching the match, lobby or sockets:
+  static text re-translates in place, the menu's sign-in line and buttons, the in-match menu, the
+  result card, the invite rows, the Settings labels and the local name tag re-render; banners
+  already on screen finish in the language they were shown in.
+- **Expansion.** Buttons wrap inside `min(320px, 80vw)`, banners scale with `clamp()`, list rows
+  ellipsise names. German at 390 px is checked by the e2e.
 
 ## 11. Accessibility
 
@@ -477,6 +503,19 @@ sign-in for sign-in launches; if the browser refuses, the status line says to re
 the library) or **PLAY OFFLINE**. Account-surface strings (sign-in, invite, toasts, session-expired
 dialog, achievements screen, the result card's leaderboard line) are localized in the nine locales (`js/platform-i18n.js`).
 
+When StarHermit needs the player to accept updated terms (`StarHermit.connect`'s
+`onTermsRequired`, or `renewForReconnect()` resolving `'terms-required'` for the voice relay) the
+socket stops like auth loss: a live match ends back at the menu, voice hangs up, and an **UPDATED
+TERMS** dialog offers **BACK TO STARHERMIT** (to review them) or **PLAY OFFLINE**. When the games
+socket's session is gone, finished or on another build (`onUnavailable`) the reconnect loop ends,
+the match closes and the status line says "This match is no longer available."
+
+Settings → **Language** follows the account's preferred language under Automatic and saves an
+explicit choice to `ui.language` (section 10). Settings → **Report a problem** (signed in only, from
+`game-options.js`) files a bug report through `StarHermit.reportBug` with a small non-personal
+`context.json` (language, viewport, pixel ratio, FPS cap, audio limit, path); uncaught errors are
+filed as crash reports through `StarHermit.captureCrashes` (SDK-capped).
+
 Does not use: the peer relay (`ws/v1/relay`), chat WebSocket, presence outside rooms,
 host-submitted results (`POST /rooms/{id}/result`), platform matchmaking queues (quick play uses
 Realtime Rooms quick-join), or cloud saves (the client keeps no progress of its own — ratings and
@@ -529,7 +568,14 @@ clearing overrides. `tests/platform.test.mjs` (also in `npm test`) loads `js/api
 `js/net.js` game socket on the real SDK with a stubbed fetch / WebSocket: token read and URL
 scrub, nickname, settings get / patch, controls, achievements, invite link, the quick-join 404
 fallback, `sync` on open with snapshot / event / achievement routing and the realtime input
-envelope, sign-out on refused renewal, and zero requests standalone.
+envelope, sign-out on refused renewal (sign-in offered again on the game's UUID host), the reconnect
+renewing first (the mock answers the session check), pending terms consent ending the match socket
+(`onTermsRequired`) and the voice relay (`terms` callback), a finished session ending the reconnect
+loop (`onUnavailable`, no reopen), and zero requests standalone. `tests/i18n.test.mjs` checks that
+every key in `index.html`, the modules' HTML literals and `T` / `N` calls exists in all nine locales
+with intact placeholders, that no template text node mixes words with an interpolation, that the
+locale follows `sh-language.js` and switches live, and that the Settings and account strings
+(including the terms prompt) cover the nine locales.
 
 `npm run test:e2e` asserts, at 1280×800 and 390×844: offline status text, QUICK PLAY /
 CREATE LOBBY disabled and platform screens hidden, the voice toggle persists, SETTINGS opens
@@ -543,6 +589,15 @@ MAIN MENU returns; the offline passes must make no `/api` request. A signed-in p
 `#game_token=` against mocked platform routes) checks the token left the URL, the nickname line,
 sign-in hidden, the synced voice preference, INVITE A FRIEND copying the share link, the
 ACHIEVEMENTS screen (one unlocked, one locked row), and the settings PATCH after toggling voice.
+Two **Language** passes (1280×800 and 390×844 touch) launch signed in with
+`GET /api/v1/me/language` answering `fr-CA`: the menu resolves to French and Settings shows
+*Automatique — Français (Canada)*; choosing Italian re-renders the Settings title, Graphics heading
+and menu in place (the shared select stays mounted) and saves `ui.language`; *Report a problem* posts
+a bug report; German must fit the viewport in Settings, on the menu and in the in-match menu; a
+1-a-side practice started in German, switched to French from ☰ → SETTINGS, keeps its clock running
+and shows the French match menu and clock; Automatic returns to fr-CA. Screenshots go to `$SHOT_DIR`
+(default `/tmp`). `E2E_PASSES=signed-in,language,desktop,mobile` (default: all) selects passes, so the
+signed-in and Language passes can run without the two long match passes.
 Any page error or console error (other than GPU noise) fails the run. On this box (software GL) a full run takes roughly 70 minutes (two
 real 2×3 min matches at ≤ 0.1 s of sim per frame), so it is run on demand rather than in
 every pass; the last full pass on the current build reached kick-off and played the first
@@ -571,7 +626,7 @@ shoot, pass, camera and the ball arrow through on-screen feedback without a manu
 
 ## 16. Known limitations
 
-- No localisation: English-only literals (section 10).
+- Achievement names and descriptions come from the server script's declarations and stay English.
 - Reduced motion only stills the ambient effects (flicker, flashes, haze); camera sway,
   crowd motion and banner pops always play.
 - The canvas is created with MSAA, so the Anti-aliasing "Off" tier only removes
@@ -587,8 +642,6 @@ shoot, pass, camera and the ball arrow through on-screen feedback without a manu
 
 ### Design intent not yet implemented
 
-- Ship the nine locales through a string table with a locale picked from the launch
-  token's profile or `navigator.language`.
 - A SOUND toggle on the menu (bound to `audio.setMuted`) and `prefers-reduced-motion`
   handling that also stills the crowd sway, camera sprint FOV and banner animation.
 - Show the crests on the result card and on the LED boards (a FLUX board strip would replace

@@ -1,11 +1,12 @@
 // platform-i18n.js — localized strings for the StarHermit account surface
 // (sign-in, invite link, sign-out notice, session-expired prompt,
-// achievements screen), picked from
-// navigator.language like the Settings panel.
+// achievements screen, updated-terms prompt), picked from
+// the game language (js/i18n) like the Settings panel.
 import { pickLocale } from './settings.js?v=10';
 
 const STRINGS = {
   'en-US': {
+    termsTitle: 'Updated terms', termsText: 'StarHermit needs you to accept its updated terms, so online play stopped. Go back to StarHermit to review them, or keep playing practice offline.',
     expiredTitle: 'Session expired', expiredText: 'Your StarHermit session has expired, so online play stopped. Go back to StarHermit to start a fresh session, or keep playing practice offline.',
     relaunch: 'Back to StarHermit', playOffline: 'Play offline', relaunchFailed: 'Could not open StarHermit — reopen the game from the StarHermit library.',
     signIn: 'Sign in with StarHermit', invite: 'Invite a friend',
@@ -17,6 +18,7 @@ const STRINGS = {
   },
   'en-GB': {},
   'es-419': {
+    termsTitle: 'Términos actualizados', termsText: 'StarHermit necesita que aceptes sus términos actualizados, así que el juego en línea se detuvo. Vuelve a StarHermit para revisarlos o sigue jugando la práctica sin conexión.',
     expiredTitle: 'Sesión vencida', expiredText: 'Tu sesión de StarHermit venció y el juego en línea se detuvo. Vuelve a StarHermit para iniciar una sesión nueva o sigue jugando la práctica sin conexión.',
     relaunch: 'Volver a StarHermit', playOffline: 'Jugar sin conexión', relaunchFailed: 'No se pudo abrir StarHermit: vuelve a abrir el juego desde la biblioteca de StarHermit.',
     signIn: 'Iniciar sesión con StarHermit', invite: 'Invitar a un amigo',
@@ -27,6 +29,7 @@ const STRINGS = {
     lbPosting: 'Publicando en la clasificación…', lbRank: 'Puesto en la clasificación: #{rank}', lbPosted: 'Resultado publicado en la clasificación.', lbNotPosted: 'El resultado no se publicó en la clasificación.',
   },
   'es-ES': {
+    termsTitle: 'Términos actualizados', termsText: 'StarHermit necesita que aceptes sus términos actualizados, así que el juego en línea se ha detenido. Vuelve a StarHermit para revisarlos o sigue jugando al modo práctica sin conexión.',
     expiredTitle: 'Sesión caducada', expiredText: 'Tu sesión de StarHermit ha caducado y el juego en línea se ha detenido. Vuelve a StarHermit para iniciar una sesión nueva o sigue jugando al modo práctica sin conexión.',
     relaunch: 'Volver a StarHermit', playOffline: 'Jugar sin conexión', relaunchFailed: 'No se ha podido abrir StarHermit: vuelve a abrir el juego desde la biblioteca de StarHermit.',
     signIn: 'Iniciar sesión con StarHermit', invite: 'Invitar a un amigo',
@@ -37,6 +40,7 @@ const STRINGS = {
     lbPosting: 'Publicando en la clasificación…', lbRank: 'Puesto en la clasificación: #{rank}', lbPosted: 'Resultado publicado en la clasificación.', lbNotPosted: 'El resultado no se ha publicado en la clasificación.',
   },
   'de-DE': {
+    termsTitle: 'Aktualisierte Bedingungen', termsText: 'StarHermit braucht deine Zustimmung zu den aktualisierten Bedingungen, daher wurde das Online-Spiel beendet. Kehre zu StarHermit zurück, um sie zu prüfen, oder spiele offline im Training weiter.',
     expiredTitle: 'Sitzung abgelaufen', expiredText: 'Deine StarHermit-Sitzung ist abgelaufen, daher wurde das Online-Spiel beendet. Kehre zu StarHermit zurück, um eine neue Sitzung zu starten, oder spiele offline im Training weiter.',
     relaunch: 'Zurück zu StarHermit', playOffline: 'Offline spielen', relaunchFailed: 'StarHermit konnte nicht geöffnet werden – starte das Spiel erneut aus der StarHermit-Bibliothek.',
     signIn: 'Mit StarHermit anmelden', invite: 'Freund einladen',
@@ -47,6 +51,7 @@ const STRINGS = {
     lbPosting: 'Wird in die Bestenliste eingetragen …', lbRank: 'Platz in der Bestenliste: #{rank}', lbPosted: 'Ergebnis in die Bestenliste eingetragen.', lbNotPosted: 'Ergebnis nicht in die Bestenliste eingetragen.',
   },
   'fr-FR': {
+    termsTitle: 'Conditions mises à jour', termsText: 'StarHermit a besoin que tu acceptes ses conditions mises à jour, le jeu en ligne s’est donc arrêté. Retourne sur StarHermit pour les consulter, ou continue l’entraînement hors ligne.',
     expiredTitle: 'Session expirée', expiredText: 'Ta session StarHermit a expiré et le jeu en ligne s’est arrêté. Retourne sur StarHermit pour ouvrir une nouvelle session, ou continue l’entraînement hors ligne.',
     relaunch: 'Retour à StarHermit', playOffline: 'Jouer hors ligne', relaunchFailed: 'Impossible d’ouvrir StarHermit : relance le jeu depuis la bibliothèque StarHermit.',
     signIn: 'Se connecter avec StarHermit', invite: 'Inviter un ami',
@@ -57,6 +62,7 @@ const STRINGS = {
     lbPosting: 'Envoi au classement…', lbRank: 'Rang au classement : #{rank}', lbPosted: 'Score inscrit au classement.', lbNotPosted: 'Score non inscrit au classement.',
   },
   'fr-CA': {
+    termsTitle: 'Conditions mises à jour', termsText: 'StarHermit a besoin que tu acceptes ses conditions mises à jour, le jeu en ligne s’est donc arrêté. Retourne sur StarHermit pour les consulter, ou continue la pratique hors ligne.',
     expiredTitle: 'Session expirée', expiredText: 'Ta session StarHermit a expiré et le jeu en ligne s’est arrêté. Retourne sur StarHermit pour ouvrir une nouvelle session, ou continue la pratique hors ligne.',
     relaunch: 'Retour à StarHermit', playOffline: 'Jouer hors ligne', relaunchFailed: 'Impossible d’ouvrir StarHermit : relance le jeu à partir de la bibliothèque StarHermit.',
     signIn: 'Se connecter avec StarHermit', invite: 'Inviter un ami',
@@ -67,6 +73,7 @@ const STRINGS = {
     lbPosting: 'Envoi au classement…', lbRank: 'Rang au classement : #{rank}', lbPosted: 'Pointage inscrit au classement.', lbNotPosted: 'Pointage non inscrit au classement.',
   },
   'pt-BR': {
+    termsTitle: 'Termos atualizados', termsText: 'O StarHermit precisa que você aceite os termos atualizados, então o jogo online parou. Volte ao StarHermit para revisá-los ou continue treinando offline.',
     expiredTitle: 'Sessão expirada', expiredText: 'Sua sessão do StarHermit expirou e o jogo online parou. Volte ao StarHermit para iniciar uma nova sessão ou continue treinando offline.',
     relaunch: 'Voltar ao StarHermit', playOffline: 'Jogar offline', relaunchFailed: 'Não foi possível abrir o StarHermit — abra o jogo novamente pela biblioteca do StarHermit.',
     signIn: 'Entrar com StarHermit', invite: 'Convidar um amigo',
@@ -77,6 +84,7 @@ const STRINGS = {
     lbPosting: 'Enviando para o ranking…', lbRank: 'Posição no ranking: #{rank}', lbPosted: 'Placar registrado no ranking.', lbNotPosted: 'Placar não registrado no ranking.',
   },
   'it-IT': {
+    termsTitle: 'Termini aggiornati', termsText: 'StarHermit ha bisogno che tu accetti i termini aggiornati, quindi il gioco online si è interrotto. Torna su StarHermit per leggerli o continua ad allenarti offline.',
     expiredTitle: 'Sessione scaduta', expiredText: 'La tua sessione StarHermit è scaduta e il gioco online si è interrotto. Torna su StarHermit per avviare una nuova sessione o continua ad allenarti offline.',
     relaunch: 'Torna a StarHermit', playOffline: 'Gioca offline', relaunchFailed: 'Impossibile aprire StarHermit: riapri il gioco dalla libreria di StarHermit.',
     signIn: 'Accedi con StarHermit', invite: 'Invita un amico',
@@ -91,6 +99,6 @@ const STRINGS = {
 export const PLATFORM_LOCALES = Object.keys(STRINGS);
 
 /** Strings for the browser's locale (en-US fallback per key). */
-export function platformStrings(tag = (typeof navigator !== 'undefined' ? (navigator.languages?.[0] || navigator.language) : 'en-US')) {
+export function platformStrings(tag = globalThis.FBI18N?.lang || (typeof navigator !== 'undefined' ? (navigator.languages?.[0] || navigator.language) : 'en-US')) {
   return { ...STRINGS['en-US'], ...STRINGS[pickLocale(tag)] };
 }

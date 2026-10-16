@@ -18,6 +18,7 @@ import { createSettingsPanel } from './settings.js?v=10';
 import { createAchievementsScreen } from './achievements.js?v=10';
 import { platformStrings } from './platform-i18n.js?v=10';
 import { offerRelaunch } from './session-expiry.js?v=10';
+import { T, N } from './i18n/t.js?v=10';
 
 const $ = (id) => document.getElementById(id);
 
@@ -72,7 +73,7 @@ async function refreshActiveRoom() {
   const btn = $('btn-rejoin');
   if (activeRoom) {
     const playing = activeRoom.status === 'Playing' || activeRoom.status === 'playing';
-    btn.textContent = playing ? 'REJOIN MATCH' : 'RETURN TO LOBBY';
+    btn.textContent = playing ? N('REJOIN MATCH') : N('RETURN TO LOBBY');
     btn.classList.remove('hidden');
   } else {
     btn.classList.add('hidden');
@@ -108,8 +109,8 @@ async function confirmLeaveActiveRoom() {
   if (!activeRoom) return true;
   const playing = activeRoom.status === 'Playing' || activeRoom.status === 'playing';
   const ok = await uiConfirm(playing
-    ? { title: 'LEAVE MATCH?', text: 'You are in a match right now. An AI player will take over your footballer.', yes: 'LEAVE MATCH', no: 'CANCEL' }
-    : { title: 'LEAVE LOBBY?', text: 'You already have a lobby open. Leave it and continue?', yes: 'LEAVE LOBBY', no: 'CANCEL' });
+    ? { title: N('LEAVE MATCH?'), text: N('You are in a match right now. An AI player will take over your footballer.'), yes: N('LEAVE MATCH'), no: N('CANCEL') }
+    : { title: N('LEAVE LOBBY?'), text: N('You already have a lobby open. Leave it and continue?'), yes: N('LEAVE LOBBY'), no: N('CANCEL') });
   if (!ok) return false;
   try { await api.leaveRoom(activeRoom.id); } catch { /* already gone */ }
   activeRoom = null;
@@ -137,8 +138,8 @@ function applyAuthToMenu() {
   const online = api.getAuth().online;
   const t = platformStrings();
   $('menu-user').textContent = online
-    ? `Signed in as ${api.getAuth().username}`
-    : 'Offline mode — practice only (launch via StarHermit for multiplayer)';
+    ? T('Signed in as {name}', { name: api.getAuth().username })
+    : N('Offline mode — practice only (launch via StarHermit for multiplayer)');
   $('btn-quick').disabled = !online;
   $('btn-lobby').disabled = !online;
   const signIn = $('btn-signin');
@@ -180,7 +181,7 @@ function setupMenu() {
     try {
       showScreen('screen-lobby');
       await lobby.soloVsAi(teamSize);
-    } catch (e) { showScreen('screen-menu'); setStatus(`Could not start match: ${e.message}`); }
+    } catch (e) { showScreen('screen-menu'); setStatus(T('Could not start match: {error}', { error: e.message })); }
   };
   $('btn-lobby').onclick = async () => {
     audio.ui(); audio.resume();
@@ -188,7 +189,7 @@ function setupMenu() {
     try {
       showScreen('screen-lobby');
       await lobby.create(teamSize);
-    } catch (e) { showScreen('screen-menu'); setStatus(`Could not create lobby: ${e.message}`); }
+    } catch (e) { showScreen('screen-menu'); setStatus(T('Could not create lobby: {error}', { error: e.message })); }
   };
   $('btn-quick').onclick = async () => {
     audio.ui(); audio.resume();
@@ -196,7 +197,7 @@ function setupMenu() {
     try {
       showScreen('screen-lobby');
       await lobby.quickPlay(teamSize);
-    } catch (e) { showScreen('screen-menu'); setStatus(`Quick play failed: ${e.message}`); }
+    } catch (e) { showScreen('screen-menu'); setStatus(T('Quick play failed: {error}', { error: e.message })); }
   };
   // Remappable desktop controls (spec §5.6/§8.8): saved per user on the platform,
   // so the button needs a launch token; touch layouts have nothing to remap.
@@ -259,9 +260,9 @@ async function refreshIncomingInvites() {
     for (const inv of shown) {
       const row = document.createElement('div');
       row.className = 'invite-row';
-      row.innerHTML = `<span>${esc(inv.fromUsername || 'A friend')} invited you to a match</span>`;
+      row.innerHTML = `<span>${esc(T('{name} invited you to a match', { name: inv.fromUsername || T('A friend') }))}</span>`;
       const btn = document.createElement('button');
-      btn.textContent = 'JOIN';
+      btn.textContent = N('JOIN');
       btn.onclick = async () => {
         audio.resume();
         try {
@@ -299,7 +300,7 @@ async function onMatchReady(room, { isRejoin = false } = {}) {
   // The platform runs the authoritative match as a scripted game session.
   const sessionId = room.gameSessionId;
   if (!sessionId) {
-    setStatus('Match session unavailable — the server could not start the game.');
+    setStatus(N('Match session unavailable — the server could not start the game.'));
     showScreen('screen-menu');
     return;
   }
@@ -315,14 +316,20 @@ async function onMatchReady(room, { isRejoin = false } = {}) {
     await gameNet.connect({
       onSnapshot: (snap) => m.onSnapshot(snap),
       onEvent: (ev) => m.onNetEvent(ev),
-      onAchievement: (a) => { if (a?.name) hud.banner(`Achievement unlocked: ${a.name}`, 4000); },
-      onClose: () => { if (match && match.phase !== 'done') { setStatus('Connection lost'); backToMenu(); } },
+      onAchievement: (a) => { if (a?.name) hud.banner(T('Achievement unlocked: {name}', { name: a.name }), 4000); },
+      onClose: () => { if (match && match.phase !== 'done') { setStatus(N('Connection lost')); backToMenu(); } },
       // token renewal refused: the SDK signed out (the auth listener shows the
       // relaunch prompt) and the socket stopped for good
       onAuthLost: () => { if (match) backToMenu(); },
+      // StarHermit needs the player to accept updated terms: like auth loss,
+      // the match ends and the prompt offers a relaunch from StarHermit.
+      onTermsRequired: () => { if (match) backToMenu(); promptRelaunch('terms'); },
+      // The session is gone, finished elsewhere or on another build: the SDK
+      // ended the reconnect loop; say so instead of retrying forever.
+      onUnavailable: () => { if (match) backToMenu(); setStatus(N('This match is no longer available.')); },
     });
   } catch (e) {
-    setStatus(`Could not connect: ${e.message}`);
+    setStatus(T('Could not connect: {error}', { error: e.message }));
     return backToMenu();
   }
 
@@ -346,13 +353,15 @@ function showResult(result) {
   menuScene.start();
   const { score, stats, myTeam, winner } = result;
   $('result-title').textContent =
-    winner === -1 ? 'DRAW' : (winner === myTeam ? 'VICTORY' : 'DEFEAT');
+    winner === -1 ? N('DRAW') : (winner === myTeam ? N('VICTORY') : N('DEFEAT'));
   $('result-score').textContent = `${score[0]} – ${score[1]}`;
+  lastStats = null;
   if (stats) {
     const poss = stats.possession[0] + stats.possession[1] || 1;
     $('result-stats').innerHTML =
-      `Possession: ${Math.round(100 * stats.possession[0] / poss)}% – ${Math.round(100 * stats.possession[1] / poss)}%<br>` +
-      `Shots: ${stats.shots[0]} – ${stats.shots[1]}`;
+      esc(T('Possession: {a}% – {b}%', { a: Math.round(100 * stats.possession[0] / poss), b: Math.round(100 * stats.possession[1] / poss) })) + '<br>' +
+      esc(T('Shots: {a} – {b}', { a: stats.shots[0], b: stats.shots[1] }));
+    lastStats = stats;
   } else {
     $('result-stats').innerHTML = '';
   }
@@ -425,16 +434,19 @@ function setMatchMenu(open) {
   const el = $('leave-confirm');
   el.classList.toggle('hidden', !open);
   if (!match) return;
-  const practice = match.mode === 'practice';
-  match.paused = open && practice;
-  $('match-menu-title').textContent = practice ? 'PRACTICE PAUSED' : 'MATCH MENU';
-  $('match-menu-note').textContent = practice
-    ? 'The practice match waits while this menu is open.'
-    : 'Online play continues; an AI player takes over if you leave.';
-  $('btn-match-restart').classList.toggle('hidden', !practice);
-  $('btn-match-sound').textContent = `SOUND: ${audio.isMuted() ? 'OFF' : 'ON'}`;
-  $('btn-leave-yes').textContent = practice ? 'BACK TO MENU' : 'LEAVE MATCH';
+  match.paused = open && match.mode === 'practice';
+  labelMatchMenu();
   if (open) $('btn-leave-no').focus();
+}
+function labelMatchMenu() {
+  const practice = match.mode === 'practice';
+  $('match-menu-title').textContent = practice ? N('PRACTICE PAUSED') : N('MATCH MENU');
+  $('match-menu-note').textContent = practice
+    ? N('The practice match waits while this menu is open.')
+    : N('Online play continues; an AI player takes over if you leave.');
+  $('btn-match-restart').classList.toggle('hidden', !practice);
+  $('btn-match-sound').textContent = audio.isMuted() ? N('SOUND: OFF') : N('SOUND: ON');
+  $('btn-leave-yes').textContent = practice ? N('BACK TO MENU') : N('LEAVE MATCH');
 }
 addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
@@ -448,7 +460,7 @@ addEventListener('keydown', (e) => {
 $('btn-match-menu').onclick = () => { if (match && match.phase !== 'done') { audio.ui(); setMatchMenu(true); } };
 $('btn-leave-no').onclick = () => { audio.ui(); setMatchMenu(false); };
 $('btn-match-settings').onclick = () => { audio.ui(); settingsPanel.open(); };
-$('btn-match-sound').onclick = () => { audio.setMuted(!audio.isMuted()); $('btn-match-sound').textContent = `SOUND: ${audio.isMuted() ? 'OFF' : 'ON'}`; };
+$('btn-match-sound').onclick = () => { audio.setMuted(!audio.isMuted()); $('btn-match-sound').textContent = audio.isMuted() ? N('SOUND: OFF') : N('SOUND: ON'); };
 $('btn-match-restart').onclick = () => { audio.ui(); setMatchMenu(false); disposeMatch(); startPractice(); };
 $('btn-leave-yes').onclick = async () => {
   audio.ui();
@@ -458,6 +470,25 @@ $('btn-leave-yes').onclick = async () => {
   activeRoom = null;
   backToMenu();
 };
+
+// ── language ──
+// The game language changed (Settings › Language or the account preference
+// arriving). Static text and N() strings re-translate in place (js/i18n);
+// text built with T() is rebuilt here. A match, lobby or socket is untouched.
+let lastStats = null;
+document.addEventListener('fb-language', () => {
+  applyAuthToMenu();
+  refreshActiveRoom();
+  if (match) labelMatchMenu();
+  if (!$('screen-result').classList.contains('hidden') && lastStats) {
+    const poss = lastStats.possession[0] + lastStats.possession[1] || 1;
+    $('result-stats').innerHTML =
+      esc(T('Possession: {a}% – {b}%', { a: Math.round(100 * lastStats.possession[0] / poss), b: Math.round(100 * lastStats.possession[1] / poss) })) + '<br>' +
+      esc(T('Shots: {a} – {b}', { a: lastStats.shots[0], b: lastStats.shots[1] }));
+  }
+  invitesSig = null;
+  if (auth.online) refreshIncomingInvites();
+});
 
 // ── boot ──
 lobby = createLobby({
@@ -489,14 +520,16 @@ api.onAuthChange?.((state) => {
   setStatus(platformStrings().signedOut);
   if (state.reason === 'expired') promptRelaunch();
 });
+// The voice relay reports pending terms consent the same way (voice.js).
+document.addEventListener('fb-terms-required', () => promptRelaunch('terms'));
 
 // Launch token expired and can no longer be renewed: offer a fresh launch
 // from StarHermit (the button click carries the gesture the launcher frame needs).
-async function promptRelaunch() {
+async function promptRelaunch(kind = 'expired') {
   const t = platformStrings();
   const up = (x) => x.toLocaleUpperCase();
   const r = await offerRelaunch(
-    (o) => uiConfirm({ ...o, title: up(o.title), yes: up(o.yes), no: up(o.no), primaryYes: true }), t);
+    (o) => uiConfirm({ ...o, title: up(o.title), yes: up(o.yes), no: up(o.no), primaryYes: true }), t, kind);
   if (r === 'refused') setStatus(t.relaunchFailed);
 }
 

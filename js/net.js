@@ -19,12 +19,16 @@ import * as api from './api.js?v=10';
  * may be an expired launch token — refused before the upgrade, reported only
  * as 1006 — so the token is renewed first and the socket is reopened with a
  * URL built from the current token. 'retry' backs off without touching the
- * old URL; 'relaunch' (signed out) stops for good.
+ * old URL; 'terms-required' ends it like auth loss (terms callback); 'relaunch'
+ * (signed out) stops for good.
  */
-export async function reconnectWithRenewal({ reopen, retry, stop }) {
+export async function reconnectWithRenewal({ reopen, retry, stop, terms }) {
   const r = await api.renewForReconnect();
   if (r === 'renewed') return reopen();
   if (r === 'retry') return retry();
+  // Pending terms consent ends the socket like auth loss; the caller asks the
+  // player to reopen the game from StarHermit to review them.
+  if (r === 'terms-required' && terms) return terms();
   return stop();
 }
 
@@ -145,6 +149,18 @@ export function createGameClient({ sessionId }) {
           if (disposed) return;
           disposed = true;
           if (handlers.onAuthLost) handlers.onAuthLost(); else handlers.onClose?.();
+        },
+        // StarHermit needs updated-terms consent: the SDK stopped the socket.
+        onTermsRequired: () => {
+          if (disposed) return;
+          disposed = true;
+          if (handlers.onTermsRequired) handlers.onTermsRequired(); else handlers.onClose?.();
+        },
+        // The session is gone, finished or on another build: no reconnect follows.
+        onUnavailable: (err) => {
+          if (disposed) return;
+          disposed = true;
+          if (handlers.onUnavailable) handlers.onUnavailable(err); else handlers.onClose?.();
         },
         onClose: (code) => {
           if (!settled) { settled = true; conn.close(); reject(new Error('Games socket connection failed')); return; }

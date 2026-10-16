@@ -1,10 +1,11 @@
 // lobby.js — lobby screen: create/invite/open/quick-join against the
 // platform's Realtime Rooms API (spec.md §8). Pure DOM + api.js; main.js
 // drives the transitions.
+import { T, N } from './i18n/t.js?v=10';
 import * as api from './api.js?v=10';
 import { roleForSlot } from './game/sim.js?v=10';
 
-const ROLE_NAMES = { GK: 'Goalkeeper', DF: 'Defender', MF: 'Midfielder', FW: 'Forward' };
+const ROLE_NAMES = { GK: N('Goalkeeper'), DF: N('Defender'), MF: N('Midfielder'), FW: N('Forward') };
 
 export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
   let room = null;
@@ -43,7 +44,7 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
   // binding a few polls to appear before entering.
   function enterWhenReady() {
     if (room.gameSessionId) { enterMatch(); return; }
-    timerEl.textContent = 'Starting match…';
+    timerEl.textContent = N('Starting match…');
     startPolling();
   }
 
@@ -63,7 +64,7 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
 
   // Quick play: join an open room; if none, create our own open room.
   async function quickPlay(teamSize) {
-    setStatus('Searching for a match…');
+    setStatus(N('Searching for a match…'));
     entered = false;
     try {
       room = await api.quickJoin();
@@ -89,7 +90,7 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
   async function soloVsAi(teamSize) {
     stopPolling();
     entered = false;
-    timerEl.textContent = 'Starting match…';
+    timerEl.textContent = N('Starting match…');
     room = await api.createRoom({
       teamCount: 2,
       seatsPerTeam: teamSize,
@@ -116,13 +117,13 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
     for (const f of friends) {
       const row = document.createElement('div');
       row.className = 'friend-row';
-      row.innerHTML = `<span>${esc(f.username)} <span class="online">${f.online ? '● online' : ''}</span></span>`;
+      row.innerHTML = `<span>${esc(f.username)} <span class="online">${f.online ? `● <span>online</span>` : ''}</span></span>`;
       const btn = document.createElement('button');
-      btn.textContent = 'INVITE';
+      btn.textContent = N('INVITE');
       btn.onclick = async () => {
         btn.disabled = true;
-        try { await api.inviteToRoom(room.id, f.userId); btn.textContent = 'SENT'; }
-        catch { btn.textContent = 'ERROR'; btn.disabled = false; }
+        try { await api.inviteToRoom(room.id, f.userId); btn.textContent = N('SENT'); }
+        catch { btn.textContent = N('ERROR'); btn.disabled = false; }
       };
       row.appendChild(btn);
       listEl.appendChild(row);
@@ -134,15 +135,15 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
   async function copyInviteLink() {
     const { userId, slug } = api.getAuth();
     if (!userId || !slug) {
-      timerEl.textContent = 'Sign in via StarHermit to share an invite link.';
+      timerEl.textContent = N('Sign in via StarHermit to share an invite link.');
       return;
     }
     const url = `https://dashboard.starhermit.com/game-invite/${userId}/${slug}`;
     try {
       await copyText(url);
-      timerEl.textContent = 'Invite link copied — send it to anyone to play together.';
+      timerEl.textContent = N('Invite link copied — send it to anyone to play together.');
     } catch {
-      timerEl.textContent = 'Could not copy the invite link.';
+      timerEl.textContent = N('Could not copy the invite link.');
     }
   }
 
@@ -162,7 +163,7 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
       enterWhenReady();
       return;
     }
-    timerEl.textContent = 'Finding players… 30s';
+    timerEl.textContent = T('Finding players… {n}s', { n: 30 });
     startCountdown();
   }
 
@@ -171,7 +172,7 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
     let left = 30;
     countdownTimer = setInterval(async () => {
       left--;
-      timerEl.textContent = `Finding players… ${left}s`;
+      timerEl.textContent = T('Finding players… {n}s', { n: left });
       if (left <= 0) {
         clearInterval(countdownTimer);
         await tryStart();
@@ -200,7 +201,7 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
           // room to Playing — give it a few polls to appear before entering
           // (entering without it shows "match session unavailable").
           if (room.gameSessionId || ++playingPolls >= 5) enterMatch();
-          else timerEl.textContent = 'Starting match…';
+          else timerEl.textContent = N('Starting match…');
         } else if (room.status === 'Closed' || room.status === 'closed') {
           leave();
         }
@@ -233,7 +234,7 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
     // an already-Open room matchmaking is running, so the button stays off
     const host = amHost();
     findBtn.disabled = !host || status !== 'lobby';
-    findBtn.title = host ? '' : 'Only the lobby host can start matchmaking';
+    findBtn.title = host ? '' : N('Only the lobby host can start matchmaking');
     // invites make sense until the match starts; render owns this state so a
     // disabled button never leaks into a fresh lobby
     inviteBtn.disabled = status === 'playing' || status === 'closed';
@@ -245,7 +246,7 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
       crest.src = t === 0 ? 'assets/crest-blue.webp' : 'assets/crest-red.webp';
       crest.alt = '';
       head.appendChild(crest);
-      head.appendChild(document.createTextNode(t === 0 ? 'BLUE' : 'RED'));
+      head.appendChild(document.createTextNode(t === 0 ? N('BLUE') : N('RED')));
       head.style.color = t === 0 ? '#5b9bd5' : '#e74c3c';
       rosterEl.appendChild(head);
     }
@@ -281,7 +282,7 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
         const who = document.createElement('span');
         if (p) {
           if (p.isAi || !p.userId) {
-            who.textContent = p.username + (p.isAi ? ' (AI)' : '');
+            who.textContent = p.isAi ? T('{name} (AI)', { name: p.username }) : p.username;
           } else {
             // humans: resolve the profile nickname, never the raw username
             who.textContent = '…';
@@ -290,10 +291,10 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
           if (p.isAi) el.classList.add('ai');
           if (p.userId === me.userId) el.classList.add('me');
         } else {
-          who.textContent = '— open —';
+          who.textContent = N('— open —');
           if (canMove) {
             el.classList.add('clickable');
-            el.title = `Move me here to play ${ROLE_NAMES[role] || role}`;
+            el.title = T('Move me here to play {role}', { role: T(ROLE_NAMES[role] || role) });
             el.onclick = () => moveTo(t, s);
           }
         }
@@ -303,8 +304,8 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
     }
     const humans = parts.filter((p) => !p.isAi).length;
     timerEl.textContent = room.status === 'Open' || room.status === 'open'
-      ? timerEl.textContent || 'Finding players…'
-      : `${humans} player${humans === 1 ? '' : 's'} in lobby`;
+      ? timerEl.textContent || N('Finding players…')
+      : (humans === 1 ? T('{n} player in lobby', { n: humans }) : T('{n} players in lobby', { n: humans }));
   }
 
   // Click an open seat → move my participant there. The seats endpoint is

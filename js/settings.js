@@ -4,7 +4,7 @@
 // summary. Every change applies immediately through graphics.js and persists.
 //
 // The rest of the game's UI is English-only; this panel's strings are
-// localized for the supported locales, picked from navigator.language.
+// localized for the supported locales, in the game language (js/i18n).
 import { PRESETS, CATEGORIES, presetTier } from './gfx.js?v=10';
 
 const STRINGS = {
@@ -143,10 +143,14 @@ function translator(locale) {
 
 export function createSettingsPanel({ graphics, audio }) {
   const $ = (id) => document.getElementById(id);
-  const locale = pickLocale(navigator.languages?.[0] || navigator.language);
-  const t = translator(locale);
+  // Follows the game language (js/i18n); relabels in place on `fb-language`.
+  const gameLocale = () => pickLocale(globalThis.FBI18N?.lang || navigator.languages?.[0] || navigator.language);
+  let locale = gameLocale();
+  let t = translator(locale);
   const describeWords = {};
-  for (const k of ['noShadows', 'shadows', 'ao', 'aoHigh', 'bloom', 'reflections', 'noAA', 'crowdSparse']) describeWords[k] = t(`d_${k}`);
+  const setWords = () => { for (const k of ['noShadows', 'shadows', 'ao', 'aoHigh', 'bloom', 'reflections', 'noAA', 'crowdSparse']) describeWords[k] = t(`d_${k}`); };
+  setWords();
+  const labels = []; // [element, key] pairs re-labelled on a language change
 
   const panel = $('screen-settings');
   const rows = $('gfx-rows');
@@ -154,12 +158,15 @@ export function createSettingsPanel({ graphics, audio }) {
   let infoTimer = null;
 
   // localize the static chrome and the two entry buttons
-  panel.setAttribute('lang', locale);
-  $('settings-title').textContent = t('settings');
-  $('gfx-heading').textContent = t('graphics');
-  $('btn-settings-back').textContent = t('back');
-  $('btn-settings').textContent = t('settings');
-  $('btn-match-settings').textContent = t('settings');
+  function chrome() {
+    panel.setAttribute('lang', locale);
+    $('settings-title').textContent = t('settings');
+    $('gfx-heading').textContent = t('graphics');
+    $('btn-settings-back').textContent = t('back');
+    $('btn-settings').textContent = t('settings');
+    $('btn-match-settings').textContent = t('settings');
+  }
+  chrome();
 
   function option(value, label) {
     const o = document.createElement('option');
@@ -168,12 +175,13 @@ export function createSettingsPanel({ graphics, audio }) {
     return o;
   }
 
-  function row(id, labelText, control) {
+  function row(id, key, control) {
     const r = document.createElement('div');
     r.className = 'gfx-row';
     const l = document.createElement('label');
     l.htmlFor = id;
-    l.textContent = labelText;
+    l.textContent = t(key);
+    labels.push([l, key]);
     control.id = id;
     r.append(l, control);
     rows.append(r);
@@ -183,7 +191,7 @@ export function createSettingsPanel({ graphics, audio }) {
   // Quality
   const presetSel = document.createElement('select');
   presetSel.dataset.gfx = 'preset';
-  row('gfx-preset', t('quality'), presetSel);
+  row('gfx-preset', 'quality', presetSel);
 
   // Render scale
   const scaleWrap = document.createElement('div');
@@ -197,7 +205,7 @@ export function createSettingsPanel({ graphics, audio }) {
   const scaleVal = document.createElement('output');
   scaleVal.id = 'gfx-scale-val';
   scaleWrap.append(scale, scaleVal);
-  const scaleRow = row('gfx-scale-wrap', t('renderScale'), scaleWrap);
+  const scaleRow = row('gfx-scale-wrap', 'renderScale', scaleWrap);
   scale.id = 'gfx-scale';
   scaleRow.querySelector('label').htmlFor = 'gfx-scale';
   scaleWrap.id = '';
@@ -209,11 +217,11 @@ export function createSettingsPanel({ graphics, audio }) {
     sel.dataset.gfx = cat;
     sel.dataset.tiers = tiers.join(' ');
     catSel[cat] = sel;
-    row(`gfx-${cat}`, t(`c_${cat}`), sel);
+    row(`gfx-${cat}`, `c_${cat}`, sel);
   }
 
   // Toggles
-  function check(id, labelText, key) {
+  function check(id, labelKey, key) {
     const r = document.createElement('label');
     r.className = 'gfx-row menu-check';
     const c = document.createElement('input');
@@ -221,13 +229,14 @@ export function createSettingsPanel({ graphics, audio }) {
     c.id = id;
     c.dataset.gfx = key;
     const span = document.createElement('span');
-    span.textContent = labelText;
+    span.textContent = t(labelKey);
+    labels.push([span, labelKey]);
     r.append(span, c);
     rows.append(r);
     return c;
   }
-  const adaptive = check('gfx-adaptive', t('adaptive'), 'adaptive');
-  const showFps = check('gfx-fps', t('showFps'), 'show_fps');
+  const adaptive = check('gfx-adaptive', 'adaptive', 'adaptive');
+  const showFps = check('gfx-fps', 'showFps', 'show_fps');
 
   function refresh() {
     const saved = graphics.saved();
@@ -265,6 +274,15 @@ export function createSettingsPanel({ graphics, audio }) {
   adaptive.onchange = () => { graphics.save({ adaptive: adaptive.checked }); refresh(); };
   showFps.onchange = () => { graphics.save({ show_fps: showFps.checked }); refresh(); };
   $('btn-settings-back').onclick = () => { audio?.ui(); close(); };
+
+  document.addEventListener('fb-language', () => {
+    locale = gameLocale();
+    t = translator(locale);
+    setWords();
+    chrome();
+    for (const [el, key] of labels) el.textContent = t(key);
+    refresh();
+  });
 
   function open() {
     returnFocus = document.activeElement;

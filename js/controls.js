@@ -2,6 +2,7 @@
 // manifest-declared action: click the keycap to capture a new key, duplicates
 // highlight red, SAVE PUTs the overrides to the platform, RESET ALL DELETEs
 // them. Pure DOM + api.js, same shape as lobby.js.
+import { T, N } from './i18n/t.js?v=10';
 import * as api from './api.js?v=10';
 
 const KEY_LABELS = {
@@ -43,7 +44,7 @@ export function createControlsScreen({ input, audio, onBack }) {
         .filter((a) => a.action !== 'sprint')
         .map((a) => ({ ...a, codes: [...a.codes] }));
       render();
-      hintEl.textContent = 'Click a key to rebind it. Esc cancels. In a match, click the pitch for mouse camera; left mouse shoots, right passes, middle tackles.';
+      hintEl.textContent = N('Click a key to rebind it. Esc cancels. In a match, click the pitch for mouse camera; left mouse shoots, right passes, middle tackles.');
     } catch (e) {
       // Service unavailable or the game has no remappable controls declared:
       // still show the built-in defaults and full instructions; saving/resetting
@@ -51,7 +52,7 @@ export function createControlsScreen({ input, audio, onBack }) {
       actions = defaultActions();
       render(true);
       hintEl.textContent = (e.status === 404
-        ? 'Remapping is not available for this game on this platform. These are the built-in controls.'
+        ? N('Remapping is not available for this game on this platform. These are the built-in controls.')
         : `Control remapping is unavailable right now (${e.message}). These are the built-in controls.`) +
         ' In a match: WASD/arrows move, Space or J shoots (hold to charge), L passes, K tackles; click the pitch for mouse camera — left mouse shoots, right passes, middle tackles.';
     }
@@ -60,13 +61,13 @@ export function createControlsScreen({ input, audio, onBack }) {
   // Built-in keymap (mirrors game/input.js DEFAULT_KEYMAP) for offline display.
   function defaultActions() {
     return [
-      { action: 'up', label: 'Move forward', codes: ['KeyW', 'ArrowUp'] },
-      { action: 'down', label: 'Move back', codes: ['KeyS', 'ArrowDown'] },
-      { action: 'left', label: 'Turn left', codes: ['KeyA', 'ArrowLeft'] },
-      { action: 'right', label: 'Turn right', codes: ['KeyD', 'ArrowRight'] },
-      { action: 'shoot', label: 'Shoot (hold to charge)', codes: ['Space', 'KeyJ'] },
-      { action: 'pass', label: 'Pass', codes: ['KeyL'] },
-      { action: 'tackle', label: 'Tackle', codes: ['KeyK'] },
+      { action: 'up', label: N('Move forward'), codes: ['KeyW', 'ArrowUp'] },
+      { action: 'down', label: N('Move back'), codes: ['KeyS', 'ArrowDown'] },
+      { action: 'left', label: N('Turn left'), codes: ['KeyA', 'ArrowLeft'] },
+      { action: 'right', label: N('Turn right'), codes: ['KeyD', 'ArrowRight'] },
+      { action: 'shoot', label: N('Shoot (hold to charge)'), codes: ['Space', 'KeyJ'] },
+      { action: 'pass', label: N('Pass'), codes: ['KeyL'] },
+      { action: 'tackle', label: N('Tackle'), codes: ['KeyK'] },
     ].map((a) => ({ ...a, defaultCodes: [...a.codes] }));
   }
 
@@ -107,7 +108,7 @@ export function createControlsScreen({ input, audio, onBack }) {
       keys.className = 'keys';
       if (capturing === a.action) {
         keys.classList.add('capturing');
-        keys.textContent = 'PRESS A KEY…';
+        keys.textContent = N('PRESS A KEY…');
       } else {
         keys.textContent = a.codes.map(keyLabel).join(' / ');
         if (a.codes.some((c) => conflicts.has(c))) row.classList.add('conflict');
@@ -123,7 +124,7 @@ export function createControlsScreen({ input, audio, onBack }) {
 
       const reset = document.createElement('button');
       reset.className = 'row-reset';
-      reset.textContent = 'default';
+      reset.textContent = N('default');
       reset.disabled = isDefault(a);
       reset.onclick = () => {
         audio.ui();
@@ -136,7 +137,7 @@ export function createControlsScreen({ input, audio, onBack }) {
       listEl.appendChild(row);
     }
     saveBtn.disabled = readOnly || busy || conflicts.size > 0;
-    if (conflicts.size > 0) hintEl.textContent = 'Two actions share a key — rebind one of them to save.';
+    if (conflicts.size > 0) hintEl.textContent = N('Two actions share a key — rebind one of them to save.');
   }
 
   // capture the next keypress while a row is armed
@@ -150,7 +151,7 @@ export function createControlsScreen({ input, audio, onBack }) {
     a.codes = [e.code];
     capturing = null;
     render();
-    hintEl.textContent = 'Click a key to rebind it. Esc cancels. Mouse: left shoots, right passes, middle tackles.';
+    hintEl.textContent = N('Click a key to rebind it. Esc cancels. Mouse: left shoots, right passes, middle tackles.');
   }, true); // capture phase: runs before input.js's gameplay listener
 
   saveBtn.onclick = async () => {
@@ -158,7 +159,7 @@ export function createControlsScreen({ input, audio, onBack }) {
     if (busy) return;
     busy = true;
     saveBtn.disabled = true;
-    hintEl.textContent = 'Saving…';
+    hintEl.textContent = N('Saving…');
     try {
       // only send actions that differ from the manifest defaults;
       // an all-defaults save clears the override row server-side
@@ -169,9 +170,9 @@ export function createControlsScreen({ input, audio, onBack }) {
         .filter((a) => a.action !== 'sprint')
         .map((a) => ({ ...a, codes: [...a.codes] }));
       input.setBindings(actions);
-      hintEl.textContent = 'Saved.';
+      hintEl.textContent = N('Saved.');
     } catch (e) {
-      hintEl.textContent = `Could not save: ${e.message}`;
+      hintEl.textContent = T('Could not save: {error}', { error: e.message });
     }
     busy = false;
     render();
@@ -181,14 +182,14 @@ export function createControlsScreen({ input, audio, onBack }) {
     audio.ui();
     if (busy) return;
     busy = true;
-    hintEl.textContent = 'Resetting…';
+    hintEl.textContent = N('Resetting…');
     try {
       await api.resetControls();
       for (const a of actions) a.codes = [...a.defaultCodes];
       input.setBindings(actions);
-      hintEl.textContent = 'Reset to defaults.';
+      hintEl.textContent = N('Reset to defaults.');
     } catch (e) {
-      hintEl.textContent = `Could not reset: ${e.message}`;
+      hintEl.textContent = T('Could not reset: {error}', { error: e.message });
     }
     busy = false;
     capturing = null;

@@ -11,15 +11,17 @@ let showing = false;
 
 /**
  * Show the prompt through the game's modal `confirm({title,text,yes,no})`
- * (resolves true for yes). Resolves 'relaunch' (navigation started),
+ * (resolves true for yes); `kind` 'terms' asks for updated-terms consent
+ * instead of a fresh session. Resolves 'relaunch' (navigation started),
  * 'refused' (browser blocked it), 'offline' (dismissed) or 'shown' when the
  * prompt is already up.
  */
-export async function offerRelaunch(confirm, t = platformStrings()) {
+export async function offerRelaunch(confirm, t = platformStrings(), kind = 'expired') {
   if (showing) return 'shown';
   showing = true;
   try {
-    const go = await confirm({ title: t.expiredTitle, text: t.expiredText, yes: t.relaunch, no: t.playOffline });
+    const terms = kind === 'terms';
+    const go = await confirm({ title: terms ? t.termsTitle : t.expiredTitle, text: terms ? t.termsText : t.expiredText, yes: t.relaunch, no: t.playOffline });
     if (!go) return 'offline';
     return api.relaunch() ? 'relaunch' : 'refused';
   } finally {

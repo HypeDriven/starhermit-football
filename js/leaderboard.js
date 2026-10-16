@@ -1,6 +1,7 @@
 // leaderboard.js — platform leaderboard screen: my rating (from the game info
 // endpoint) and ranked entries with paging + a friends-only filter. Pure DOM +
 // api.js, same shape as controls.js.
+import { T, N } from './i18n/t.js?v=10';
 import * as api from './api.js?v=10';
 
 const PAGE_SIZE = 20;
@@ -36,7 +37,7 @@ export function createLeaderboardScreen({ audio, onBack }) {
     } catch (e) {
       ratingEl.innerHTML = '';
       listEl.innerHTML = '';
-      hintEl.textContent = `Could not load leaderboard: ${e.message}`;
+      hintEl.textContent = T('Could not load leaderboard: {error}', { error: e.message });
       renderPager();
     }
   }
@@ -50,7 +51,7 @@ export function createLeaderboardScreen({ audio, onBack }) {
     ratingEl.innerHTML = '';
     const head = document.createElement('div');
     head.className = 'lb-rating-head';
-    head.textContent = 'MY RATING';
+    head.textContent = N('MY RATING');
     ratingEl.appendChild(head);
     const body = document.createElement('div');
     body.className = 'lb-rating-body';
@@ -59,7 +60,7 @@ export function createLeaderboardScreen({ audio, onBack }) {
     } else {
       body.innerHTML =
         `<span class="lb-elo">${me.elo}</span>` +
-        `<span class="muted small">${me.wins ?? 0}W · ${me.losses ?? 0}L · ${me.draws ?? 0}D</span>`;
+        `<span class="muted small">${T('{w}W · {l}L · {d}D', { w: me.wins ?? 0, l: me.losses ?? 0, d: me.draws ?? 0 })}</span>`;
     }
     ratingEl.appendChild(body);
   }
@@ -85,7 +86,7 @@ export function createLeaderboardScreen({ audio, onBack }) {
       renderEntries(data.items || []);
     } catch (e) {
       listEl.innerHTML = '';
-      hintEl.textContent = `Could not load entries: ${e.message}`;
+      hintEl.textContent = T('Could not load entries: {error}', { error: e.message });
     } finally {
       busy = false;
       renderPager();

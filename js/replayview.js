@@ -3,6 +3,7 @@
 // state.replay) and plays it back on a virtual 30 Hz tick clock, interpolating
 // between the 2 fps keyframes with the same math as the live snapshot
 // interpolation in match.js (applyInterp). No net, no input, no audio.
+import { T, N } from './i18n/t.js?v=10';
 import * as THREE from 'three';
 import * as api from './api.js?v=10';
 import { pitchFor, roleForSlot, makeRng, BALL_R } from './game/sim.js?v=10';
@@ -12,8 +13,8 @@ import { createFollowCamera } from './game/camera.js?v=10';
 import { parsePlayerRow, parseBallRow } from './snapformat.js?v=10';
 
 const TEAM_KITS = [
-  { shirt: '#1f5fb4', shorts: '#f2f2f2', socks: '#1f5fb4', gk: '#e67e22', plate: '#1f5fb4', label: 'BLUE' },
-  { shirt: '#c0392b', shorts: '#232323', socks: '#c0392b', gk: '#8e44ad', plate: '#c0392b', label: 'RED' },
+  { shirt: '#1f5fb4', shorts: '#f2f2f2', socks: '#1f5fb4', gk: '#e67e22', plate: '#1f5fb4', label: N('BLUE') },
+  { shirt: '#c0392b', shorts: '#232323', socks: '#c0392b', gk: '#8e44ad', plate: '#c0392b', label: N('RED') },
 ];
 const HAIRS = ['#1a1a1a', '#3b2314', '#6e4a21', '#b99256', '#545454', '#8a3b12'];
 const TICK_HZ = 30; // server sim rate; replay frame times are ticks
@@ -80,7 +81,7 @@ export function createReplayViewer({ scene, camera, hud, onExit }) {
   async function load(sessionId) {
     uiEl.classList.remove('hidden');
     barEl.classList.add('hidden');
-    showMsg('Loading replay…');
+    showMsg(N('Loading replay…'));
     exitBtn.onclick = () => onExit();
 
     let data;
@@ -91,13 +92,13 @@ export function createReplayViewer({ scene, camera, hud, onExit }) {
     }
     const r = data && data.state && data.state.replay;
     if (!r || r.v !== 1 || !Array.isArray(r.frames) || !r.frames.length || !(r.every > 0)) {
-      return unavailable('Replay unavailable.');
+      return unavailable(N('Replay unavailable.'));
     }
     try {
       build(r);
     } catch (e) {
       console.error('replay build failed', e);
-      return unavailable('Replay unavailable.');
+      return unavailable(N('Replay unavailable.'));
     }
   }
 
@@ -173,7 +174,7 @@ export function createReplayViewer({ scene, camera, hud, onExit }) {
     evIdx = 0;
     seekEl.max = tEnd;
     seekEl.value = vt;
-    noteEl.textContent = r.truncated ? 'replay truncated' : '';
+    noteEl.textContent = r.truncated ? N('replay truncated') : '';
 
     hud.showHud(true);
     hud.setTeamNames(TEAM_KITS[0].label, TEAM_KITS[1].label);
@@ -182,7 +183,7 @@ export function createReplayViewer({ scene, camera, hud, onExit }) {
     msgEl.classList.add('hidden');
     barEl.classList.remove('hidden');
     playing = true;
-    playBtn.textContent = 'PAUSE';
+    playBtn.textContent = N('PAUSE');
     ready = true;
   }
 
@@ -192,15 +193,15 @@ export function createReplayViewer({ scene, camera, hud, onExit }) {
     if (!ev || !stadium) return;
     switch (ev.type) {
       case 'goal':
-        hud.banner(ev.ownGoal ? 'OWN GOAL!' : 'GOAL!', 2600);
+        hud.banner(T(ev.ownGoal ? 'OWN GOAL!' : 'GOAL!'), 2600);
         stadium.crowd.pulse(ev.ownGoal ? 0.5 : 1);
         break;
       case 'halftime':
-        hud.banner('HALF TIME', 3000);
+        hud.banner(T('HALF TIME'), 3000);
         stadium.crowd.pulse(0.5);
         break;
       case 'fulltime':
-        hud.banner('FULL TIME', 3200);
+        hud.banner(T('FULL TIME'), 3200);
         stadium.crowd.pulse(0.7);
         break;
       // kickoff: visuals already show the reset; no banner
@@ -220,7 +221,7 @@ export function createReplayViewer({ scene, camera, hud, onExit }) {
     if (!ready) return;
     if (!playing && vt >= tEnd) seekTo(frames[0].t); // replay from the top
     playing = !playing;
-    playBtn.textContent = playing ? 'PAUSE' : 'PLAY';
+    playBtn.textContent = playing ? N('PAUSE') : N('PLAY');
   };
   const onSeekInput = () => { if (ready) { seeking = true; seekTo(+seekEl.value); } };
   const onSeekChange = () => { seeking = false; };
@@ -236,7 +237,7 @@ export function createReplayViewer({ scene, camera, hud, onExit }) {
       if (vt >= tEnd) {
         vt = tEnd;
         playing = false;
-        playBtn.textContent = 'PLAY';
+        playBtn.textContent = N('PLAY');
       }
     }
     if (!seeking) seekEl.value = Math.round(vt);

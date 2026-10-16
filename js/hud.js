@@ -1,4 +1,6 @@
 // hud.js — DOM HUD: score bar, match clock, power bar, event banners.
+import { T } from './i18n/t.js?v=10';
+
 export function createHud() {
   const hudEl = document.getElementById('hud');
   const homeName = document.getElementById('score-home-name');
@@ -20,7 +22,7 @@ export function createHud() {
       const shown = half === 1 ? t : t - halfLength;
       const mm = String(Math.floor(shown / 60)).padStart(2, '0');
       const ss = String(Math.floor(shown % 60)).padStart(2, '0');
-      clockEl.textContent = `${half === 1 ? '1st' : '2nd'} ${mm}:${ss}`;
+      clockEl.textContent = T(half === 1 ? '1st {time}' : '2nd {time}', { time: `${mm}:${ss}` });
     },
     setPower(v) {
       powerBar.classList.toggle('hidden', v <= 0);

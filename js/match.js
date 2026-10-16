@@ -7,6 +7,7 @@
 //                inputs at 30 Hz over the games socket and adaptively interpolate
 //                server-timed snapshots. Leave/rejoin/AI stand-ins and
 //                the stretcher ceremony are owned by the server.
+import { T, N } from './i18n/t.js?v=10';
 import * as THREE from 'three';
 import {
   createMatch, stepMatch, takeAiName, makeRng, resetKickoff,
@@ -22,8 +23,8 @@ import { parsePlayerRow, parseBallRow } from './snapformat.js?v=10';
 import * as api from './api.js?v=10';
 
 const TEAM_KITS = [
-  { shirt: '#1f5fb4', shorts: '#f2f2f2', socks: '#1f5fb4', gk: '#e67e22', plate: '#1f5fb4', label: 'BLUE' },
-  { shirt: '#c0392b', shorts: '#232323', socks: '#c0392b', gk: '#8e44ad', plate: '#c0392b', label: 'RED' },
+  { shirt: '#1f5fb4', shorts: '#f2f2f2', socks: '#1f5fb4', gk: '#e67e22', plate: '#1f5fb4', label: N('BLUE') },
+  { shirt: '#c0392b', shorts: '#232323', socks: '#c0392b', gk: '#8e44ad', plate: '#c0392b', label: N('RED') },
 ];
 const HAIRS = ['#1a1a1a', '#3b2314', '#6e4a21', '#b99256', '#545454', '#8a3b12'];
 const INPUT_HZ = 30, FIXED_DT = 1 / 60;
@@ -122,13 +123,17 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
       },
       skin: rng(),
       hair: HAIRS[Math.floor(rng() * HAIRS.length)],
-      name: isMe ? 'You' : name ?? p.name,
+      name: isMe ? T('You') : name ?? p.name,
       nameColor: kit.plate,
       isYou: isMe,
     });
     scene.add(view.group);
     return view;
   }
+
+  // The game language changed: the local player's tag reads "You" in it.
+  const onLanguage = () => { if (myPlayerId != null) views[myPlayerId]?.setName?.(T('You')); };
+  document.addEventListener('fb-language', onLanguage);
 
   function buildPlayers(rosterPlayers) {
     for (const v of views) v.dispose();
@@ -308,7 +313,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
     if (phaseT <= 0) {
       coin.visible = false;
       const label = TEAM_KITS[kickoffTeam].label;
-      hud.banner(`${label} KICKS OFF`, 2200);
+      hud.banner(T('{team} KICKS OFF', { team: T(label) }), 2200);
       phase = 'play';
       audio.whistle('short');
       if (mode === 'practice') resetKickoff(sim, kickoffTeam);
@@ -652,22 +657,22 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
           audio.crowd.gasp();
           audio.crowd.cheer(0.5);
           stadium.crowd.pulse(0.5);
-          hud.banner('OWN GOAL!', 2600);
+          hud.banner(T('OWN GOAL!'), 2600);
         } else {
           audio.crowd.goal(isHome);
           stadium.crowd.pulse(1);
-          hud.banner('GOAL!', 2600);
+          hud.banner(T('GOAL!'), 2600);
         }
         audio.whistle('short');
         hud.setScore(sim.score[0], sim.score[1]);
         break;
       }
       case 'restart': audio.whistle('short'); break; // sideline/goalline/drop-ball
-      case 'halftime': audio.whistle('long'); hud.banner('HALF TIME', 3000); break;
+      case 'halftime': audio.whistle('long'); hud.banner(T('HALF TIME'), 3000); break;
       case 'kickoff': audio.whistle('short'); break;
       case 'fulltime': {
         audio.whistle('long');
-        hud.banner('FULL TIME', 3200);
+        hud.banner(T('FULL TIME'), 3200);
         const won = ev.winner === sim.players[myPlayerId].team;
         if (ev.winner === -1) audio.crowd.cheer(0.5);
         else if (won) { audio.crowd.cheer(1); stadium.crowd.pulse(1); }
@@ -679,7 +684,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
         audio.injury();
         audio.crowd.gasp();
         if (ev.kind === 'leave') {
-          hud.banner(`INJURY — ${ev.name} CAN'T CONTINUE`, 3200);
+          hud.banner(T("INJURY — {name} CAN'T CONTINUE", { name: ev.name }), 3200);
           // the crowd turns on the leaver a beat later
           schedule(1, () => { audio.crowd.boo(0.9); stadium?.crowd.boo(0.9); });
         }
@@ -691,12 +696,12 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
       case 'substitution': {
         audio.crowd.cheer(0.8);
         stadium.crowd.pulse(0.8);
-        hud.banner(ev.kind === 'rejoin' ? `${ev.inName} IS BACK` : `${ev.inName} COMES ON`, 2800);
+        hud.banner(T(ev.kind === 'rejoin' ? '{name} IS BACK' : '{name} COMES ON', { name: ev.inName }), 2800);
         break;
       }
       case 'abandoned-draw': {
         audio.whistle('long');
-        hud.banner('MATCH ABANDONED — DRAW', 4200);
+        hud.banner(T('MATCH ABANDONED — DRAW'), 4200);
         finishMatch(-1, true);
         break;
       }
@@ -815,6 +820,7 @@ export function createMatchController({ renderer, scene, camera, audio, input, h
 
   function dispose() {
     disposed = true;
+    document.removeEventListener('fb-language', onLanguage);
     cleanup();
     net?.close();
     net = null;
