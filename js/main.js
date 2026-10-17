@@ -1,24 +1,24 @@
 // main.js — boot, screens state machine, renderer, match lifecycle.
 import * as THREE from 'three';
-import * as api from './api.js?v=10';
-import { createAudio } from './game/audio.js?v=10';
-import { createInput } from './game/input.js?v=10';
-import { createHud } from './hud.js?v=10';
-import { createMatchController } from './match.js?v=10';
-import { createLobby } from './lobby.js?v=10';
-import { createNetClient, createGameClient } from './net.js?v=10';
-import { createMenuScene } from './menuScene.js?v=10';
-import { createVoice } from './voice.js?v=10';
-import { createControlsScreen } from './controls.js?v=10';
-import { createLeaderboardScreen } from './leaderboard.js?v=10';
-import { createReplaysScreen } from './replays.js?v=10';
-import { createReplayViewer } from './replayview.js?v=10';
-import { createGraphics } from './graphics.js?v=10';
-import { createSettingsPanel } from './settings.js?v=10';
-import { createAchievementsScreen } from './achievements.js?v=10';
-import { platformStrings } from './platform-i18n.js?v=10';
-import { offerRelaunch } from './session-expiry.js?v=10';
-import { T, N } from './i18n/t.js?v=10';
+import * as api from './api.js?v=11';
+import { createAudio } from './game/audio.js?v=11';
+import { createInput } from './game/input.js?v=11';
+import { createHud } from './hud.js?v=11';
+import { createMatchController } from './match.js?v=11';
+import { createLobby } from './lobby.js?v=11';
+import { createNetClient, createGameClient } from './net.js?v=11';
+import { createMenuScene } from './menuScene.js?v=11';
+import { createVoice } from './voice.js?v=11';
+import { createControlsScreen } from './controls.js?v=11';
+import { createLeaderboardScreen } from './leaderboard.js?v=11';
+import { createReplaysScreen } from './replays.js?v=11';
+import { createReplayViewer } from './replayview.js?v=11';
+import { createGraphics } from './graphics.js?v=11';
+import { createSettingsPanel } from './settings.js?v=11';
+import { createAchievementsScreen } from './achievements.js?v=11';
+import { platformStrings } from './platform-i18n.js?v=11';
+import { offerRelaunch } from './session-expiry.js?v=11';
+import { T, N } from './i18n/t.js?v=11';
 
 const $ = (id) => document.getElementById(id);
 

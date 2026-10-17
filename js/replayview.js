@@ -3,14 +3,14 @@
 // state.replay) and plays it back on a virtual 30 Hz tick clock, interpolating
 // between the 2 fps keyframes with the same math as the live snapshot
 // interpolation in match.js (applyInterp). No net, no input, no audio.
-import { T, N } from './i18n/t.js?v=10';
+import { T, N } from './i18n/t.js?v=11';
 import * as THREE from 'three';
-import * as api from './api.js?v=10';
-import { pitchFor, roleForSlot, makeRng, BALL_R } from './game/sim.js?v=10';
-import { buildStadium } from './world/stadium.js?v=10';
-import { createPlayerMesh } from './world/player.js?v=10';
-import { createFollowCamera } from './game/camera.js?v=10';
-import { parsePlayerRow, parseBallRow } from './snapformat.js?v=10';
+import * as api from './api.js?v=11';
+import { pitchFor, roleForSlot, makeRng, BALL_R } from './game/sim.js?v=11';
+import { buildStadium } from './world/stadium.js?v=11';
+import { createPlayerMesh } from './world/player.js?v=11';
+import { createFollowCamera } from './game/camera.js?v=11';
+import { parsePlayerRow, parseBallRow } from './snapformat.js?v=11';
 
 const TEAM_KITS = [
   { shirt: '#1f5fb4', shorts: '#f2f2f2', socks: '#1f5fb4', gk: '#e67e22', plate: '#1f5fb4', label: N('BLUE') },

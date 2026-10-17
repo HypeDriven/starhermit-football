@@ -5,13 +5,13 @@
 //
 // The rest of the game's UI is English-only; this panel's strings are
 // localized for the supported locales, in the game language (js/i18n).
-import { PRESETS, CATEGORIES, presetTier } from './gfx.js?v=10';
+import { PRESETS, CATEGORIES, presetTier } from './gfx.js?v=11';
 
 const STRINGS = {
   'en-US': {
     settings: 'SETTINGS', graphics: 'Graphics', quality: 'Quality', auto: 'Auto (detected: {tier})',
     p_low: 'Low', p_balanced: 'Balanced', p_high: 'High', p_ultra: 'Ultra',
-    renderScale: 'Render scale', fromPreset: 'From preset ({tier})',
+    renderScale: 'Render scale', level: 'Level {level}', fromPreset: 'From preset ({tier})',
     adaptive: 'Adaptive resolution', showFps: 'Show frame rate', back: 'BACK',
     postFailed: 'Post-processing is unavailable on this device, so bloom, ambient occlusion, colour grade and FXAA/SMAA are off.',
     c_shadows: 'Shadows', c_ao: 'Ambient occlusion', c_bloom: 'Bloom', c_grade: 'Color grade', c_antialias: 'Anti-aliasing',
@@ -27,7 +27,7 @@ const STRINGS = {
   'es-419': {
     settings: 'AJUSTES', graphics: 'Gráficos', quality: 'Calidad', auto: 'Automática (detectada: {tier})',
     p_low: 'Baja', p_balanced: 'Equilibrada', p_high: 'Alta', p_ultra: 'Ultra',
-    renderScale: 'Escala de renderizado', fromPreset: 'Según calidad ({tier})',
+    renderScale: 'Escala de renderizado', level: 'Nivel {level}', fromPreset: 'Según calidad ({tier})',
     adaptive: 'Resolución adaptativa', showFps: 'Mostrar FPS', back: 'VOLVER',
     postFailed: 'El posprocesado no está disponible en este dispositivo: el resplandor, la oclusión ambiental, la corrección de color y FXAA/SMAA están desactivados.',
     c_shadows: 'Sombras', c_ao: 'Oclusión ambiental', c_bloom: 'Resplandor', c_grade: 'Corrección de color', c_antialias: 'Antialiasing',
@@ -40,7 +40,7 @@ const STRINGS = {
   'es-ES': {
     settings: 'AJUSTES', graphics: 'Gráficos', quality: 'Calidad', auto: 'Automática (detectada: {tier})',
     p_low: 'Baja', p_balanced: 'Equilibrada', p_high: 'Alta', p_ultra: 'Ultra',
-    renderScale: 'Escala de renderizado', fromPreset: 'Según calidad ({tier})',
+    renderScale: 'Escala de renderizado', level: 'Nivel {level}', fromPreset: 'Según calidad ({tier})',
     adaptive: 'Resolución adaptativa', showFps: 'Mostrar FPS', back: 'VOLVER',
     postFailed: 'El posprocesado no está disponible en este dispositivo: el resplandor, la oclusión ambiental, la corrección de color y FXAA/SMAA están desactivados.',
     c_shadows: 'Sombras', c_ao: 'Oclusión ambiental', c_bloom: 'Resplandor', c_grade: 'Corrección de color', c_antialias: 'Antialiasing',
@@ -53,7 +53,7 @@ const STRINGS = {
   'de-DE': {
     settings: 'EINSTELLUNGEN', graphics: 'Grafik', quality: 'Qualität', auto: 'Auto (erkannt: {tier})',
     p_low: 'Niedrig', p_balanced: 'Ausgewogen', p_high: 'Hoch', p_ultra: 'Ultra',
-    renderScale: 'Renderskalierung', fromPreset: 'Vorgabe ({tier})',
+    renderScale: 'Renderskalierung', level: 'Stufe {level}', fromPreset: 'Vorgabe ({tier})',
     adaptive: 'Adaptive Auflösung', showFps: 'Bildrate anzeigen', back: 'ZURÜCK',
     postFailed: 'Nachbearbeitung ist auf diesem Gerät nicht verfügbar – Bloom, Umgebungsverdeckung, Farbkorrektur und FXAA/SMAA sind aus.',
     c_shadows: 'Schatten', c_ao: 'Umgebungsverdeckung', c_bloom: 'Bloom', c_grade: 'Farbkorrektur', c_antialias: 'Kantenglättung',
@@ -66,7 +66,7 @@ const STRINGS = {
   'fr-FR': {
     settings: 'PARAMÈTRES', graphics: 'Graphismes', quality: 'Qualité', auto: 'Auto (détectée : {tier})',
     p_low: 'Basse', p_balanced: 'Équilibrée', p_high: 'Haute', p_ultra: 'Ultra',
-    renderScale: 'Échelle de rendu', fromPreset: 'Selon la qualité ({tier})',
+    renderScale: 'Échelle de rendu', level: 'Niveau {level}', fromPreset: 'Selon la qualité ({tier})',
     adaptive: 'Résolution adaptative', showFps: 'Afficher les IPS', back: 'RETOUR',
     postFailed: 'Le post-traitement n’est pas disponible sur cet appareil : flou lumineux, occlusion ambiante, étalonnage et FXAA/SMAA sont désactivés.',
     c_shadows: 'Ombres', c_ao: 'Occlusion ambiante', c_bloom: 'Flou lumineux', c_grade: 'Étalonnage des couleurs', c_antialias: 'Anticrénelage',
@@ -79,7 +79,7 @@ const STRINGS = {
   'fr-CA': {
     settings: 'PARAMÈTRES', graphics: 'Graphiques', quality: 'Qualité', auto: 'Auto (détectée : {tier})',
     p_low: 'Basse', p_balanced: 'Équilibrée', p_high: 'Haute', p_ultra: 'Ultra',
-    renderScale: 'Échelle de rendu', fromPreset: 'Selon la qualité ({tier})',
+    renderScale: 'Échelle de rendu', level: 'Niveau {level}', fromPreset: 'Selon la qualité ({tier})',
     adaptive: 'Résolution adaptative', showFps: 'Afficher les images/s', back: 'RETOUR',
     postFailed: 'Le post-traitement n’est pas offert sur cet appareil : halo lumineux, occlusion ambiante, étalonnage et FXAA/SMAA sont désactivés.',
     c_shadows: 'Ombres', c_ao: 'Occlusion ambiante', c_bloom: 'Halo lumineux', c_grade: 'Étalonnage des couleurs', c_antialias: 'Anticrénelage',
@@ -92,7 +92,7 @@ const STRINGS = {
   'pt-BR': {
     settings: 'CONFIGURAÇÕES', graphics: 'Gráficos', quality: 'Qualidade', auto: 'Automática (detectada: {tier})',
     p_low: 'Baixa', p_balanced: 'Equilibrada', p_high: 'Alta', p_ultra: 'Ultra',
-    renderScale: 'Escala de renderização', fromPreset: 'Conforme a qualidade ({tier})',
+    renderScale: 'Escala de renderização', level: 'Nível {level}', fromPreset: 'Conforme a qualidade ({tier})',
     adaptive: 'Resolução adaptativa', showFps: 'Mostrar FPS', back: 'VOLTAR',
     postFailed: 'O pós-processamento não está disponível neste dispositivo: brilho, oclusão de ambiente, correção de cor e FXAA/SMAA estão desligados.',
     c_shadows: 'Sombras', c_ao: 'Oclusão de ambiente', c_bloom: 'Brilho', c_grade: 'Correção de cor', c_antialias: 'Antisserrilhado',
@@ -105,7 +105,7 @@ const STRINGS = {
   'it-IT': {
     settings: 'IMPOSTAZIONI', graphics: 'Grafica', quality: 'Qualità', auto: 'Automatica (rilevata: {tier})',
     p_low: 'Bassa', p_balanced: 'Bilanciata', p_high: 'Alta', p_ultra: 'Ultra',
-    renderScale: 'Scala di rendering', fromPreset: 'Secondo la qualità ({tier})',
+    renderScale: 'Scala di rendering', level: 'Livello {level}', fromPreset: 'Secondo la qualità ({tier})',
     adaptive: 'Risoluzione adattiva', showFps: 'Mostra FPS', back: 'INDIETRO',
     postFailed: 'La post-elaborazione non è disponibile su questo dispositivo: bagliore, occlusione ambientale, correzione colore e FXAA/SMAA sono disattivati.',
     c_shadows: 'Ombre', c_ao: 'Occlusione ambientale', c_bloom: 'Bagliore', c_grade: 'Correzione colore', c_antialias: 'Antialiasing',
@@ -259,7 +259,7 @@ export function createSettingsPanel({ graphics, audio }) {
 
   function refreshInfo() {
     const info = graphics.info(describeWords);
-    $('gfx-summary').textContent = `${info.gpu} · ${info.summary}`;
+    $('gfx-summary').textContent = `${info.gpu} · ${t('level').replace('{level}', info.level ?? 0)} · ${info.summary}`;
     const note = $('gfx-note');
     note.textContent = t('postFailed');
     note.classList.toggle('hidden', !info.postFailed);

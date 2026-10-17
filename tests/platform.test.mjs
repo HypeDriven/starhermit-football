@@ -31,7 +31,7 @@ async function load(href, routes = {}, opts = {}) {
   win.location.assign = (u) => { win.assigned = u; };
   // Backoff timers run at once so reconnect paths are testable without waiting.
   globalThis.StarHermit = SDK.create({ window: win, fetch, WebSocket: FakeSocket, setTimeout: (fn, ms) => { const t = setTimeout(fn, opts.fastTimers ? 0 : ms); t.unref?.(); return t; } });
-  const api = await import(`../js/api.js?v=10&case=${++n}`);
+  const api = await import(`../js/api.js?v=11&case=${++n}`);
   return { api, calls, win, sh: globalThis.StarHermit };
 }
 
@@ -63,7 +63,7 @@ test('launch token, nickname, settings KV, controls, achievements', async () => 
 test('game socket: SDK connect, sync on open, snapshots, realtime input envelope', async () => {
   const { api } = await load('https://football-id.starhermit.com/#game_token=' + TOKEN);
   api.initAuth();
-  const { createGameClient } = await import('../js/net.js?v=10');
+  const { createGameClient } = await import('../js/net.js?v=11');
   const got = { snaps: [], evs: [], ach: [] };
   const client = createGameClient({ sessionId: 'sess-1' });
   const ready = client.connect({ onSnapshot: (s) => got.snaps.push(s), onEvent: (e) => got.evs.push(e), onAchievement: (a) => got.ach.push(a), onClose: () => { got.closed = true; } });
@@ -101,7 +101,7 @@ test('game socket reconnect renews the token first and reopens with the new one'
   const { api, calls } = await load('https://football-id.starhermit.com/#game_token=' + TOKEN,
     { 'POST /api/v1/games/football-id/launch-token': { token: TOKEN2 }, 'GET /api/v1/games/football-id/sessions/sess-1': { sessionId: 'sess-1', status: 'active' } }, { fastTimers: true });
   api.initAuth();
-  const { createGameClient } = await import('../js/net.js?v=10');
+  const { createGameClient } = await import('../js/net.js?v=11');
   const client = createGameClient({ sessionId: 'sess-1' });
   const ready = client.connect({ onReconnecting: () => {} });
   const first = FakeSocket.last; first.open(); await ready;
@@ -117,7 +117,7 @@ test('game socket: renewal refused stops reconnecting and reports onAuthLost', a
   const { api } = await load('https://football-id.starhermit.com/#game_token=' + TOKEN,
     { 'POST /api/v1/games/football-id/launch-token': refused }, { fastTimers: true });
   api.initAuth();
-  const { createGameClient } = await import('../js/net.js?v=10');
+  const { createGameClient } = await import('../js/net.js?v=11');
   const seen = []; api.onAuthChange((s) => seen.push(s));
   const client = createGameClient({ sessionId: 'sess-1' });
   let lost = 0;
@@ -132,8 +132,8 @@ test('game socket: renewal refused stops reconnecting and reports onAuthLost', a
 
 test('voice relay reconnect: renewed → new URL; retry → old URL untouched; relaunch → stop + prompt', async () => {
   globalThis.WebSocket = FakeSocket; FakeSocket.OPEN = 1;
-  const { reconnectWithRenewal, createVoiceClient } = await import('../js/net.js?v=10');
-  const { offerRelaunch } = await import('../js/session-expiry.js?v=10');
+  const { reconnectWithRenewal, createVoiceClient } = await import('../js/net.js?v=11');
+  const { offerRelaunch } = await import('../js/session-expiry.js?v=11');
 
   // renewed: the reopened socket's URL carries the fresh token
   let env = await load('https://football-id.starhermit.com/#game_token=' + TOKEN,
@@ -177,7 +177,7 @@ test('voice relay reconnect: renewed → new URL; retry → old URL untouched; r
 });
 
 test('session-expired prompt is localized in all nine locales', async () => {
-  const { PLATFORM_LOCALES, platformStrings } = await import('../js/platform-i18n.js?v=10');
+  const { PLATFORM_LOCALES, platformStrings } = await import('../js/platform-i18n.js?v=11');
   assert.equal(PLATFORM_LOCALES.length, 9);
   for (const loc of PLATFORM_LOCALES) {
     const t = platformStrings(loc);
@@ -206,7 +206,7 @@ test('game socket: pending terms consent ends the match like auth loss', async (
   const { api } = await load('https://football-id.starhermit.com/#game_token=' + TOKEN,
     { 'POST /api/v1/games/football-id/launch-token': () => new Response(JSON.stringify({ error: 'terms_acceptance_required' }), { status: 403 }) }, { fastTimers: true });
   api.initAuth();
-  const { createGameClient } = await import('../js/net.js?v=10');
+  const { createGameClient } = await import('../js/net.js?v=11');
   const client = createGameClient({ sessionId: 'sess-1' });
   let terms = 0, closed = 0;
   const ready = client.connect({ onTermsRequired: () => { terms++; }, onClose: () => { closed++; } });
@@ -221,7 +221,7 @@ test('game socket: a finished session ends the reconnect loop with onUnavailable
   const { api } = await load('https://football-id.starhermit.com/#game_token=' + TOKEN,
     { 'POST /api/v1/games/football-id/launch-token': { token: TOKEN2 }, 'GET /api/v1/games/football-id/sessions/sess-1': { sessionId: 'sess-1', status: 'finished' } }, { fastTimers: true });
   api.initAuth();
-  const { createGameClient } = await import('../js/net.js?v=10');
+  const { createGameClient } = await import('../js/net.js?v=11');
   const client = createGameClient({ sessionId: 'sess-1' });
   let gone = null;
   const ready = client.connect({ onUnavailable: (e) => { gone = e; } });
@@ -236,7 +236,7 @@ test('voice relay: terms-required stops and asks for consent', async () => {
   const { api } = await load('https://football-id.starhermit.com/#game_token=' + TOKEN,
     { 'POST /api/v1/games/football-id/launch-token': () => new Response(JSON.stringify({ error: 'terms_acceptance_required' }), { status: 403 }) });
   api.initAuth();
-  const { reconnectWithRenewal } = await import('../js/net.js?v=10');
+  const { reconnectWithRenewal } = await import('../js/net.js?v=11');
   const seen = [];
   await reconnectWithRenewal({ reopen: () => seen.push('reopen'), retry: () => seen.push('retry'), stop: () => seen.push('stop'), terms: () => seen.push('terms') });
   assert.deepEqual(seen, ['terms']);

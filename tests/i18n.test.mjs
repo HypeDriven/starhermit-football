@@ -48,7 +48,7 @@ test('the locale follows sh-language and switches live', () => {
 });
 
 test('settings panel and account strings cover all nine locales', async () => {
-  const { platformStrings } = await import('../js/platform-i18n.js?v=10');
+  const { platformStrings } = await import('../js/platform-i18n.js?v=11');
   const src = read('js/settings.js');
   for (const l of LOCALES) {
     for (const k of Object.keys(platformStrings('en-US'))) assert.ok(platformStrings(l)[k], `${l} ${k}`);

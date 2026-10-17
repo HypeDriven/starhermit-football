@@ -6,8 +6,8 @@
 // renders the tail into a small HUD panel (bottom-left, inside #hud).
 // Like voice, chat is best-effort: any failure degrades to a muted status
 // line or silence — the match itself never depends on it.
-import { T, N } from './i18n/t.js?v=10';
-import * as api from './api.js?v=10';
+import { T, N } from './i18n/t.js?v=11';
+import * as api from './api.js?v=11';
 
 const POLL_MS = 5000;
 const PAGE_SIZE = 50;

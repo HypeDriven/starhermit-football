@@ -19,9 +19,9 @@
 // WebRTC P2P, so mute is enforced client-side — locally by disabling the mic
 // tracks at source, remotely by zeroing a muted peer's gain (roster `muted`
 // flags and voice.mute_changed events). Toggle with M or the HUD mic button.
-import { T, N } from './i18n/t.js?v=10';
-import * as api from './api.js?v=10';
-import { createVoiceClient, reconnectWithRenewal } from './net.js?v=10';
+import { T, N } from './i18n/t.js?v=11';
+import * as api from './api.js?v=11';
+import { createVoiceClient, reconnectWithRenewal } from './net.js?v=11';
 
 const LS_KEY = 'starhermit-football-voice';
 const ICE_SERVERS = [{ urls: ['stun:stun.l.google.com:19302'] }];

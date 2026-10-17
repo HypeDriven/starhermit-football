@@ -1,9 +1,9 @@
 // lobby.js — lobby screen: create/invite/open/quick-join against the
 // platform's Realtime Rooms API (spec.md §8). Pure DOM + api.js; main.js
 // drives the transitions.
-import { T, N } from './i18n/t.js?v=10';
-import * as api from './api.js?v=10';
-import { roleForSlot } from './game/sim.js?v=10';
+import { T, N } from './i18n/t.js?v=11';
+import * as api from './api.js?v=11';
+import { roleForSlot } from './game/sim.js?v=11';
 
 const ROLE_NAMES = { GK: N('Goalkeeper'), DF: N('Defender'), MF: N('Midfielder'), FW: N('Forward') };
 

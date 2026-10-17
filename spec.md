@@ -27,7 +27,8 @@ File map (everything shipped or run from this repository):
 | `server.js` | Simulation core (`FootballSim`: pitch, players, ball, AI, injury ceremony) and the platform script (`game.createSession / onPlayerMessage / onTick`, Elo, achievements, match-goals scores, replay recording). |
 | `leaderboards.json` | The game's own leaderboard (`match-goals`), created by the owner tooling. |
 | `js/main.js` | Boot, renderer, screen state machine, match lifecycle, rejoin/leave prompts, token refresh, render loop. |
-| `js/gfx.js` | Pure graphics quality model: presets, categories, GPU detection (`detectPreset`), `resolve`, `choosePreset`, `presetTier`, `describe`. |
+| `js/gfx.js` | Pure graphics quality model: presets, categories, per-preset budgets (`BUDGETS`, `budget`), hardware level → preset (`LEVELS`, `detectLevel`, `presetForLevel`, `detectPreset`), `resolve`, `choosePreset`, `presetTier`, `describe`. |
+| `js/gpu-level.js` | Shared StarHermit hardware-level detector (`window.StarHermitGpu`; copy of the canonical tools file, not edited here). |
 | `js/graphics.js` | Renderer wiring for the graphics settings: pixel ratio, shadow maps, post chain, adaptive resolution, frame-rate readout, floodlit environment map, persistence; `onGraphics()` subscription for world builders. |
 | `js/settings.js` | Settings panel (Graphics section) and its localized strings. |
 | `sh-language.js`, `js/i18n/` | Game language: the shared StarHermit language resolver (unmodified copy of `tools/sh-language.js`); `strings.js` translation tables; `i18n.js` engine (`window.FBI18N`, DOM observer, `fb-language` event); `t.js` module helpers `T` / `N`. |
@@ -337,28 +338,60 @@ ring, turf and night sky), a detailed pitch (turf variation, worn goalmouths and
 normal map whose mow bands lean opposite ways so the stripes shift with the view angle, and
 blade grain), crowd density (full, or an evenly spread half) and particles (camera flashes in
 the stands that burst on goals, dust drifting in the beams). The Settings panel's
-**Graphics** section offers a quality preset (Auto, chosen from the detected GPU, where
-software renderers get Low and touch devices at most Balanced; Low; Balanced; High; Ultra),
+**Graphics** section offers a quality preset (Auto, chosen from the StarHermit hardware level
+below; Low; Balanced; High; Ultra),
 a render scale (50–200 % of the preset's), a per-effect override for every category ("From
 preset (…)" by default; choosing a preset clears overrides), adaptive resolution (averages
 90 frames, steps the resolution down by 10 % to 60 % when frames take over 26 ms and back up
 by 5 % under 14 ms) and a frame-rate readout (top-left, never over HUD controls), plus a
-summary line "GPU · cost summary · W×H px". Presets:
+summary line "GPU · Level N · cost summary · W×H px" (the level label localized). Presets:
 
 | Preset | Pixel-ratio cap | Shadows | AO | Bloom | Grade | AA | Reflections | Detail | Crowd | Particles |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Low | 1 | 1024² | off | off | off | MSAA (canvas) | off | plain | sparse | off |
-| Balanced | 1.5 | 2048² | off | on | on | FXAA | on | detailed | full | on |
+| Low | 1 | off | off | off | off | MSAA (canvas) | off | plain | sparse | off |
+| Balanced | 1.5 | 1024² | off | on | on | FXAA | on | detailed | full | on |
 | High | 2 | 2048² | on | on | on | SMAA | on | detailed | full | on |
 | Ultra | 2 | 4096² ×2 | high | on | on | MSAA ×4 | on | detailed | full | on |
 
-Pixel ratio = min(devicePixelRatio, cap) × render scale × adaptive scale. The post chain
+Pixel ratio = min(devicePixelRatio, cap) × preset scale (Low 0.85, Balanced 0.9, else 1) × render scale × adaptive scale. The post chain
 (RenderPass → GTAO → UnrealBloom → grade → OutputPass → SMAA/FXAA) is built only when an
 effect needs it and rebuilt when its key changes; Low renders straight to the canvas. Changes
 apply immediately (shadow toggles recompile materials) and persist in `localStorage`
 (`starhermit-football-graphics`). If the post chain cannot be built, the game renders
 without it and the panel says so. The resolved preset and main categories are mirrored on
 `<body>` as `data-gfx-preset`, `data-gfx-bloom`, `data-gfx-shadows`, … for tests.
+
+**Hardware level and Auto.** `js/gpu-level.js` (the shared StarHermit detector, `window.StarHermitGpu`,
+loaded as a classic script before `js/main.js`) rates the GPU 0–20 (0 = Galaxy S20 / Intel UHD or
+weaker, 20 = RTX 5090, each level ≈ 1.23× the one below; laptop parts two levels lower; phones, tablets
+and ≤ 4 GB machines capped at 9; software renderers 0). Auto picks **Low from 0, Balanced from 4, High
+from 10, Ultra from 17**, so strong desktop GPUs get Ultra; adaptive resolution still steps down when
+frames are slow. On phones and tablets the shared frame-rate option paces Auto at half the display
+refresh rate and starts at 16 simultaneous sounds.
+
+**Per-preset budgets** (`BUDGETS` in `js/gfx.js`; each tuned to hold 60 FPS on the weakest GPU Auto
+gives it — Low: level 0 phones / Intel UHD, Balanced: level 4 Iris Xe, High: level 10 GTX 1070, Ultra:
+level 17 RTX 4080). Gameplay is identical on every preset.
+
+| Preset | Crowd, seats, stands | Grass texture | Line texture | Spectators drawn (× Crowd tier) | Spectator capsule LOD | Camera flashes / haze | Bloom / GTAO resolution |
+|---|---|---|---|---|---|---|---|
+| Low | Lambert | 512 px | 1024 px | 60 % | 1 × 5 segments | 80 / 160 | ½ / ½ |
+| Balanced | Standard | 1024 px | 2048 px | 80 % | 2 × 6 | 140 / 300 | ½ / ½ |
+| High | Standard | 1024 px | 2048 px | 100 % | 3 × 8 | 220 / 480 | ½ / ½ |
+| Ultra | Standard | 2048 px | 4096 px | 100 % | 4 × 12 | 300 / 700 | full / full |
+
+Flashes and haze scale within the preset by the hardware level (`StarHermitGpu.scaleBudget`, ≤ 2×,
+capped by the 600 / 1400 pools; fewer below the floor). Textures, capsule geometry, particle draw
+ranges and the Lambert twins of the stands, seats and crowd are swapped live when the preset changes.
+Bloom and GTAO run at a fraction of the frame through a wrapped pass `setSize`. Static files are
+cache-busted with `?v=11`.
+
+**60 FPS benchmark** (`node tools/gfx-bench.mjs football [--mobile --presets low,balanced]`, dev-only,
+real GPUs; hook `tests/gfx-bench.mjs` picks the preset in Settings → Graphics, starts Practice with the
+largest team size and plays with the real keyboard controls). Measured 2026-10-17 (an AMD Radeon iGPU at level 2 projected to each preset's floor level, the same page with draws skipped subtracted; typical p50 ≤ 12 ms and slow p90 ≤ 14 ms, CPU p90 ≤ 6 ms on the NVIDIA run):
+
+- Desktop 1920×1080 (Low and Balanced re-measured after their budgets were lowered — Low scale 0.85 without shadows, Balanced scale 0.9 with 1024² shadows; with the earlier 1.0 scale and shadow maps they measured FAIL low typical 19.33 / slow 17.46 ms and FAIL balanced typical 14.05 ms): PASS low (typical 11.23, slow 8.86 ms at level 0; CPU 1.30 ms); PASS balanced (typical 9.45, slow 9.38 ms at level 4; CPU 1.80 ms); PASS high (typical 6.24, slow 6.70 ms at level 10; CPU 2.40 ms); PASS ultra (typical 3.90, slow 4.30 ms at level 17; CPU 3.50 ms).
+- Mobile 390×844 @3×: PASS low (typical 3.73, slow 4.64 ms at level 0; CPU 1.30 ms); PASS balanced (typical 7.14, slow 2.79 ms at level 4; CPU 1.90 ms).
 
 Visual assets the design calls for: cover art (16:9 night stadium, no text), loading key
 art (the same image), one crest per team, the procedural stadium and rig. No 3D model or
@@ -561,8 +594,9 @@ summary, replay frames every 15 ticks with the snapshot row shape, `kickoff` and
 events, and a 4-seat roster; a 2×60 s match rates in the right direction; a forced 0–0 is a
 rated draw; an abandoned match carries no ratings.
 
-`tests/gfx.test.mjs` (`node --test`, part of `npm test`) covers `detectPreset` on sample GPU
-strings (software → Low, discrete → High, touch capped at Balanced), `resolve` with Auto,
+`tests/gfx.test.mjs` (`node --test`, part of `npm test`) covers the hardware level → preset
+mapping (SwiftShader / `Radeon Graphics` / UHD → Low, Iris Xe → Balanced, GTX 1070 → High, RTX 4080 /
+5090 → Ultra, phones and tablets Balanced at most), the per-preset budget table and its level scaling, `resolve` with Auto,
 explicit presets, overrides, invalid tiers and the 50–200 % scale clamp, and `choosePreset`
 clearing overrides. `tests/platform.test.mjs` (also in `npm test`) loads `js/api.js` and the
 `js/net.js` game socket on the real SDK with a stubbed fetch / WebSocket: token read and URL
@@ -579,7 +613,7 @@ locale follows `sh-language.js` and switches live, and that the Settings and acc
 
 `npm run test:e2e` asserts, at 1280×800 and 390×844: offline status text, QUICK PLAY /
 CREATE LOBBY disabled and platform screens hidden, the voice toggle persists, SETTINGS opens
-the Graphics panel with every control on screen, Auto reports Low on SwiftShader, Low then
+the Graphics panel with every control on screen, Auto reports Low on SwiftShader with the summary naming Level 0, Low then
 High apply (`data-gfx-preset`, SMAA in the summary), a bloom override applies, both survive
 a reload, choosing Ultra clears the override and renders cleanly, Low is chosen for the
 match, the in-match ☰ menu opens Settings and returns to play, PRACTICE

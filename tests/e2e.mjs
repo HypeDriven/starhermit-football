@@ -151,6 +151,9 @@ async function runPass(browser, label, contextOpts, drive) {
     }
     const auto = await page.locator('#gfx-preset option[value="auto"]').textContent();
     if (!/Low/.test(auto)) throw new Error(`software GPU should auto-detect Low, got: ${auto}`);
+    // The summary names the StarHermit hardware level (software GPU = level 0).
+    const sum = await page.textContent('#gfx-summary');
+    if (!/Level 0/.test(sum)) throw new Error(`summary lacks the hardware level: ${sum}`);
     await pick('#gfx-preset', 'low');
     if (await gfxAttr('gfxPreset') !== 'low') throw new Error('Low preset not applied');
     await pick('#gfx-preset', 'high');

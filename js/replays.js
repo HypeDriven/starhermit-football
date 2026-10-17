@@ -1,8 +1,8 @@
 // replays.js — archived replays of my online matches: date, sides, score, and
 // a WATCH button that opens the 3D replay viewer. Pure DOM + api.js, same
 // shape as leaderboard.js.
-import { T, N } from './i18n/t.js?v=10';
-import * as api from './api.js?v=10';
+import { T, N } from './i18n/t.js?v=11';
+import * as api from './api.js?v=11';
 
 export function createReplaysScreen({ audio, onWatch, onBack }) {
   const screen = document.getElementById('screen-replays');

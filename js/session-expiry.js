@@ -4,8 +4,8 @@
 // StarHermit can mint a new token. The prompt offers that relaunch — from the
 // button click, since leaving the launcher frame needs a user gesture — or
 // staying in offline practice.
-import * as api from './api.js?v=10';
-import { platformStrings } from './platform-i18n.js?v=10';
+import * as api from './api.js?v=11';
+import { platformStrings } from './platform-i18n.js?v=11';
 
 let showing = false;
 

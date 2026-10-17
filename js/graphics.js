@@ -18,7 +18,7 @@ import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
-import { detectPreset, resolve, describe, choosePreset, SHADOW_MAP } from './gfx.js?v=10';
+import { detectLevel, presetForLevel, resolve, describe, choosePreset, SHADOW_MAP } from './gfx.js?v=11';
 
 const STORE_KEY = 'starhermit-football-graphics';
 const listeners = new Set();
@@ -35,6 +35,15 @@ export function onGraphics(fn) {
   listeners.add(fn);
   if (current) fn(current);
   return () => listeners.delete(fn);
+}
+
+// Run a post pass at a fraction of the frame (per-preset budget). EffectComposer sizes every pass to the
+// full frame in addPass/setSize, so the pass's own setSize is wrapped to apply the scale.
+function atScale(pass, k) {
+  if (!(k > 0 && k < 1)) return pass;
+  const setSize = pass.setSize.bind(pass);
+  pass.setSize = (w, h) => setSize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+  return pass;
 }
 
 /** Floodlit-stadium environment map for PBR reflections (null until the renderer exists). */
@@ -130,7 +139,11 @@ function buildEnvironment(renderer) {
 export function createGraphics({ renderer, scene, camera, isTouch = false }) {
   const canvas = renderer.domElement;
   const gpu = gpuName(renderer);
-  const detected = detectPreset(gpu, { touch: isTouch });
+  // StarHermit hardware level → Auto preset (SwiftShader = level 0 → Low; phones cap at Balanced).
+  const G = globalThis.StarHermitGpu;
+  const system = G ? G.detectSystem() : {};
+  const level = detectLevel(gpu, { ...system, mobile: !!(system.mobile || isTouch) });
+  const detected = presetForLevel(level);
   envBuilder = () => buildEnvironment(renderer);
 
   let saved = loadSaved();
@@ -150,7 +163,7 @@ export function createGraphics({ renderer, scene, camera, isTouch = false }) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   function apply() {
-    q = resolve(saved, detected);
+    q = resolve(saved, detected, level);
     current = q;
     const on = SHADOW_MAP[q.shadows] > 0;
     renderer.shadowMap.enabled = on;
@@ -206,7 +219,7 @@ export function createGraphics({ renderer, scene, camera, isTouch = false }) {
       c.addPass(new RenderPass(scene, camera));
       if (q.ao !== 'off') {
         const high = q.ao === 'high';
-        const ao = new StadiumGTAOPass(scene, camera, pw, ph);
+        const ao = atScale(new StadiumGTAOPass(scene, camera, pw, ph), q.budget.aoRes);
         ao.output = GTAOPass.OUTPUT.Default;
         ao.blendIntensity = high ? 0.85 : 0.7;
         ao.updateGtaoMaterial({ radius: 1.2, distanceExponent: 1.6, thickness: 1.5, scale: 1.0, samples: high ? 16 : 8, distanceFallOff: 1.0 });
@@ -215,7 +228,7 @@ export function createGraphics({ renderer, scene, camera, isTouch = false }) {
       }
       if (q.bloom === 'on') {
         // high threshold: floodlight lamps, camera flashes and hot highlights only
-        c.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.55, 0.45, 1.3));
+        c.addPass(atScale(new UnrealBloomPass(new THREE.Vector2(w, h), 0.55, 0.45, 1.3), q.budget.bloomRes));
       }
       if (q.grade === 'on') c.addPass(new ShaderPass(GradeShader));
       c.addPass(new OutputPass());
@@ -292,6 +305,7 @@ export function createGraphics({ renderer, scene, camera, isTouch = false }) {
     saved: () => ({ ...saved }),
     resolved: () => q,
     detected,
+    level,
     /** Patch saved settings; `value: undefined` removes a key (back to "From preset"). */
     save(patch) {
       saved = { ...saved, ...patch };
@@ -309,6 +323,7 @@ export function createGraphics({ renderer, scene, camera, isTouch = false }) {
       const px = [Math.round(size[0] * pixelRatio), Math.round(size[1] * pixelRatio)];
       return {
         gpu: gpu || 'unknown GPU',
+        level,
         detected,
         resolved: q,
         summary: describe(q, px, t),

@@ -7,20 +7,20 @@
 //                inputs at 30 Hz over the games socket and adaptively interpolate
 //                server-timed snapshots. Leave/rejoin/AI stand-ins and
 //                the stretcher ceremony are owned by the server.
-import { T, N } from './i18n/t.js?v=10';
+import { T, N } from './i18n/t.js?v=11';
 import * as THREE from 'three';
 import {
   createMatch, stepMatch, takeAiName, makeRng, resetKickoff,
   WALK_SPEED, RUN_SPEED, SPRINT_SPEED, TURN_RATE, BALL_SLOWDOWN, BALL_R, GRAVITY,
-} from './game/sim.js?v=10';
-import { computeAiInput, clearAiPlans } from './game/ai.js?v=10';
-import { buildStadium } from './world/stadium.js?v=10';
-import { createPlayerMesh } from './world/player.js?v=10';
-import { createCeremonyViews } from './world/officials.js?v=10';
-import { createFollowCamera } from './game/camera.js?v=10';
-import { createMatchChat } from './chat.js?v=10';
-import { parsePlayerRow, parseBallRow } from './snapformat.js?v=10';
-import * as api from './api.js?v=10';
+} from './game/sim.js?v=11';
+import { computeAiInput, clearAiPlans } from './game/ai.js?v=11';
+import { buildStadium } from './world/stadium.js?v=11';
+import { createPlayerMesh } from './world/player.js?v=11';
+import { createCeremonyViews } from './world/officials.js?v=11';
+import { createFollowCamera } from './game/camera.js?v=11';
+import { createMatchChat } from './chat.js?v=11';
+import { parsePlayerRow, parseBallRow } from './snapformat.js?v=11';
+import * as api from './api.js?v=11';
 
 const TEAM_KITS = [
   { shirt: '#1f5fb4', shorts: '#f2f2f2', socks: '#1f5fb4', gk: '#e67e22', plate: '#1f5fb4', label: N('BLUE') },

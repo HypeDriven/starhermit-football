@@ -12,7 +12,7 @@
 // for reflections, and the detailed pitch (wear, mow-stripe sheen, blade relief).
 //
 // Usage:
-//   import { buildStadium } from './world/stadium.js?v=10';
+//   import { buildStadium } from './world/stadium.js?v=11';
 //   const stadium = buildStadium(scene, { pitch: { L, W, goalW, goalH, boxD, boxW } });
 //   stadium.update(dt, camera);            // every frame
 //   stadium.crowd.setExcitement(0..1);
@@ -21,8 +21,8 @@
 //   stadium.dispose();
 
 import * as THREE from 'three';
-import { onGraphics, stadiumEnvironment, reducedMotion } from '../graphics.js?v=10';
-import { SHADOW_MAP } from '../gfx.js?v=10';
+import { onGraphics, stadiumEnvironment, reducedMotion } from '../graphics.js?v=11';
+import { SHADOW_MAP, MAX_FLASHES, MAX_HAZE } from '../gfx.js?v=11';
 
 const DEFAULT_PITCH = { L: 105, W: 68, goalW: 7.32, goalH: 2.44, boxD: 16.5, boxW: 40.32 };
 
@@ -137,9 +137,10 @@ function makeSkyTexture(night) {
   return canvasTexture(c);
 }
 
-function makeGrassTexture(L, W, detailed = false) {
-  const w = 1024;
-  const h = Math.max(2, Math.round((1024 * W) / L));
+// Texture width `w` is the preset budget's `grass` (authored at 1024 px; px constants scale with k).
+function makeGrassTexture(L, W, detailed = false, w = 1024) {
+  const h = Math.max(2, Math.round((w * W) / L));
+  const k = w / 1024;
   const [c, ctx] = makeCanvas(w, h);
   const bands = 16; // mow bands along the length (x axis)
   const bw = w / bands;
@@ -152,7 +153,7 @@ function makeGrassTexture(L, W, detailed = false) {
     for (let i = 0; i < 90; i++) {
       const x = Math.random() * w;
       const y = Math.random() * h;
-      const r = 30 + Math.random() * 110;
+      const r = (30 + Math.random() * 110) * k;
       const g = ctx.createRadialGradient(x, y, 0, x, y, r);
       const tint = Math.random() < 0.5 ? '70,120,40' : '10,40,15';
       g.addColorStop(0, `rgba(${tint},0.10)`);
@@ -194,12 +195,12 @@ function makeGrassTexture(L, W, detailed = false) {
   }
   ctx.putImageData(img, 0, 0);
   // sparse lighter/darker flecks for extra texture
-  for (let i = 0; i < (detailed ? 9000 : 2600); i++) {
+  for (let i = 0; i < Math.round((detailed ? 9000 : 2600) * k * k); i++) {
     const a = Math.random() * 0.05;
     ctx.fillStyle = Math.random() < 0.5
       ? `rgba(255,255,240,${a})`
       : `rgba(0,20,0,${a})`;
-    ctx.fillRect(Math.random() * w, Math.random() * h, 2, 2);
+    ctx.fillRect(Math.random() * w, Math.random() * h, 2 * k, 2 * k);
   }
   return canvasTexture(c);
 }
@@ -207,9 +208,8 @@ function makeGrassTexture(L, W, detailed = false) {
 // Pitch-sized normal map: each mow band leans its blades the opposite way, so
 // the stripes brighten and darken with the view angle under the floodlights,
 // plus fine blade grain for the grazing-light sheen.
-function makeGrassNormal(L, W) {
-  const w = 1024;
-  const h = Math.max(2, Math.round((1024 * W) / L));
+function makeGrassNormal(L, W, w = 1024) {
+  const h = Math.max(2, Math.round((w * W) / L));
   const [c, ctx] = makeCanvas(w, h);
   const img = ctx.createImageData(w, h);
   const d = img.data;
@@ -249,7 +249,7 @@ function makeGlowTexture() {
   return canvasTexture(c);
 }
 
-function makeLinesTexture(p) {
+function makeLinesTexture(p, Wpx = 2048) {
   const L = p.L;
   const W = p.W;
   const goalW = p.goalW;
@@ -261,8 +261,7 @@ function makeLinesTexture(p) {
   const circR = Math.min(9.15, L * 0.09, W / 2 - 1.5);
   const penR = circR;
 
-  const Wpx = 2048;
-  const Hpx = Math.max(2, Math.round((2048 * W) / L));
+  const Hpx = Math.max(2, Math.round((Wpx * W) / L));
   const [c, ctx] = makeCanvas(Wpx, Hpx);
   const s = Wpx / L; // px per meter (uniform: Hpx/Wpx == W/L)
   const X = (x) => (x + L / 2) * s;
@@ -461,18 +460,20 @@ export function buildStadium(scene, opts) {
   runoff.receiveShadow = true;
   root.add(runoff);
 
-  const grassPlainTex = makeGrassTexture(L + 0.6, W + 0.6);
+  // Grass and line textures are built at the preset budget's size in applyGraphics (rebuilt on change).
+  let grassPlainTex = null;
   let grassDetailTex = null;   // built on first use (Detail: detailed)
   let grassNormalTex = null;
-  const grassMat = new THREE.MeshStandardMaterial({ map: grassPlainTex, roughness: 0.95 });
+  let grassSize = 0;
+  const grassMat = new THREE.MeshStandardMaterial({ roughness: 0.95 });
   const grass = new THREE.Mesh(new THREE.PlaneGeometry(L + 0.6, W + 0.6), grassMat);
   grass.rotation.x = -Math.PI / 2;
   grass.position.y = 0.02;
   grass.receiveShadow = true;
   root.add(grass);
 
+  let linesSize = 0;
   const linesMat = new THREE.MeshStandardMaterial({
-    map: makeLinesTexture(p),
     transparent: true,
     roughness: 0.9,
     polygonOffset: true,
@@ -636,6 +637,9 @@ export function buildStadium(scene, opts) {
     mergeGeoms(standGeoms),
     new THREE.MeshStandardMaterial({ color: 0x181c23, roughness: 0.95 })
   );
+  // Material class per preset budget: Lambert twins on Low for the stands, seats and crowd.
+  const lambertTwins = new Map();
+  const lambertSwap = [];
   root.add(stands);
 
   // seats
@@ -660,6 +664,7 @@ export function buildStadium(scene, opts) {
     if (seatMesh.instanceColor) seatMesh.instanceColor.needsUpdate = true;
   }
   root.add(seatMesh);
+  lambertSwap.push(stands, seatMesh);
 
   // crowd (subset of seats), with per-instance animation data
   const crowdIdx = [];
@@ -677,6 +682,7 @@ export function buildStadium(scene, opts) {
   const phase = new Float32Array(cN);
   const freqV = new Float32Array(cN);
   const ampV = new Float32Array(cN);
+  let crowdBody = '3,8';
   const crowdMesh = new THREE.InstancedMesh(
     new THREE.CapsuleGeometry(0.17, 0.5, 3, 8),
     new THREE.MeshStandardMaterial({ roughness: 0.9 }),
@@ -716,6 +722,7 @@ export function buildStadium(scene, opts) {
     if (crowdMesh.instanceColor) crowdMesh.instanceColor.needsUpdate = true;
   }
   root.add(crowdMesh);
+  lambertSwap.push(crowdMesh);
 
   // ── floodlights: 4 corner towers, emissive lamp heads, light cones ──
   const poleGeoms = [];
@@ -952,7 +959,9 @@ export function buildStadium(scene, opts) {
   root.add(flagPoles);
 
   // ── particles: camera flashes in the stands + haze drifting in the beams ──
-  const FLASHES = 220;
+  // Pools sized for the largest budget; the budget sets how many are drawn and animated.
+  const FLASHES = MAX_FLASHES;
+  let flashN = 220;
   const flashPos = new Float32Array(FLASHES * 3);
   const flashCol = new Float32Array(FLASHES * 3);
   const flashLife = new Float32Array(FLASHES);
@@ -974,7 +983,8 @@ export function buildStadium(scene, opts) {
   flashes.renderOrder = 7;
   root.add(flashes);
 
-  const HAZE = 480;
+  const HAZE = MAX_HAZE;
+  let hazeN = 480;
   const hazePos = new Float32Array(HAZE * 3);
   const hazeBaseY = new Float32Array(HAZE);
   const hazePh = new Float32Array(HAZE);
@@ -1017,8 +1027,8 @@ export function buildStadium(scene, opts) {
   function setDetail(on) {
     detailOn = on;
     if (on && !grassDetailTex) {
-      grassDetailTex = makeGrassTexture(L + 0.6, W + 0.6, true);
-      grassNormalTex = makeGrassNormal(L + 0.6, W + 0.6);
+      grassDetailTex = makeGrassTexture(L + 0.6, W + 0.6, true, grassSize);
+      grassNormalTex = makeGrassNormal(L + 0.6, W + 0.6, grassSize);
     }
     grassMat.map = on ? grassDetailTex : grassPlainTex;
     grassMat.normalMap = on ? grassNormalTex : null;
@@ -1026,11 +1036,46 @@ export function buildStadium(scene, opts) {
     grassMat.roughness = on ? 0.82 : 0.95;
     grassMat.needsUpdate = true;
   }
+  // Preset asset variants: texture sizes, spectator LOD and share, particle counts, material class.
+  function applyBudget(b) {
+    if (grassSize !== b.grass) {
+      for (const t of [grassPlainTex, grassDetailTex, grassNormalTex]) t?.dispose();
+      grassSize = b.grass;
+      grassPlainTex = makeGrassTexture(L + 0.6, W + 0.6, false, grassSize);
+      grassDetailTex = grassNormalTex = null;
+      grassMat.map = null; // setDetail re-applies
+    }
+    if (linesSize !== b.lines) {
+      linesMat.map?.dispose();
+      linesSize = b.lines;
+      linesMat.map = makeLinesTexture(p, linesSize);
+      linesMat.needsUpdate = true;
+    }
+    const body = b.body.join(',');
+    if (crowdBody !== body) {
+      crowdBody = body;
+      crowdMesh.geometry.dispose();
+      crowdMesh.geometry = new THREE.CapsuleGeometry(0.17, 0.5, b.body[0], b.body[1]);
+    }
+    flashN = b.flashes;
+    hazeN = b.haze;
+    flashGeo.setDrawRange(0, flashN);
+    hazeGeo.setDrawRange(0, hazeN);
+    for (let i = flashN; i < FLASHES; i++) flashLife[i] = 0;
+    const lambert = b.material === 'lambert';
+    for (const mesh of lambertSwap) {
+      const base = mesh.userData.stdMaterial || mesh.material;
+      mesh.userData.stdMaterial = base;
+      if (lambert && !lambertTwins.has(base)) lambertTwins.set(base, new THREE.MeshLambertMaterial({ color: base.color.clone() }));
+      mesh.material = lambert ? lambertTwins.get(base) : base;
+    }
+  }
   function applyGraphics(q) {
+    applyBudget(q.budget);
     const size = SHADOW_MAP[q.shadows];
     setShadow(spot, size);
     setShadow(spot2, q.shadows === 'high' ? size : 0);
-    crowdMesh.count = q.crowd === 'full' ? cN : sparseN;
+    crowdMesh.count = Math.max(1, Math.round((q.crowd === 'full' ? cN : sparseN) * q.budget.crowd));
     particlesOn = q.particles === 'on';
     flashes.visible = haze.visible = particlesOn && night;
     scene.environment = q.reflections === 'on' ? stadiumEnvironment() : null;
@@ -1105,11 +1150,11 @@ export function buildStadium(scene, opts) {
       if (!still) {
         let spawn = step * (2 + 40 * pulseV + 6 * exc);
         while (spawn > 0) {
-          if (spawn >= 1 || Math.random() < spawn) flashLife[(Math.random() * FLASHES) | 0] = 0.14;
+          if (spawn >= 1 || Math.random() < spawn) flashLife[(Math.random() * flashN) | 0] = 0.14;
           spawn -= 1;
         }
       }
-      for (let i = 0; i < FLASHES; i++) {
+      for (let i = 0; i < flashN; i++) {
         const life = flashLife[i] = Math.max(0, flashLife[i] - step);
         const v = still ? 0 : (life / 0.14) * 7;
         flashCol[i * 3] = v;
@@ -1120,7 +1165,7 @@ export function buildStadium(scene, opts) {
     }
     // haze drifts slowly up and down through the beams
     if (haze.visible && !still) {
-      for (let i = 0; i < HAZE; i++) hazePos[i * 3 + 1] = hazeBaseY[i] + Math.sin(t * 0.25 + hazePh[i]) * 0.8;
+      for (let i = 0; i < hazeN; i++) hazePos[i * 3 + 1] = hazeBaseY[i] + Math.sin(t * 0.25 + hazePh[i]) * 0.8;
       hazePosAttr.needsUpdate = true;
     }
 
@@ -1162,6 +1207,7 @@ export function buildStadium(scene, opts) {
     scene.environment = prevEnvironment;
     // the unused grass variant is not on a material, so free it here
     for (const tex of [grassPlainTex, grassDetailTex, grassNormalTex]) tex?.dispose();
+    for (const m of lambertTwins.values()) m.dispose();
     root.traverse((obj) => {
       if (obj.geometry) obj.geometry.dispose();
       if (obj.material) {

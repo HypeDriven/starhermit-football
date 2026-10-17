@@ -12,7 +12,7 @@
 // backoff, stops on 4403/4404, renews the launch token before every reconnect
 // and reports onAuthLost when renewal is refused); socket URLs come from the
 // SDK at open time so they always carry the current, renewed launch token.
-import * as api from './api.js?v=10';
+import * as api from './api.js?v=11';
 
 /**
  * Reopen a game-managed socket (voice relay) after a drop. A failed reconnect

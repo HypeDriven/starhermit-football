@@ -2,7 +2,7 @@
 // (sign-in, invite link, sign-out notice, session-expired prompt,
 // achievements screen, updated-terms prompt), picked from
 // the game language (js/i18n) like the Settings panel.
-import { pickLocale } from './settings.js?v=10';
+import { pickLocale } from './settings.js?v=11';
 
 const STRINGS = {
   'en-US': {

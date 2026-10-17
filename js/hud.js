@@ -1,5 +1,5 @@
 // hud.js — DOM HUD: score bar, match clock, power bar, event banners.
-import { T } from './i18n/t.js?v=10';
+import { T } from './i18n/t.js?v=11';
 
 export function createHud() {
   const hudEl = document.getElementById('hud');
