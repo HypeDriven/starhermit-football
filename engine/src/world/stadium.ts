@@ -30,6 +30,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  MirroredRepeatWrapping,
   PlaneGeometry,
   Quaternion,
   RepeatWrapping,
@@ -75,8 +76,11 @@ const HEMI_DAY = 1.05 / Math.PI;
 const AMB_NIGHT = 0.35 / Math.PI;
 const AMB_DAY = 0.6 / Math.PI;
 const TOWER_H = 30;
-/** three.js's UnrealBloomPass(strength 0.55, radius 0.45, threshold 1.3). */
-const BLOOM = { threshold: 1.3, intensity: 0.55 };
+/** three.js's UnrealBloomPass(strength 0.55, radius 0.45, threshold 1.3).
+ * The browser's HDR threshold of 1.3 blooms only what lighting pushes past
+ * white (lamp faces, flashes); the engine clamps colors to 0–1 before bloom,
+ * so the nearest equivalent is blooming only saturated pixels. */
+const BLOOM = { threshold: 1, intensity: 0.55 };
 /** three.js points' size (sizeAttenuation) as a sprite's world size at the
  * match camera's 55° field of view. */
 const POINT_TO_SPRITE = 0.52;
@@ -263,6 +267,11 @@ async function makeGrassTexture(L: number, W: number, detailed: boolean, w: numb
   return alive() ? canvasTexture(c) : null;
 }
 
+/** The markings at `Wpx` pixels across the pitch's length. They are
+ * symmetric about both halfway lines, so the canvas holds one corner
+ * quarter (corner at the image's bottom-left, centre spot at its top-right)
+ * and the texture mirrors it twice each way: Ultra's 4096 px markings fit a
+ * 2048-px canvas and a quarter of the memory. */
 function makeLinesTexture(p: Pitch, Wpx: number): CanvasTexture {
   const L = p.L;
   const W = p.W;
@@ -275,11 +284,14 @@ function makeLinesTexture(p: Pitch, Wpx: number): CanvasTexture {
   const circR = Math.min(9.15, L * 0.09, W / 2 - 1.5);
   const penR = circR;
 
-  const Hpx = Math.max(2, Math.round((Wpx * W) / L));
-  const [c, ctx] = makeCanvas(Wpx, Hpx);
-  const s = Wpx / L; // px per meter (uniform: Hpx/Wpx == W/L)
-  const X = (x: number): number => (x + L / 2) * s;
-  const Z = (z: number): number => (z + W / 2) * s;
+  const w = Math.max(2, Math.round(Wpx / 2));
+  const h = Math.max(2, Math.round((Wpx * W) / L / 2));
+  const [c, ctx] = makeCanvas(w, h);
+  const s = w / (L / 2); // px per meter
+  // canvas x from the goal line (0) to the halfway line (w); canvas y from
+  // the long axis through the spots (0) to the touchline (h)
+  const X = (fromGoal: number): number => fromGoal * s;
+  const Y = (fromMiddle: number): number => fromMiddle * s;
   const lw = Math.max(2, 0.12 * s);
 
   ctx.strokeStyle = "#f5f8f5";
@@ -287,50 +299,48 @@ function makeLinesTexture(p: Pitch, Wpx: number): CanvasTexture {
   ctx.lineWidth = lw;
   ctx.lineCap = "round";
 
-  const dot = (x: number, z: number, r: number): void => {
+  const dot = (x: number, y: number, r: number): void => {
     ctx.beginPath();
-    ctx.arc(x, z, r, 0, Math.PI * 2);
+    ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
   };
-  const seg = (x0: number, z0: number, x1: number, z1: number): void => {
+  const seg = (x0: number, y0: number, x1: number, y1: number): void => {
     ctx.beginPath();
-    ctx.moveTo(x0, z0);
-    ctx.lineTo(x1, z1);
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
     ctx.stroke();
   };
 
   // boundary (inset half a line width so it stays on the plane)
-  ctx.strokeRect(X(-L / 2) + lw / 2, Z(-W / 2) + lw / 2, L * s - lw, W * s - lw);
-  seg(X(0), Z(-W / 2), X(0), Z(W / 2)); // halfway line
+  seg(lw / 2, -lw, lw / 2, h - lw / 2); // goal line
+  seg(lw / 2, h - lw / 2, w + lw, h - lw / 2); // touchline
+  seg(w, -lw, w, h + lw); // halfway line, half of it (the mirror draws the rest)
   ctx.beginPath();
-  ctx.arc(X(0), Z(0), circR * s, 0, Math.PI * 2); // centre circle
+  ctx.arc(w, 0, circR * s, 0, Math.PI * 2); // centre circle
   ctx.stroke();
-  dot(X(0), Z(0), lw * 0.85);
+  dot(w, 0, lw * 0.85); // centre spot
 
-  for (const side of [-1, 1]) {
-    const gx = X((side * L) / 2);
-    const innerX = X(side * (L / 2 - boxD));
-    const innerGbX = X(side * (L / 2 - gbD));
-    ctx.strokeRect(Math.min(gx, innerX), Z(-boxW / 2), boxD * s, boxW * s); // penalty box
-    ctx.strokeRect(Math.min(gx, innerGbX), Z(-gbW / 2), gbD * s, gbW * s); // goal box
-    const spx = X(side * (L / 2 - spotD));
-    dot(spx, Z(0), lw * 0.85); // penalty spot
-    // penalty arc (part of the spot-circle outside the box)
-    const cosA = Math.min(1, Math.max(-1, (boxD - spotD) / penR));
-    const a = Math.acos(cosA);
-    ctx.beginPath();
-    if (side > 0) ctx.arc(spx, Z(0), penR * s, Math.PI - a, Math.PI + a);
-    else ctx.arc(spx, Z(0), penR * s, -a, a);
-    ctx.stroke();
-  }
+  ctx.strokeRect(0, -Y(boxW / 2), X(boxD), Y(boxW)); // penalty box
+  ctx.strokeRect(0, -Y(gbW / 2), X(gbD), Y(gbW)); // goal box
+  const spx = X(spotD);
+  dot(spx, 0, lw * 0.85); // penalty spot
+  // penalty arc (part of the spot-circle outside the box)
+  const cosA = Math.min(1, Math.max(-1, (boxD - spotD) / penR));
+  const a = Math.acos(cosA);
+  ctx.beginPath();
+  ctx.arc(spx, 0, penR * s, -a, a);
+  ctx.stroke();
 
-  // corner arcs (1 m quarter circles)
+  // corner arc (a 1 m quarter circle)
   const cr = Math.min(1, W * 0.02) * s;
-  ctx.beginPath(); ctx.arc(X(-L / 2), Z(-W / 2), cr, 0, Math.PI / 2); ctx.stroke();
-  ctx.beginPath(); ctx.arc(X(L / 2), Z(-W / 2), cr, Math.PI / 2, Math.PI); ctx.stroke();
-  ctx.beginPath(); ctx.arc(X(L / 2), Z(W / 2), cr, Math.PI, Math.PI * 1.5); ctx.stroke();
-  ctx.beginPath(); ctx.arc(X(-L / 2), Z(W / 2), cr, Math.PI * 1.5, Math.PI * 2); ctx.stroke();
-  return canvasTexture(c);
+  ctx.beginPath();
+  ctx.arc(0, h, cr, -Math.PI / 2, 0);
+  ctx.stroke();
+  const tex = canvasTexture(c);
+  tex.wrapS = MirroredRepeatWrapping;
+  tex.wrapT = MirroredRepeatWrapping;
+  tex.repeat.set(2, 2);
+  return tex;
 }
 
 function makeNetTexture(): CanvasTexture {
@@ -951,7 +961,8 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
       grassDetailTex = detail;
       grassSize = gw;
     }
-    const lw = fitTextureWidth(want.lines, W / L);
+    // the canvas is a quarter of the markings (see makeLinesTexture)
+    const lw = 2 * fitTextureWidth(want.lines / 2, W / L);
     if (lw !== linesSize) {
       const tex = makeLinesTexture(p, lw);
       if (!live()) {

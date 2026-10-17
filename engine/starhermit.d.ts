@@ -1,8 +1,8 @@
 // Copied unchanged below this note from starhermit-engine
-// crates/starhermit-runtime/api/starhermit.d.ts at commit 180c36c (2026-10-17,
-// branch h1-runtime-services): host API v1 with the football port's decisions.
+// crates/starhermit-runtime/api/starhermit.d.ts at commit aba1f53 (2026-10-17,
+// branch h1b-script-bindings): host API v1 with the football port's decisions.
 // Refresh it from the runtime when the contract changes; the sha256 of the
-// original file is 03f4eaaf58a8bf209876e0f9ee1c3774b2329a957c356c8ed45905b5511f0938.
+// original file is 01a60bdda4042d58425c8b3e8e08ec559cb7cab96f1c0ad28b19c77b5556108a.
 
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -781,8 +781,10 @@ declare module "starhermit:scene" {
 
   // -- Textures ---------------------------------------------------------------
   /** An RGBA8 image on the GPU (sRGB-encoded), at most 4,096 pixels on a
-   * side (RangeError). UVs follow three.js: (0, 0) is the image's
-   * bottom-left. Sampling settings take effect at the next frame. */
+   * side (RangeError), counted against the game's image budget (about
+   * 56 MiB; mipmaps add a third): prefer repeating a small image over one
+   * large one (see `starhermit:canvas`). UVs follow three.js: (0, 0) is the
+   * image's bottom-left. Sampling settings take effect at the next frame. */
   export class Texture {
     #private;
     protected constructor();
@@ -916,7 +918,8 @@ declare module "starhermit:scene" {
 
   // -- Materials ----------------------------------------------------------------
   export interface MaterialParameters {
-    /** Base color (default white). */
+    /** Base color (default white). Components above 1 (three.js HDR
+     * colors) show saturated: lighting clamps colors to 0–1. */
     color?: ColorInput;
     /** Base color texture, multiplied by `color`. */
     map?: Texture | null;
@@ -1216,7 +1219,9 @@ declare module "starhermit:scene" {
     camera: Camera | null;
     readonly shadowMap: { enabled: boolean };
     /** Bloom from pixels brighter than `threshold` (null: none; the quality
-     * setting may turn it off). */
+     * setting may turn it off). Colors are clamped to 0–1 after lighting, so
+     * the threshold is taken within 0–1: a three.js HDR threshold above 1
+     * blooms only saturated colors. A negative intensity acts as 0. */
     bloom: { threshold: number; intensity: number } | null;
   }
   export const renderer: Renderer;
@@ -1233,7 +1238,9 @@ declare module "starhermit:scene" {
     readonly uv?: Vector2;
   }
   /** Rays against meshes' triangles (sprites by their quads), nearest first.
-   * Tests at most 1,000,000 triangles a call (RangeError). */
+   * Only objects in the scene and visible are hit (as drawn: a raycast
+   * sends the frame's changes first). Tests at most 1,000,000 triangles a
+   * call (RangeError). */
   export class Raycaster {
     constructor(origin?: Vector3, direction?: Vector3, near?: number, far?: number);
     near: number;
@@ -1265,6 +1272,14 @@ declare module "starhermit:canvas" {
   // call (each text character counts); past one a call throws a RangeError
   // ("canvas work budget spent" for the work). All canvases and image
   // bitmaps of a game together hold at most 256 MiB (RangeError).
+  //
+  // Large textures: a canvas is at most 8,388,608 pixels (4096 × 2048) and
+  // a game's images share about 56 MiB of GPU memory, mipmaps adding a
+  // third; a 4096 × 4096 image with mipmaps alone would take 85 MiB. Draw
+  // repeating detail (line markings, grass, tiles) once on a small canvas
+  // and repeat it (`texture.wrapS = wrapT = RepeatWrapping` with
+  // `texture.repeat`), or split a large surface into several meshes, each
+  // with its own canvas of at most 2048 pixels a side.
   // Not supported: `filter`, `imageSmoothingQuality` above "low" (it is
   // recorded only), `fontStretch`, `fontVariantCaps`, `textRendering`,
   // `lab()`/`lch()`/`oklab()`/`oklch()`/`color()` colors, `currentcolor`
@@ -1696,7 +1711,9 @@ declare module "starhermit:ui" {
   /** Whether the pointer is over a widget (the game should not act on its
    * clicks). */
   export function pointerOver(): boolean;
+  /** The focused widget's label (null when nothing has focus). */
   export function focused(): string | null;
+  /** Focuses the widget with this label from the next frame (null: none). */
   export function setFocus(id: string | null): void;
   /** The language widgets announce (BCP 47) and its direction (right-to-left
    * mirrors the layout); default the player's language. */
@@ -2043,8 +2060,11 @@ declare module "starhermit:platform" {
   /** Opens the runtime's own Account dialog, where the player signs in
    * (games never draw sign-in themselves, and never see credentials).
    * Resolves with the player once signed in, or null when they close it.
-   * Only while handling one of the player's presses (`NotAllowedError`
-   * otherwise); builds without the platform reject with `unavailable`. */
+   * Only while handling one of the player's presses, or during the
+   * `onUpdate` and `onRender` of a frame in which a `starhermit:ui` widget
+   * was activated by a press (the rule `clipboard.writeText` and pointer
+   * lock follow); otherwise `NotAllowedError`. Builds without the platform
+   * reject with `unavailable`. */
   export function requestSignIn(): Promise<Player | null>;
   export interface Profile {
     readonly id: string;

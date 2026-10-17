@@ -693,9 +693,10 @@ browser code:
   interface language, the device's for a guest → en-US), following preference changes live;
   `js/platform-i18n.js` (account strings) is imported as a module. `js/gfx.js` is imported as a
   module: the runtime's quality tier (its Options menu, `frame().quality`, the same four names)
-  selects the game's preset content — shadow-map size, grass and line texture sizes (capped by the
-  canvas and texture bounds), the detailed pitch, crowd density and capsule LOD, camera flashes and
-  haze, bloom (threshold 1.3, 0.55) — and changes apply live. SETTINGS overrides the three
+  selects the game's preset content — shadow-map size, grass and line texture sizes (the markings
+  are one mirrored corner quarter, so Ultra's 4096 px fit the canvas bound), the detailed pitch,
+  crowd density and capsule LOD, camera flashes and haze, bloom (0.55 on saturated colors, the
+  host's equivalent of the browser's HDR threshold 1.3) — and changes apply live. SETTINGS overrides the three
   categories that are the game's own content (pitch detail, crowd, flashes and haze) in the
   `graphics` game setting the browser also keeps. Render scale, anti-aliasing, adaptive resolution,
   frame-rate limits and the sound volumes and concurrent-sound limit are the runtime's own options

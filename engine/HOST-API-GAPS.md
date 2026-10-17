@@ -1,12 +1,12 @@
 # Host API gaps found by the football port
 
 What the native client (`engine/src`) still needs from host API v1
-(`engine/starhermit.d.ts`, copied from the runtime at 180c36c, which answered
+(`engine/starhermit.d.ts`, copied from the runtime at aba1f53, which answered
 the port's earlier lists: module specifiers and their queries, fuel,
 rotation, audio lifetimes, the game socket's envelopes, rooms, instance
 attributes, geometry, projection, draw, UI areas and tones, input sources
-and bindings, preferences, bold text, session ends and sign-in, report
-context). Each entry names the module and member, the semantics wanted, why
+and bindings, preferences, bold text, session ends and sign-in (also from
+UI buttons), report context, large textures). Each entry names the module and member, the semantics wanted, why
 football needs it, and what the port does meanwhile. Nothing here is
 football-specific.
 
@@ -36,17 +36,5 @@ alternative until a contract update lands.
 
 ## Open
 
-6. **`starhermit:canvas` / textures — Ultra's line texture.** The canvas bound
-   (8,388,608 pixels) is below the Ultra preset's 4096-px line markings
-   (4096 × 2540 on an 11v11 pitch), and with mipmaps it alone would exceed half
-   of the 56 MiB texture budget. The port caps the texture to the bound and to
-   half of what the budget has free. Wanted: canvases of 4096 × 4096, or a
-   stated per-texture size the budget allows.
-
-7. **`starhermit:platform` — `requestSignIn` from a UI button.** It needs a
-   press; `ui.button` says a press's activation counts for
-   `clipboard.writeText` and pointer lock, not for `requestSignIn`. The
-   menu's SIGN IN WITH STARHERMIT and the session prompt's BACK TO STARHERMIT
-   are UI buttons; the port calls it in the button's frame and opens the
-   Options menu when it is refused. Wanted: the same rule stated for
-   `requestSignIn` (and `requestPermission`).
+None from the contract; findings from running the port on the runtime
+follow.
