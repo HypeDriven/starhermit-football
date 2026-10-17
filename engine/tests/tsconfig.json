@@ -1,0 +1,25 @@
+{
+  // The Node tests of the pure logic modules (engine/src/logic: no host
+  // modules; logic/quality.ts reads the browser's js/gfx.js). run.sh
+  // compiles them to a temporary directory and runs them with `node --test`.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": [],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "rewriteRelativeImportExtensions": true,
+    "allowJs": true,
+    "checkJs": false,
+    "rootDir": "../.."
+  },
+  "include": ["*.ts", "../src/logic/**/*.ts"]
+}

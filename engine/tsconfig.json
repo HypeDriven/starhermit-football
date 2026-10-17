@@ -1,0 +1,32 @@
+{
+  // Type-checks the native client against the host API contract (a copy of
+  // the runtime's starhermit.d.ts). The runtime erases the TypeScript itself
+  // and never reads this file: run
+  //   tsc -p engine
+  // (TypeScript 5.9) before committing. Imports name their .ts files, which
+  // is how the runtime finds modules in the package.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": [],
+    "strict": true,
+    "noEmit": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    // The game's own pure browser modules the native client shares
+    // (js/gfx.js: the per-preset content budgets) are imported as JS.
+    "allowJs": true,
+    "checkJs": false
+  },
+  "files": ["starhermit.d.ts"],
+  "include": ["src/**/*.ts"]
+}
