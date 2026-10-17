@@ -125,15 +125,15 @@ export function createHud(): Hud {
     const mid = top + h / 2;
     draw.image(crest(0).canvas, cx, mid - crestSize / 2, crestSize, crestSize);
     cx += crestSize + gap;
-    draw.text(home, cx, mid - small / 2, { size: small, color: "#9fb0c0" });
+    draw.text(home, cx, mid - small / 2, { size: small, color: "#9fb0c0", weight: "800" });
     cx += wHome + gap;
-    draw.text(score, cx, mid - big / 2, { size: big, color: TEXT, letterSpacing: 0.05 * 20 * s });
+    draw.text(score, cx, mid - big / 2, { size: big, color: TEXT, letterSpacing: 0.05 * 20 * s, weight: "800" });
     cx += wScore + gap;
-    draw.text(away, cx, mid - small / 2, { size: small, color: "#9fb0c0" });
+    draw.text(away, cx, mid - small / 2, { size: small, color: "#9fb0c0", weight: "800" });
     cx += wAway + gap;
     draw.image(crest(1).canvas, cx, mid - crestSize / 2, crestSize, crestSize);
     cx += crestSize + gap * 2;
-    draw.text(clock, cx, mid - clockSize / 2, { size: clockSize, color: ACCENT2 });
+    draw.text(clock, cx, mid - clockSize / 2, { size: clockSize, color: ACCENT2, weight: "800" });
   }
 
   function drawArrow(s: number): void {
@@ -153,7 +153,7 @@ export function createHud(): Hud {
     draw.polygon(tri(1.35), [0, 0, 0, 0.45]); // the glyph's dark text shadow
     draw.polygon(tri(1), "#ffffff");
     const size = crisp(10 * s);
-    draw.text(arrowDist, cx, cy + 14 * s, { size, color: "#ffffff", align: "center", shadow: { color: [0, 0, 0, 0.8], x: 0, y: s } });
+    draw.text(arrowDist, cx, cy + 14 * s, { size, color: "#ffffff", align: "center", weight: "700", shadow: { color: [0, 0, 0, 0.8], x: 0, y: s } });
   }
 
   function drawPower(W: number, H: number, s: number, bottomInset: number): void {
@@ -178,10 +178,10 @@ export function createHud(): Hud {
     const spacing = 0.2 * size;
     // green glow (text-shadow 0 0 30px), then the dark drop shadow and white
     for (let i = -2; i <= 2; i++) {
-      draw.text(bannerText, W / 2 + i * 2 * s, y, { size, letterSpacing: spacing, color: [39 / 255, 174 / 255, 96 / 255, 0.25 * alpha], align: "center" });
+      draw.text(bannerText, W / 2 + i * 2 * s, y, { size, letterSpacing: spacing, weight: "900", color: [39 / 255, 174 / 255, 96 / 255, 0.25 * alpha], align: "center" });
     }
     draw.text(bannerText, W / 2, y, {
-      size, letterSpacing: spacing, align: "center", color: [1, 1, 1, alpha],
+      size, letterSpacing: spacing, weight: "900", align: "center", color: [1, 1, 1, alpha],
       shadow: { color: [0, 0, 0, 0.8 * alpha], x: 0, y: 2 * s },
     });
   }
@@ -198,7 +198,7 @@ export function createHud(): Hud {
     const x = W / 2 - w / 2;
     const y = H - Math.max(24 * s, bottomInset) - h;
     panel(x, y, w, h, 7 * s, s, "rgba(255,255,255,0.2)", [4 / 255, 9 / 255, 15 / 255, 0.78]);
-    draw.text(text, x + padX, y + padY, { size, color: "#d7e1e9", letterSpacing: 0.06 * 11 * s });
+    draw.text(text, x + padX, y + padY, { size, color: "#d7e1e9", letterSpacing: 0.06 * 11 * s, weight: "700" });
   }
 
   function drawMenuButton(W: number, s: number, top: number, right: number): void {
@@ -235,7 +235,7 @@ export function createHud(): Hud {
     mic.h = h;
     const color = micMuted ? "#e74c3c" : TEXT;
     panel(mic.x, mic.y, w, h, 8 * s, s, micMuted ? "#e74c3c" : BORDER);
-    draw.text(label, mic.x + w / 2, mic.y + (h - size) / 2, { size, color, align: "center" });
+    draw.text(label, mic.x + w / 2, mic.y + (h - size) / 2, { size, color, align: "center", weight: "700" });
   }
 
   return {

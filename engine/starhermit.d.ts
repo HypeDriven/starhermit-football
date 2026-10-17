@@ -1,8 +1,8 @@
 // Copied unchanged below this note from starhermit-engine
-// crates/starhermit-runtime/api/starhermit.d.ts at commit e4e20eb (2026-10-17,
+// crates/starhermit-runtime/api/starhermit.d.ts at commit 180c36c (2026-10-17,
 // branch h1-runtime-services): host API v1 with the football port's decisions.
 // Refresh it from the runtime when the contract changes; the sha256 of the
-// original file is 8f86e278b75ed508fa03058eba454d829b6420ddc033c4c80a618f1a4eee3de0.
+// original file is 03f4eaaf58a8bf209876e0f9ee1c3774b2329a957c356c8ed45905b5511f0938.
 
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -52,9 +52,12 @@
 // `.js` or `.mjs` loads the `.ts` or `.mts` file of the same stem (the
 // TypeScript compiler's convention), and an extensionless one tries `.ts`,
 // `.mts`, `.js` and `.mjs` in that order; directories are not resolved to
-// an index file. A specifier that resolves to nothing, or outside the
-// package, ends the game on the error screen naming the importing file and
-// the specifier. Dynamic `import()` resolves the same way and rejects
+// an index file. A query string or fragment on a relative specifier
+// (`"./settings.js?v=11"`, web cache-busting) is ignored for resolution:
+// a module's identity is its resolved path, so `./a.js?v=1` and `./a.js`
+// are one module, evaluated once. A specifier that resolves to nothing, or
+// outside the package, ends the game on the error screen naming the
+// importing file and the specifier. Dynamic `import()` resolves the same way and rejects
 // instead. `"moduleResolution": "bundler"` with
 // `"allowImportingTsExtensions": true` type-checks every accepted form.
 //
@@ -348,6 +351,24 @@ declare module "starhermit:engine" {
     readText(): Promise<string>;
   }
   export const clipboard: Clipboard;
+
+  // -- The player's preferences ------------------------------------------------
+  /** What the player chose in the runtime's Options menu (or, for what they
+   * left on "system", what the device says): nothing else about the device
+   * is exposed. */
+  export interface Preferences {
+    /** Keep motion to a minimum (camera shake, parallax, flashing). */
+    readonly reducedMotion: boolean;
+    /** The interface language (BCP 47): the player's choice, else the
+     * device's (a guest's too), else `"en"`. */
+    readonly language: string;
+    /** The player's text size multiplier (1 by default). */
+    readonly textScale: number;
+    /** High-contrast colors asked for. */
+    readonly highContrast: boolean;
+  }
+  export function preferences(): Preferences;
+  export function onPreferencesChange(listener: (preferences: Preferences) => void): Unsubscribe;
 }
 
 // ===========================================================================
@@ -479,7 +500,7 @@ declare module "starhermit:input" {
     | {
         readonly kind: "button";
         readonly action: string;
-        /** At most 8 characters (TypeError). */
+        /** At most 16 characters (TypeError). */
         readonly label: string;
         readonly anchor: TouchAnchor;
         readonly offset: readonly [number, number];
@@ -1182,7 +1203,13 @@ declare module "starhermit:scene" {
   }
   export const scene: Scene;
 
-  /** How the scene is drawn. */
+  /** How the scene is drawn. The player's graphics settings (Options ›
+   * Graphics) decide anti-aliasing (MSAA, FXAA), the shadow map's largest
+   * size, render scale, frame rate and whether bloom draws at all; the game
+   * decides the camera, lights, shadows on or off, fog, bloom's threshold
+   * and intensity and materials. The engine renders in sRGB without tone
+   * mapping or HDR output (three.js's `toneMapping` has no equivalent yet);
+   * colors are clamped to 0–1 after lighting. */
   export interface Renderer {
     /** The camera the scene is seen through; nothing 3D draws without one.
      * It need not be in the scene graph. */
@@ -1551,7 +1578,8 @@ declare module "starhermit:draw" {
     /** Where `x` is: the text's start (default), center or end. */
     align?: "start" | "center" | "end";
     /** A `FontFace` weight of the family (`"bold"`, `"700"`); the nearest
-     * face added under it is used. */
+     * face added under it is used. The built-in font draws a synthesized
+     * bold at weights of 600 and more. */
     weight?: string;
     /** Extra pixels between characters. */
     letterSpacing?: number;
@@ -1695,6 +1723,11 @@ declare module "starhermit:ui" {
     outline?: ColorLike;
   }
   export function setTheme(theme: Theme): void;
+  /** The font the UI lays out and draws its text with: a family added with
+   * `canvas.fonts` (any case) at the face nearest `weight` (synthesized
+   * bold for the built-in font at 600 and more); null returns to the
+   * built-in font. A family never added throws a TypeError. */
+  export function setFont(font: { family?: string; weight?: string } | null): void;
 }
 
 // ===========================================================================
@@ -1769,10 +1802,12 @@ declare module "starhermit:audio" {
   // RangeError, non-finite values a TypeError. Bounds: min(`voices`, 256)
   // nodes, 1,024 connections, 1,024 automation events per parameter and
   // 16,384 in all, curves of at most 65,536 values, 32 MiB of buffers
-  // (4,096 at most) and 32 MiB of delay lines, 256 periodic waves, and a
-  // render cost of 2,048 units (gain 2, constant 1, panner 4, oscillator 6,
-  // buffer source 4, biquad 12, delay 4, each connection 1): past one a
-  // RangeError. Not supported: channel count settings (buffers are mono or
+  // (4,096 at most) and 32 MiB of delay lines, 256 periodic waves, and an
+  // estimated render cost of 20,000 units at 48 kHz (less above): a node
+  // costs gain 5, constant source 4, stereo panner 5, oscillator 20, buffer
+  // source 40, biquad 28, delay 25, and from its first ramp, target, curve
+  // or parameter connection on 20, 14, 75, 210, 42, 280 and 42; each
+  // connection 2: past one a RangeError. Not supported: channel count settings (buffers are mono or
   // stereo), wave shapers, convolvers, compressors, analysers, 3D panners
   // and listeners, IIR filters, channel splitters and mergers, worklets,
   // media nodes and offline contexts; `AudioParam.value` reads the last
@@ -1928,7 +1963,8 @@ declare module "starhermit:audio" {
     /** Noise for buffer sources (there is no noise node): `seconds` of
      * white, pink or brown noise, looped seamlessly when played with `loop`. */
     createNoiseBuffer(seconds: number, color?: "white" | "pink" | "brown"): AudioBuffer;
-    /** Equal lengths of at least 2 (`IndexSizeError`). */
+    /** Equal lengths of at least 2 (`IndexSizeError`); coefficients whose
+     * unnormalized wave exceeds the float range are a RangeError. */
     createPeriodicWave(real: Float32Array | readonly number[], imag: Float32Array | readonly number[], constraints?: { disableNormalization?: boolean }): PeriodicWave;
     /** Decodes WAV, Ogg Vorbis or Ogg Opus bytes (mono or stereo). */
     decodeAudioData(data: ArrayBuffer | Uint8Array): Promise<AudioBuffer>;
@@ -1998,6 +2034,18 @@ declare module "starhermit:platform" {
   /** The signed-in player, or null for a local guest. */
   export function player(): Player | null;
   export function onPlayerChange(listener: (player: Player | null) => void): Unsubscribe;
+  /** Why the player's session ended: they signed out (in the Options
+   * menu), another device took over the game, the platform needs the terms
+   * accepted again, the credentials expired or were revoked. The game then
+   * plays as a guest (`player()` is null) until the player signs in again. */
+  export type SessionEndReason = "signed-out" | "elsewhere" | "terms-required" | "expired" | "revoked";
+  export function onSessionEnded(listener: (reason: SessionEndReason) => void): Unsubscribe;
+  /** Opens the runtime's own Account dialog, where the player signs in
+   * (games never draw sign-in themselves, and never see credentials).
+   * Resolves with the player once signed in, or null when they close it.
+   * Only while handling one of the player's presses (`NotAllowedError`
+   * otherwise); builds without the platform reject with `unavailable`. */
+  export function requestSignIn(): Promise<Player | null>;
   export interface Profile {
     readonly id: string;
     readonly username: string;
@@ -2404,7 +2452,14 @@ declare module "starhermit:platform" {
   export function reportPlayer(report: { targetUserId: string; reason: string; note?: string; sessionId?: string }): Promise<{ flagId: string; status: string }>;
   /** A bug report with the runtime's version and platform attached
    * (`title` at most 200 characters). */
-  export function reportBug(report: { title: string; description: string; sessionId?: string }): Promise<{ id: string; status: string }>;
+  export function reportBug(report: {
+    title: string;
+    description: string;
+    sessionId?: string;
+    /** The game's own state for the report (at most 16 KB as JSON;
+     * RangeError past it). */
+    context?: JsonValue;
+  }): Promise<{ id: string; status: string }>;
 }
 
 // ===========================================================================

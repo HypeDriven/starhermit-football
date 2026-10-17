@@ -689,9 +689,9 @@ browser code:
   only types `globalThis.FootballSim`; practice and the menu backdrop step it in `onFixedUpdate` at
   60 Hz. `js/i18n/strings.js` and `sh-language.js` load the same way, so every string with an
   English key in the browser's tables is translated natively too, and the language resolves as in
-  section 10 (choice in the `ui.language` game setting → the account's language → en-US; the host
-  offers no device language); `js/platform-i18n.js` (account strings) is imported when the runtime
-  resolves its `?v=` import queries, else its English stands in. `js/gfx.js` is imported as a
+  section 10 (choice in the `ui.language` game setting → the account's language → the player's
+  interface language, the device's for a guest → en-US), following preference changes live;
+  `js/platform-i18n.js` (account strings) is imported as a module. `js/gfx.js` is imported as a
   module: the runtime's quality tier (its Options menu, `frame().quality`, the same four names)
   selects the game's preset content — shadow-map size, grass and line texture sizes (capped by the
   canvas and texture bounds), the detailed pitch, crowd density and capsule LOD, camera flashes and
@@ -706,7 +706,8 @@ browser code:
   convention); merged static meshes go through the host's geometry transforms; crowd motion writes
   the instance matrices in place and sends one range a frame. The per-pixel grass and the ~20k
   instances are built a slice at a time whenever the running call's fuel runs low (a "Loading…"
-  screen covers the first menu and each match). The HUD (score bar with crests, clock, ball arrow
+  screen covers the first menu and each match). The player's reduced-motion preference stills the
+  floodlight flicker, camera flashes and haze, as `prefers-reduced-motion` does in the browser. The HUD (score bar with crests, clock, ball arrow
   clamped inside the window, power bar, banners, mouse hint, ☰ and mic buttons, chat lines) is
   drawn with `starhermit:draw`; menus, lobby, invites, controls, leaderboard, replays,
   achievements, result card, in-match menu, SETTINGS, confirmations, the replay bar and the chat
@@ -724,9 +725,11 @@ browser code:
   replays, achievements (read-only) and the result card's match-goals rank. Invite links come from
   the platform (`inviteLink()`) and copy with the press of INVITE A FRIEND or COPY INVITE LINK.
   Signed out, the menu is offline mode (Practice only) and SIGN IN WITH STARHERMIT opens the
-  runtime's sign-in; a socket stopped by an ended session or updated terms ends the match at the
-  menu with the SESSION EXPIRED / UPDATED TERMS prompt, whose BACK TO STARHERMIT opens the
-  runtime's account menu. The game's settings (`ui.language`, `muted`, `voice`) are kept by the
+  runtime's Account dialog. When the session ends, an online match ends at the menu; an expired or
+  revoked session and updated terms show the SESSION EXPIRED / UPDATED TERMS prompt, whose BACK TO
+  STARHERMIT opens that dialog, and signing out or playing on another device only says so. Bug
+  reports carry the browser's small non-personal context. The game's settings (`ui.language`,
+  `muted`, `voice`) are kept by the
   runtime on the device and in the account, the same keys the browser saves.
 - **Controls.** The runtime's bindings of the seven actions (`control.*` keys, `engine.gamepad.*`
   pads), rebound in its Options menu: the CONTROLS screen lists every binding and its keycap
@@ -738,11 +741,12 @@ browser code:
 - **Voice.** The SDK's voice room for the session's conversation (open mic; the runtime asks for the
   microphone and shows its indicator); each speaker's volume and pan follow the two footballers'
   distance and side at 10 Hz (section 9's falloff).
-- **Where it differs.** No WebP art (above); no ambient occlusion, colour grade, environment
-  reflections, pitch normal map, clearcoat ball, Lambert low tier or second shadow caster (the
-  host has none of these); camera flashes and haze are sprites whose flash brightness is their size;
+- **Where it differs.** No WebP art (above); no tone mapping, ambient occlusion, colour grade,
+  environment reflections, pitch normal map, clearcoat ball, Lambert low tier or second shadow
+  caster, and colors clamp to 0–1 (the host has none of these yet); camera flashes and haze are
+  sprites whose flash brightness is their size;
   SETTINGS keeps the game language, the game's mute, the quality line with its three content
-  overrides and Report a problem (its context rides in the description); the Settings and
+  overrides and Report a problem; the Settings and
   Report-a-problem labels the browser keeps in `js/settings.js` and `game-options.js`, and text that
   exists only natively, are English; the ball arrow points toward the ball. What the host API
   still lacks is listed in `engine/HOST-API-GAPS.md`.

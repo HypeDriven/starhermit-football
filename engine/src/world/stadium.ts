@@ -45,6 +45,7 @@ import { budgets, usage } from "starhermit:engine";
 import type { Vec3Like } from "../logic/math.ts";
 import type { ContentQuality } from "../logic/quality.ts";
 import { onQuality } from "../quality.ts";
+import { reducedMotion } from "../prefs.ts";
 import type { Pitch } from "../sim.ts";
 import { breathe, lowOnFuel, nextFrame, sliced } from "../tasks.ts";
 import { ResourceBag, canvasTexture, makeCanvas } from "./resources.ts";
@@ -1078,25 +1079,29 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     // LED board scroll
     ledTex.offset.x = (t * 0.025) % 1;
 
+    const still = reducedMotion();
+
     // camera flashes: a trickle all match, bursts when the crowd erupts
     if (particles.visible) {
-      let spawn = step * (2 + 40 * pulseV + 6 * exc);
-      while (spawn > 0 && flashN > 0) {
-        if (spawn >= 1 || Math.random() < spawn) flashLife[(Math.random() * flashN) | 0] = 0.14;
-        spawn -= 1;
+      if (!still) {
+        let spawn = step * (2 + 40 * pulseV + 6 * exc);
+        while (spawn > 0 && flashN > 0) {
+          if (spawn >= 1 || Math.random() < spawn) flashLife[(Math.random() * flashN) | 0] = 0.14;
+          spawn -= 1;
+        }
       }
       for (let i = 0; i < flashN; i++) {
         const life = (flashLife[i] = Math.max(0, flashLife[i]! - step));
         const s = flashes[i]!;
-        s.visible = life > 0;
+        s.visible = life > 0 && !still;
         if (life > 0) s.scale.setScalar(1.1 * POINT_TO_SPRITE * (0.4 + (life / 0.14) * 1.6));
       }
       // haze drifts slowly up and down through the beams
-      for (let i = 0; i < hazeN; i++) haze[i]!.position.y = hazeBaseY[i]! + Math.sin(t * 0.25 + hazePh[i]!) * 0.8;
+      if (!still) for (let i = 0; i < hazeN; i++) haze[i]!.position.y = hazeBaseY[i]! + Math.sin(t * 0.25 + hazePh[i]!) * 0.8;
     }
 
-    // floodlight flicker (subtle mains hum)
-    if (night) {
+    // floodlight flicker (subtle mains hum; steady with reduced motion)
+    if (night && !still) {
       const fl = 0.97 + 0.03 * Math.sin(t * 43.7 + Math.sin(t * 17.3) * 2.0);
       lampMat.emissiveIntensity = 2.4 * fl;
       spot.intensity = SPOT_INTENSITY * fl;

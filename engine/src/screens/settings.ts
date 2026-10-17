@@ -42,11 +42,17 @@ export class SettingsPanel {
     this.sending = true;
     this.reportStatus = "Sending…";
     const f = frame();
-    // the browser attaches a small non-personal context.json; here it rides
-    // in the description
-    const context = `\n\ncontext: language=${languageChoice()}, viewport=${f.width}×${f.height}, scale=${f.scale}, quality=${f.quality}, entry=${game.entry}`;
+    // the browser's small non-personal context.json
+    const context = {
+      language: languageChoice(),
+      viewport: `${f.width}x${f.height}`,
+      pixelRatio: f.scale,
+      quality: f.quality,
+      entry: game.entry,
+      path: "engine",
+    };
     try {
-      await P.reportBug({ title, description: (this.details.trim() || title) + context });
+      await P.reportBug({ title, description: this.details.trim() || title, context });
       this.reportStatus = "Report sent. Thank you!";
       this.title = "";
       this.details = "";

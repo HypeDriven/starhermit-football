@@ -15,7 +15,7 @@ import * as draw from "starhermit:draw";
 import * as ui from "starhermit:ui";
 import { createAudio } from "./audio.ts";
 import { ACCENT, BORDER, MUTED, TEXT, createHud, crisp } from "./hud.ts";
-import { T, loadLanguages, loadPlatformStrings, platformStrings, refreshLanguage, upper } from "./i18n.ts";
+import { T, loadLanguages, platformStrings, refreshLanguage, upper } from "./i18n.ts";
 import { createInput } from "./input.ts";
 import { resultTitle, statsLines } from "./logic/format.ts";
 import type { MatchStats } from "./logic/format.ts";
@@ -73,6 +73,8 @@ interface Confirm {
   yes: string;
   no: string;
   primaryYes: boolean;
+  /** Runs inside the yes button's frame (a press: sign-in needs one). */
+  onYes?: () => void;
   resolve(ok: boolean): void;
 }
 let confirm: Confirm | null = null;
@@ -106,6 +108,16 @@ function uiConfirm(c: Omit<Confirm, "resolve" | "primaryYes"> & { primaryYes?: b
     confirm?.resolve(false);
     confirm = { ...c, primaryYes: !!c.primaryYes, resolve };
   });
+}
+
+/** The runtime's Account dialog, from a press's frame; the Options menu
+ * where a build refuses it. */
+function signIn(): void {
+  try {
+    P.requestSignIn().catch(() => openMenu());
+  } catch {
+    openMenu();
+  }
 }
 
 /** Guards anything that starts a new game while the server still has us
@@ -162,11 +174,10 @@ function acceptInvite(inv: RoomInvite): void {
 }
 
 // ── session expiry and updated terms ──
-// The runtime holds the StarHermit session; when it ends (or StarHermit
+// The runtime holds the StarHermit session; when it expires (or StarHermit
 // needs the player to accept updated terms) online play stops and the
-// prompt offers the way back — the runtime's own sign-in in its Options
-// menu, where the browser relaunches from the StarHermit launcher — or
-// offline practice.
+// prompt offers the way back — the runtime's Account dialog, where the
+// browser relaunches from the StarHermit launcher — or offline practice.
 let relaunchShowing = false;
 async function promptRelaunch(kind: "expired" | "terms" = "expired"): Promise<void> {
   if (relaunchShowing) return;
@@ -174,14 +185,14 @@ async function promptRelaunch(kind: "expired" | "terms" = "expired"): Promise<vo
   const t = platformStrings();
   try {
     const terms = kind === "terms";
-    const go = await uiConfirm({
+    await uiConfirm({
       title: upper(terms ? t["termsTitle"]! : t["expiredTitle"]!),
       text: terms ? t["termsText"]! : t["expiredText"]!,
       yes: upper(t["relaunch"]!),
       no: upper(t["playOffline"]!),
       primaryYes: true,
+      onYes: signIn,
     });
-    if (go) openMenu();
   } finally {
     relaunchShowing = false;
   }
@@ -236,11 +247,10 @@ async function onMatchReady(room: Room, isRejoin = false): Promise<void> {
           backToMenu();
         }
       },
-      // the StarHermit session ended: the match ends back at the menu and
-      // the prompt offers a fresh session
+      // the StarHermit session ended: the match ends back at the menu
+      // (onSessionEnded says why and prompts)
       onAuthLost: () => {
         if (match) backToMenu();
-        void promptRelaunch("expired");
       },
       onTermsRequired: () => {
         if (match) backToMenu();
@@ -433,7 +443,7 @@ function menuUi(): void {
     // signing in is the runtime's (its Options menu)
     if (!online && ui.button(upper(t["signIn"]!), { tone: "accent" })) {
       audio.ui();
-      openMenu();
+      signIn();
     }
     if (activeRoom) {
       if (ui.id("rejoin").button(isPlaying(activeRoom) ? T("REJOIN MATCH") : T("RETURN TO LOBBY"), { tone: "accent" })) {
@@ -613,7 +623,10 @@ function confirmUi(): void {
   const open = ui.dialog("confirm", c.title, true, () => {
     ui.paragraph(c.text, 420);
     ui.row("confirm-buttons", () => {
-      if (ui.id("confirm-yes").button(c.yes, { tone: c.primaryYes ? "accent" : "danger" })) answer = true;
+      if (ui.id("confirm-yes").button(c.yes, { tone: c.primaryYes ? "accent" : "danger" })) {
+        answer = true;
+        c.onYes?.();
+      }
       if (ui.id("confirm-no").button(c.no, c.primaryYes ? {} : { tone: "accent" })) answer = false;
     }, { spacing: 12 });
   });
@@ -681,7 +694,7 @@ function loadingScreen(text: string): void {
   const s = f.scale;
   draw.rect(0, 0, f.width, f.height, "#05070c");
   const logo = crisp(22 * s);
-  draw.text("STARHERMIT FOOTBALL", f.width / 2, f.height / 2 - logo * 1.2, { size: logo, color: TEXT, align: "center", letterSpacing: 0.12 * logo });
+  draw.text("STARHERMIT FOOTBALL", f.width / 2, f.height / 2 - logo * 1.2, { size: logo, color: TEXT, align: "center", letterSpacing: 0.12 * logo, weight: "800" });
   draw.text(text, f.width / 2, f.height / 2 + logo * 0.4, { size: crisp(14 * s), color: MUTED, align: "center" });
 }
 
@@ -689,7 +702,6 @@ function loadingScreen(text: string): void {
 onStart(() => {
   setFixedRate(60);
   loadLanguages(); // the game's string tables and language resolver
-  void loadPlatformStrings();
   sim(); // evaluate server.js once: the shared simulation
   // The synthesis graph, its noise buffer and the clips build in an entry
   // of their own; the runtime's mixer needs no gesture to start.
@@ -721,6 +733,17 @@ onStart(() => {
       void refreshActiveRoom();
       void refreshIncomingInvites();
       inviteLinkNow();
+    });
+  } catch {
+    // no platform session in this runtime
+  }
+  try {
+    // why the session ended: an expired or revoked session and updated terms
+    // prompt; signing out or playing elsewhere only says so
+    P.onSessionEnded((reason) => {
+      if (match && matchRoom) backToMenu();
+      if (reason === "expired" || reason === "revoked") void promptRelaunch("expired");
+      else if (reason === "terms-required") void promptRelaunch("terms");
     });
   } catch {
     // no platform session in this runtime

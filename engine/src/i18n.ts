@@ -4,13 +4,16 @@
 // translations and locale matching are used unchanged. The choice is the
 // per-player game setting `ui.language` ({ choice }) — the same key the
 // browser saves — kept by starhermit:storage on the device and in the account.
-// Automatic follows the signed-in player's StarHermit language, else en-US
-// (the host offers no device language). The UI announces in it through
-// starhermit:ui's setLanguage.
+// Automatic follows the signed-in player's StarHermit language, then the
+// player's interface language (the device's for a guest), then en-US. The
+// UI announces in it through starhermit:ui's setLanguage. The account
+// strings are the browser's js/platform-i18n.js, imported as a module.
+import { onPreferencesChange, preferences } from "starhermit:engine";
 import { loadClassic } from "starhermit:script";
 import { settings } from "starhermit:storage";
 import * as ui from "starhermit:ui";
 import { me } from "./platform.ts";
+import { platformStrings as browserPlatformStrings } from "../../js/platform-i18n.js";
 
 export const LOCALES = ["en-US", "en-GB", "es-419", "es-ES", "de-DE", "fr-FR", "fr-CA", "pt-BR", "it-IT"] as const;
 const PARENT: Record<string, string> = { "en-GB": "en-US", "es-ES": "es-419", "fr-CA": "fr-FR" };
@@ -69,7 +72,7 @@ export function onLanguage(fn: (lang: string) => void): () => void {
 function compute(): void {
   const platform = me();
   const resolved = SL
-    ? SL.resolve({ choice, platform: platformLanguage(platform), device: [], supported: LOCALES, fallback: "en-US" }).locale
+    ? SL.resolve({ choice, platform: platformLanguage(platform), device: deviceLanguages(), supported: LOCALES, fallback: "en-US" }).locale
     : "en-US";
   status = platform ? "account" : "device";
   if (resolved === lang) return;
@@ -84,6 +87,14 @@ function compute(): void {
 
 function platformLanguage(p: ReturnType<typeof me>): string | null {
   return p?.language || null;
+}
+
+function deviceLanguages(): string[] {
+  try {
+    return [preferences().language];
+  } catch {
+    return [];
+  }
 }
 
 function readChoice(): string {
@@ -111,6 +122,11 @@ export function loadLanguages(): void {
   texts = SL ? SL.create({ game: "football", supported: LOCALES, window: { navigator: { languages: [] } }, starhermit: false, register: false, panel: false }) : null;
   choice = readChoice();
   compute();
+  try {
+    onPreferencesChange(() => compute());
+  } catch {
+    // no preference events
+  }
   try {
     settings.onChange((key) => {
       if (key !== SETTING) return;
@@ -162,53 +178,14 @@ export function languageTexts(): { heading: string; label: string; status: strin
 }
 
 // ── the StarHermit account strings (js/platform-i18n.js) ──
-// An ES module of the browser client whose imports carry cache-busting
-// queries (`./settings.js?v=11`): it is imported when the runtime resolves
-// those, else the English below stands in.
-const EN_PLATFORM: Record<string, string> = {
-  termsTitle: "Updated terms",
-  termsText: "StarHermit needs you to accept its updated terms, so online play stopped. Go back to StarHermit to review them, or keep playing practice offline.",
-  expiredTitle: "Session expired",
-  expiredText: "Your StarHermit session has expired, so online play stopped. Go back to StarHermit to start a fresh session, or keep playing practice offline.",
-  relaunch: "Back to StarHermit",
-  playOffline: "Play offline",
-  signIn: "Sign in with StarHermit",
-  invite: "Invite a friend",
-  inviteCopied: "Invite link copied — send it to anyone to play together.",
-  inviteFailed: "Could not copy the invite link.",
-  signedOut: "Signed out of StarHermit — practice is still available.",
-  achievements: "Achievements",
-  achLoading: "Loading…",
-  achEmpty: "No achievements are available yet.",
-  achFailed: "Could not load achievements.",
-  achUnlocked: "Unlocked",
-  achLocked: "Locked",
-  back: "Back",
-  lbPosting: "Posting to the leaderboard…",
-  lbRank: "Leaderboard rank: #{rank}",
-  lbNotPosted: "Score not posted to the leaderboard.",
-};
-let platformModule: { platformStrings(tag?: string): Record<string, string> } | null = null;
-
-export async function loadPlatformStrings(): Promise<void> {
-  const spec: string = "../../js/platform-i18n.js";
-  try {
-    const m = (await import(spec)) as { platformStrings?: unknown };
-    if (typeof m.platformStrings === "function") platformModule = m as typeof platformModule;
-  } catch {
-    platformModule = null;
-  }
-}
 
 /** The account-surface strings in the game language. */
 export function platformStrings(): Record<string, string> {
-  let t: Record<string, string> | null = null;
   try {
-    t = platformModule?.platformStrings(lang) ?? null;
+    return browserPlatformStrings(lang) as Record<string, string>;
   } catch {
-    t = null;
+    return browserPlatformStrings("en-US") as Record<string, string>;
   }
-  return { ...EN_PLATFORM, ...(t ?? {}) };
 }
 
 /** Locale-aware upper case where the runtime has it. */

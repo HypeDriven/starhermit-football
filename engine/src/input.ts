@@ -25,11 +25,10 @@ import { T, onLanguage } from "./i18n.ts";
 import { Steering } from "./logic/steering.ts";
 import type { InputFrame, Joystick } from "./logic/steering.ts";
 
-/** A touch button label in the game language, within the host's 8
- * characters (it-IT's "CONTRASTO" is abbreviated). */
+/** A touch button label in the game language (the host takes 16
+ * characters). */
 function touchLabel(key: string): string {
-  const s = T(key);
-  return s.length <= 8 ? s : `${s.slice(0, 7)}.`;
+  return T(key).slice(0, 16);
 }
 
 /** The on-screen layout (logical pixels from the anchor corner), after the
