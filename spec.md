@@ -14,7 +14,7 @@ under "Design intent not yet implemented".
 | Genre | Realtime sports, server-authoritative multiplayer with offline practice. |
 | Players | 2–22 seats (1–11 per side). Any seat a human does not take is an AI footballer with a name and a personality. |
 | Session | One match = two halves of 3:00 match time (`halfLength` 180 s), plus ~12.5 s of walkout and coin flip and ~4.5 s of full-time celebration: about 7 minutes. |
-| Platforms | Desktop browsers (keyboard + mouse), phones and tablets (touch). Both orientations. |
+| Platforms | Desktop browsers (keyboard + mouse), phones and tablets (touch). Both orientations. Natively, the same game runs as a script game of the StarHermit runtime (section 16). |
 | Rendering | three.js r176 (vendored `vendor/three/`, with the matching r176 post-processing addons under `vendor/three/addons/`, mapped as `three/addons/`), WebGL, one `<canvas>` behind a DOM HUD and DOM screens, ACES filmic tone mapping, optional post-processing (section 8, Graphics). All stadium and character art is generated in code; authored assets are the cover art, the loading key art, two club crests and the SFX clips. |
 | Authority | `server.js` is both the platform-side match script (Jint sandbox, 30 Hz) and, loaded as a classic `<script>`, the client's simulation core for practice and prediction. |
 
@@ -23,7 +23,7 @@ File map (everything shipped or run from this repository):
 | Path | Responsibility |
 |---|---|
 | `index.html` | Shell: canvas, HUD, replay bar, touch controls, every DOM screen and dialog. Loads `server.js` then `js/main.js`. |
-| `starhermit.txt` | Platform manifest: `name`, `launch=index.html`, `owner`, `server=server.js`, `control.*` default key bindings, `cover=coverart.png`. |
+| `starhermit.txt` | Platform manifest: `name`, `launch=index.html`, `owner`, `server=server.js`, `control.*` default key bindings, `cover=coverart.png`; plus the native client's `engine.*` keys, which the platform ignores. |
 | `server.js` | Simulation core (`FootballSim`: pitch, players, ball, AI, injury ceremony) and the platform script (`game.createSession / onPlayerMessage / onTick`, Elo, achievements, match-goals scores, replay recording). |
 | `leaderboards.json` | The game's own leaderboard (`match-goals`), created by the owner tooling. |
 | `js/main.js` | Boot, renderer, screen state machine, match lifecycle, rejoin/leave prompts, token refresh, render loop. |
@@ -56,6 +56,7 @@ File map (everything shipped or run from this repository):
 | `coverart.png`, `icon.png`, `favicon.svg` | Platform listing art and icons. |
 | `sfx/` | 18 Opus clips, `manifest.txt` (canonical table), `manifest.json` (binding + generation prompts), `manifest.md` (generator output). |
 | `tests/server-regression.cjs`, `tests/gfx.test.mjs`, `tests/platform.test.mjs`, `tests/e2e.mjs` | `npm test` rules regression + graphics-model + platform-client unit tests; `npm run test:e2e` Playwright playthrough. |
+| `engine/` | The native client (section 16): `src/**.ts` on the StarHermit runtime's host API (`starhermit.d.ts`, a copy of the runtime's contract), `src/logic/` (pure, Node-tested), `tests/` (`run.sh`), `tsconfig.json`, `HOST-API-GAPS.md`. |
 
 ## 2. Vision and design pillars
 
@@ -643,6 +644,16 @@ or warnings on load, in a practice match, or on the result screen; at 390×844 p
 title and score and every primary button are fully visible; the first practice match teaches
 shoot, pass, camera and the ball arrow through on-screen feedback without a manual.
 
+The native client (section 16) is checked with `tsc -p engine` (TypeScript 5.9, `strict`,
+`noUnusedLocals`, `noUnusedParameters`, `exactOptionalPropertyTypes`, no emit) against
+`engine/starhermit.d.ts`, and `engine/tests/run.sh` (with `TSC` naming the compiler) compiles
+`engine/src/logic` and its tests to a temporary directory and runs them with `node --test`: pose
+math, snapshot parsing of `server.js`'s own broadcasts and recorded replays (past the intro hold),
+interpolation and prediction, the follow camera and ball arrow, steering and the contextual shoot
+control, the quality tiers' content from `js/gfx.js`, HUD and menu text, the lobby seat model, chat
+pacing, voice falloff and pan, and a 20 s AI practice on the shared sim. `starhermit <repo> --check`
+validates the package and manifest.
+
 ## 15. Asset inventory
 
 | Asset | Path | Purpose | Source | Status |
@@ -658,7 +669,85 @@ shoot, pass, camera and the ball arrow through on-screen feedback without a manu
 | 3D model (TRELLIS) | — | — | not called for (see section 8) | n/a |
 | Humanoid animation (Kimodo) | — | — | not called for: procedural rig; football kicks/dives are out of distribution | n/a |
 
-## 16. Known limitations
+The native client plays the same SFX clips (the engine decodes Ogg Opus). It cannot show the WebP
+key art and crests (the engine decodes PNG images only): its loading screen is the key art's plain
+colour, and the score bar and lobby use a stand-in shield in each club's colors drawn in code.
+
+## 16. Native client (StarHermit runtime)
+
+The same game runs natively as a **script game**: `starhermit <this directory>` (or a `.zip` of it)
+runs it in the signed StarHermit runtime with no browser, and `cargo starhermit package --script`
+(from the engine checkout) makes release archives. The client is TypeScript in `engine/src`, written
+against host API v1 — `engine/starhermit.d.ts`, a copy of the runtime's
+`crates/starhermit-runtime/api/starhermit.d.ts` with its source commit in the header — using only
+the `starhermit:*` modules (no DOM, three.js, WebAudio, fetch or WebSocket). The browser client and
+`server.js` are untouched; the native client shares the game's own data and logic where it is not
+browser code:
+
+- **One simulation, one set of strings, one quality model.** `server.js` loads into the game's
+  realm with `starhermit:script`'s `loadClassic` (as the browser's classic script) and `sim.ts`
+  only types `globalThis.FootballSim`; practice and the menu backdrop step it in `onFixedUpdate` at
+  60 Hz. `js/i18n/strings.js` and `sh-language.js` load the same way, so every string with an
+  English key in the browser's tables is translated natively too, and the language resolves as in
+  section 10 (choice in the `ui.language` game setting → the account's language → en-US; the host
+  offers no device language); `js/platform-i18n.js` (account strings) is imported when the runtime
+  resolves its `?v=` import queries, else its English stands in. `js/gfx.js` is imported as a
+  module: the runtime's quality tier (its Options menu, `frame().quality`, the same four names)
+  selects the game's preset content — shadow-map size, grass and line texture sizes (capped by the
+  canvas and texture bounds), the detailed pitch, crowd density and capsule LOD, camera flashes and
+  haze, bloom (threshold 1.3, 0.55) — and changes apply live. SETTINGS overrides the three
+  categories that are the game's own content (pitch detail, crowd, flashes and haze) in the
+  `graphics` game setting the browser also keeps. Render scale, anti-aliasing, adaptive resolution,
+  frame-rate limits and the sound volumes and concurrent-sound limit are the runtime's own options
+  and are not repeated in the game.
+- **World and HUD.** Stadium, footballers, procedural animation (`logic/pose.ts` is
+  `animator.js`'s math), name tags, officials, ball and coin are rebuilt on `starhermit:scene` with
+  `starhermit:canvas` textures; light intensities are the browser's divided by π (the host's light
+  convention); merged static meshes go through the host's geometry transforms; crowd motion writes
+  the instance matrices in place and sends one range a frame. The per-pixel grass and the ~20k
+  instances are built a slice at a time whenever the running call's fuel runs low (a "Loading…"
+  screen covers the first menu and each match). The HUD (score bar with crests, clock, ball arrow
+  clamped inside the window, power bar, banners, mouse hint, ☰ and mic buttons, chat lines) is
+  drawn with `starhermit:draw`; menus, lobby, invites, controls, leaderboard, replays,
+  achievements, result card, in-match menu, SETTINGS, confirmations, the replay bar and the chat
+  field use the engine's UI (`starhermit:ui`), so they also work with the keyboard and a gamepad.
+- **Audio.** `audio.js`'s graph on `starhermit:audio`: the authored clips from
+  `sfx/manifest.json` decoded into graph buffers with the synthesiser as fallback per event, the
+  synthesised crowd bed and stadium delays, UI clicks on the player's interface volume. The game's
+  mute (in-match SOUND, SETTINGS) is its `muted` setting.
+- **Online.** `starhermit:platform`, which holds the player's credentials — no launch token,
+  renewal or URLs. The flows are the browser's: rooms (create, quick join of any open room, open,
+  start, seat, invite, accept, leave, mine) polled every 2 s, REJOIN MATCH / RETURN TO LOBBY, RANKED
+  vs AI, the game socket's `sync` and input frames and `snap`/`ev` handling (an action edge a paced
+  send drops rides the next one; a resumed socket drops prediction and resyncs), the room socket
+  for roster pushes, nicknames and avatars, chat in the session's conversation, leaderboard,
+  replays, achievements (read-only) and the result card's match-goals rank. Invite links come from
+  the platform (`inviteLink()`) and copy with the press of INVITE A FRIEND or COPY INVITE LINK.
+  Signed out, the menu is offline mode (Practice only) and SIGN IN WITH STARHERMIT opens the
+  runtime's sign-in; a socket stopped by an ended session or updated terms ends the match at the
+  menu with the SESSION EXPIRED / UPDATED TERMS prompt, whose BACK TO STARHERMIT opens the
+  runtime's account menu. The game's settings (`ui.language`, `muted`, `voice`) are kept by the
+  runtime on the device and in the account, the same keys the browser saves.
+- **Controls.** The runtime's bindings of the seven actions (`control.*` keys, `engine.gamepad.*`
+  pads), rebound in its Options menu: the CONTROLS screen lists every binding and its keycap
+  buttons open that rebinding (also offline). Pad defaults: left stick and D-pad steer (tank-style,
+  analog), West or the right trigger shoots (tap passes, hold charges), South passes, East tackles,
+  the right stick turns the camera, Start opens the match menu. Mouse, T, M and Escape behave as on
+  the web; touch uses the runtime's on-screen stick and TACKLE · PASS · SHOOT buttons when the
+  player's primary pointer is coarse, and sprint strides vibrate the phone.
+- **Voice.** The SDK's voice room for the session's conversation (open mic; the runtime asks for the
+  microphone and shows its indicator); each speaker's volume and pan follow the two footballers'
+  distance and side at 10 Hz (section 9's falloff).
+- **Where it differs.** No WebP art (above); no ambient occlusion, colour grade, environment
+  reflections, pitch normal map, clearcoat ball, Lambert low tier or second shadow caster (the
+  host has none of these); camera flashes and haze are sprites whose flash brightness is their size;
+  SETTINGS keeps the game language, the game's mute, the quality line with its three content
+  overrides and Report a problem (its context rides in the description); the Settings and
+  Report-a-problem labels the browser keeps in `js/settings.js` and `game-options.js`, and text that
+  exists only natively, are English; the ball arrow points toward the ball. What the host API
+  still lacks is listed in `engine/HOST-API-GAPS.md`.
+
+## 17. Known limitations
 
 - Achievement names and descriptions come from the server script's declarations and stay English.
 - Reduced motion only stills the ambient effects (flicker, flashes, haze); camera sway,
@@ -673,6 +762,9 @@ shoot, pass, camera and the ball arrow through on-screen feedback without a manu
 - The e2e run needs `/usr/bin/google-chrome` and, on software GL, tens of minutes per pass.
 - Replay lists depend on `GET /replays/{sessionId}` per row to split teams correctly.
 - Screen-reader users get no live announcements of goals or the clock.
+- The native client (section 16) type-checks against the runtime's contract and its logic is
+  tested under Node, but it has not run: the StarHermit runtime does not yet ship its script
+  engine and host-API bindings.
 
 ### Design intent not yet implemented
 

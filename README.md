@@ -24,6 +24,17 @@ The game is served as a static site — there is no build step.
   `http://localhost:8000`. Without a launch token the game runs in offline
   mode — **Practice vs AI** is fully playable; multiplayer requires the
   platform.
+- **Natively, on the StarHermit runtime**:
+  `starhermit /path/to/starhermit-engine-football` runs the native client in
+  `engine/` (TypeScript on the runtime's host API v1, the same `server.js`,
+  string tables and quality presets). Signed out it is offline mode (Practice
+  vs AI); signed in to StarHermit (F1) the online modes use the platform
+  through the runtime. A release archive (the signed runtime plus this
+  package) comes from the engine checkout:
+  `cargo starhermit package --script /path/to/starhermit-engine-football`.
+  The runtime runs it once it ships its script engine and host-API bindings;
+  until then `starhermit … --check` validates the package. See `spec.md`
+  section 16.
 
 ## Modes
 
@@ -55,6 +66,11 @@ Desktop movement is smoothed and keeps its initial camera-relative heading for
 as long as the movement keys remain held. Press Escape once to release the
 mouse and again to open the leave-match prompt.
 
+The native client uses the runtime's bindings of the same actions (rebind them
+in its Options menu, F1) and adds gamepads: left stick or D-pad to steer, X /
+right trigger to shoot (tap passes), A to pass, B to tackle, right stick for
+the camera, Start for the match menu.
+
 ## Architecture
 
 - **Client** (this repo): no-build ES modules, three.js vendored in
@@ -75,7 +91,13 @@ mouse and again to open the leave-match prompt.
 ## Files
 
 - `starhermit.txt` — platform manifest (`launch`, `owner`, `server=server.js`,
-  default `control.*` bindings, `cover`).
+  default `control.*` bindings, `cover`) plus the native client's `engine.*`
+  keys, which the platform ignores.
 - `spec.md` — the running game design document.
 - `js/`, `css/`, `assets/`, `sfx/`, `vendor/three/` — the game.
 - `tests/` — `npm test` (rules regression) and `npm run test:e2e` (browser playthrough).
+- `engine/` — the native client for the StarHermit runtime: `src/` (TypeScript;
+  `src/logic/` holds the pure, Node-tested parts), `starhermit.d.ts` (the
+  runtime's host-API contract, copied), `tsconfig.json` (`tsc -p engine`
+  type-checks it), `tests/` (`TSC="node …/typescript/bin/tsc" engine/tests/run.sh`
+  compiles and runs the Node tests) and `HOST-API-GAPS.md`.
