@@ -41,4 +41,6 @@ native client.
 - `npm test` — rules regression, graphics model, platform client and i18n tests.
 - `tsc -p engine` (TypeScript 5.9, strict, no emit) and `TSC="node …/typescript/bin/tsc"
   engine/tests/run.sh` for the native client; `engine/src/logic` must not import `starhermit:*`.
-- `starhermit <repo> --check` validates the package for the runtime.
+- `starhermit <repo> --check` validates the package for the runtime and plays 120 frames headless;
+  the engine's football probe (`STARHERMIT_FOOTBALL_DIR=<repo> cargo test --release -p
+  starhermit-runtime --features test-game football -- --ignored`) plays a practice match offscreen.

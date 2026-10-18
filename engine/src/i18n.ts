@@ -8,6 +8,7 @@
 // player's interface language (the device's for a guest), then en-US. The
 // UI announces in it through starhermit:ui's setLanguage. The account
 // strings are the browser's js/platform-i18n.js, imported as a module.
+import { shown } from "./logic/glyphs.ts";
 import { onPreferencesChange, preferences } from "starhermit:engine";
 import { loadClassic } from "starhermit:script";
 import { settings } from "starhermit:storage";
@@ -52,8 +53,8 @@ function lookup(key: string): string {
  * (the browser's FBI18N.T). Native-only text is its own English key. */
 export function T(key: string, vars?: Record<string, string | number>): string {
   const s = lookup(key);
-  if (!vars) return s;
-  return s.replace(/\{(\w+)\}/g, (m, k: string) => (Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : m));
+  if (!vars) return shown(s);
+  return shown(s.replace(/\{(\w+)\}/g, (m, k: string) => (Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : m)));
 }
 
 export function language(): string {
@@ -164,35 +165,42 @@ function textsFor(locale: string): string[] {
 
 /** "Automatic — Français (Canada)" in the effective language. */
 export function autoLabel(): string {
-  return textsFor(lang)[0]!.replace("{lang}", nativeName(lang));
+  return shown(textsFor(lang)[0]!.replace("{lang}", nativeName(lang)));
 }
 
 export function nativeName(locale: string): string {
-  return SL?.NATIVE[locale] ?? locale;
+  return shown(SL?.NATIVE[locale] ?? locale);
 }
 
 /** The selector's heading and status line (sh-language.js's own strings). */
 export function languageTexts(): { heading: string; label: string; status: string } {
   const t = textsFor(lang);
-  return { heading: t[5]!, label: t[6]!, status: status === "account" ? t[1]! : status === "unavailable" ? t[3]! : t[2]! };
+  return { heading: shown(t[5]!), label: shown(t[6]!), status: shown(status === "account" ? t[1]! : status === "unavailable" ? t[3]! : t[2]!) };
 }
 
 // ── the StarHermit account strings (js/platform-i18n.js) ──
 
 /** The account-surface strings in the game language. */
+let platformCache: { lang: string; strings: Record<string, string> } | null = null;
 export function platformStrings(): Record<string, string> {
+  if (platformCache?.lang === lang) return platformCache.strings;
+  let raw: Record<string, string>;
   try {
-    return browserPlatformStrings(lang) as Record<string, string>;
+    raw = browserPlatformStrings(lang) as Record<string, string>;
   } catch {
-    return browserPlatformStrings("en-US") as Record<string, string>;
+    raw = browserPlatformStrings("en-US") as Record<string, string>;
   }
+  const strings: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) strings[k] = typeof v === "string" ? shown(v) : v;
+  platformCache = { lang, strings };
+  return strings;
 }
 
 /** Locale-aware upper case where the runtime has it. */
 export function upper(s: string): string {
   try {
-    return s.toLocaleUpperCase(lang);
+    return shown(s.toLocaleUpperCase(lang));
   } catch {
-    return s.toUpperCase();
+    return shown(s.toUpperCase());
   }
 }

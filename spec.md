@@ -651,8 +651,11 @@ The native client (section 16) is checked with `tsc -p engine` (TypeScript 5.9, 
 math, snapshot parsing of `server.js`'s own broadcasts and recorded replays (past the intro hold),
 interpolation and prediction, the follow camera and ball arrow, steering and the contextual shoot
 control, the quality tiers' content from `js/gfx.js`, HUD and menu text, the lobby seat model, chat
-pacing, voice falloff and pan, and a 20 s AI practice on the shared sim. `starhermit <repo> --check`
-validates the package and manifest.
+pacing, voice falloff and pan, the built-in font's text fallback, and a 20 s AI practice on the
+shared sim. `starhermit <repo> --check` validates the package and manifest and plays 120 frames
+headless; the engine's ignored football probe (`STARHERMIT_FOOTBALL_DIR=<repo> cargo test --release
+-p starhermit-runtime --features test-game football -- --ignored`, frames saved with
+`STARHERMIT_RENDER_CHECK_PNG=<dir>`) boots to the menu, starts a practice match and plays it.
 
 ## 15. Asset inventory
 
@@ -744,8 +747,12 @@ browser code:
   distance and side at 10 Hz (section 9's falloff).
 - **Where it differs.** No WebP art (above); no tone mapping, ambient occlusion, colour grade,
   environment reflections, pitch normal map, clearcoat ball, Lambert low tier or second shadow
-  caster, and colors clamp to 0–1 (the host has none of these yet); camera flashes and haze are
-  sprites whose flash brightness is their size;
+  caster, and colors clamp to 0–1 (the host has none of these yet); the detailed pitch bakes the
+  normal map's stronger mow stripes into its colours and the kickoff coin is less metallic with a
+  faint glow in place of the reflection; camera flashes and haze are sprites whose flash
+  brightness is their size; text uses the runtime's pixel font, which has ASCII and a few symbols
+  only, so typographic dashes and quotes show as ASCII and accented letters without accents
+  (`logic/glyphs.ts`);
   SETTINGS keeps the game language, the game's mute, the quality line with its three content
   overrides and Report a problem; the Settings and
   Report-a-problem labels the browser keeps in `js/settings.js` and `game-options.js`, and text that

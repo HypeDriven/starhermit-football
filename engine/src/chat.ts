@@ -5,6 +5,7 @@
 // under them (T focuses it, Enter sends, Escape cancels). Best-effort: any
 // failure degrades to a status line or silence — the match never depends
 // on chat. The field lays out in its own corner with starhermit:ui's area.
+import { shown } from "./logic/glyphs.ts";
 import { frame } from "starhermit:engine";
 import type { Unsubscribe } from "starhermit:engine";
 import * as draw from "starhermit:draw";
@@ -182,13 +183,13 @@ export function createMatchChat(sessionId: string, myUserId: string | null): Mat
         } else {
           const m = tail[i]!;
           if (m.kind && m.kind !== "text") {
-            draw.text(oneLine(m.content ?? ""), lx, ly, { size, color: "#93a1b0", clip });
+            draw.text(shown(oneLine(m.content ?? "")), lx, ly, { size, color: "#93a1b0", clip });
           } else {
             const own = String(m.senderId ?? "").toLowerCase() === me;
             const label = `${displayNameNow(m.senderId) ?? "…"} `;
             draw.text(label, lx, ly, { size, color: own ? ACCENT2 : "#9fb0c0", clip });
             lx += draw.measureText(label, { size }).width;
-            draw.text(oneLine(m.content ?? ""), lx, ly, { size, color: "#d7e1e9", clip });
+            draw.text(shown(oneLine(m.content ?? "")), lx, ly, { size, color: "#d7e1e9", clip });
           }
         }
         ly += lineH;

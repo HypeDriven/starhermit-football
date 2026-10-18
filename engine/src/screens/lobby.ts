@@ -1,6 +1,7 @@
 // The lobby (the browser's js/lobby.js): create / invite / open / quick-join
 // against the platform's realtime rooms (spec.md §8), polled every 2 s,
 // drawn with the engine's UI. main.ts drives the transitions.
+import { shown } from "../logic/glyphs.ts";
 import * as ui from "starhermit:ui";
 import type { Friend, Room } from "starhermit:platform";
 import type { Audio } from "../audio.ts";
@@ -308,7 +309,7 @@ export class Lobby {
                 }
               } else {
                 let who: string;
-                if (p.isAi || !p.userId) who = p.isAi ? T("{name} (AI)", { name: p.username }) : p.username;
+                if (p.isAi || !p.userId) who = p.isAi ? T("{name} (AI)", { name: p.username }) : shown(p.username);
                 else who = displayNameNow(p.userId) ?? "…"; // humans: the profile nickname
                 const isMe = !!mine && p.userId === mine.userId;
                 ui.label(who, { color: isMe ? "#f1c40f" : p.isAi ? "#7fb3d3" : "#c7d2dc" });
@@ -364,7 +365,7 @@ export class Lobby {
         ui.scrollArea("invite-list", { width: 360, height: 300 }, () => {
           for (const row of this.invites!) {
             ui.row(`friend-${row.friend.userId}`, () => {
-              ui.label(row.friend.username);
+              ui.label(shown(row.friend.username));
               if (row.friend.online) ui.label(`● ${T("online")}`, { tone: "accent" });
               const label = row.state === "sent" ? T("SENT") : row.state === "error" ? T("ERROR") : T("INVITE");
               if (ui.id(`invite-${row.friend.userId}`).button(label, { disabled: row.state === "sending" || row.state === "sent" })) {

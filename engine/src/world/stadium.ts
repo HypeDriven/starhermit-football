@@ -201,8 +201,14 @@ async function makeGrassTexture(L: number, W: number, detailed: boolean, w: numb
   const [c, ctx] = makeCanvas(w, h);
   const bands = 16; // mow bands along the length (x axis)
   const bw = w / bands;
+  // The browser's detailed pitch tilts alternate bands with a normal map
+  // (normalScale 0.9), which under the floodlights makes the stripes about
+  // 2.5 times as strong as the colours alone; the host has no normal maps,
+  // so the detailed texture bakes that difference into the colours.
+  const light = detailed ? "#337735" : "#2f6d31";
+  const dark = detailed ? "#265628" : "#2a602c";
   for (let i = 0; i < bands; i++) {
-    ctx.fillStyle = i % 2 ? "#2f6d31" : "#2a602c";
+    ctx.fillStyle = i % 2 ? light : dark;
     ctx.fillRect(Math.floor(i * bw), 0, Math.ceil(bw) + 1, h);
   }
   if (detailed) {
@@ -436,7 +442,29 @@ function makeSignTexture(): CanvasTexture {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = "900 52px Arial, Helvetica, sans-serif";
-  ctx.fillText("★ STARHERMIT FC ★", 256, 50);
+  // the browser's "★ STARHERMIT FC ★", with the stars drawn as paths (the
+  // host's built-in font has no ★)
+  const text = "STARHERMIT FC";
+  // fit the line (the built-in face is wider than Arial)
+  const k = Math.min(1, 480 / (ctx.measureText(text).width + 2 * ctx.measureText(" ").width + 80));
+  ctx.font = `900 ${Math.floor(52 * k)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText(text, 256, 50);
+  const half = ctx.measureText(text).width / 2;
+  const gap = ctx.measureText(" ").width;
+  const r = 20 * k;
+  const star = (cx: number, cy: number, r: number): void => {
+    ctx.beginPath();
+    for (let k = 0; k < 10; k++) {
+      const a = -Math.PI / 2 + (k * Math.PI) / 5;
+      const rr = k % 2 ? r * 0.4 : r;
+      if (k) ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+      else ctx.moveTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+    }
+    ctx.closePath();
+    ctx.fill();
+  };
+  star(256 - half - gap - r, 48, r);
+  star(256 + half + gap + r, 48, r);
   return canvasTexture(c);
 }
 

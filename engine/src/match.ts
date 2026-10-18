@@ -326,6 +326,8 @@ export class MatchController {
     this.stadium!.update(dt, this.d.camera.position);
     if (this.pausedFlag && this.mode === "practice") return;
     this.d.hud.setMenuButton(this.stage !== "done");
+    // the mouse hint shows from the walkout, as the browser's showTouchUi
+    this.d.hud.setMouseHint(this.stage !== "done" && !this.d.input.touchMode && !this.d.input.pointerLocked);
     if (this.stage === "walkout") {
       this.updateWalkout(dt);
       this.pumpTimers(dt);

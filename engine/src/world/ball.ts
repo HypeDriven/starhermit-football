@@ -41,7 +41,11 @@ export function makeCoin(): Prop {
   const bag = new ResourceBag();
   const mesh = new Mesh(
     bag.add(new CylinderGeometry(0.12, 0.12, 0.02, 24)),
-    bag.add(new MeshStandardMaterial({ color: 0xf7d774, metalness: 0.9, roughness: 0.25 })),
+    // The browser's gold (metalness 0.9, roughness 0.25) shines with the
+    // environment map Reflections adds; the host has no environment, where
+    // such a metal shows almost black, so the coin is less metallic with a
+    // faint gold glow standing in for the reflection.
+    bag.add(new MeshStandardMaterial({ color: 0xf7d774, metalness: 0.45, roughness: 0.3, emissive: 0x4a3810 })),
   );
   mesh.visible = false;
   return { mesh, dispose: () => { mesh.removeFromParent(); bag.dispose(); } };

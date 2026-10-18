@@ -1,6 +1,7 @@
 // The achievements screen (the browser's js/achievements.js): the game's
 // catalog — declared by server.js, unlocked only by the server — with the
 // player's unlock state, read-only.
+import { shown } from "../logic/glyphs.ts";
 import * as ui from "starhermit:ui";
 import type { Achievement } from "starhermit:platform";
 import type { Audio } from "../audio.ts";
@@ -35,7 +36,7 @@ export class AchievementsScreen {
         ui.row(`ach-${a.key}`, () => {
           ui.label(got ? "★" : "○", { tone: got ? "accent" : "muted" });
           ui.column(`ach-text-${a.key}`, () => {
-            ui.label(a.name || a.key, got ? {} : { tone: "muted" });
+            ui.label(shown(a.name || a.key), got ? {} : { tone: "muted" });
             ui.label(a.description || "", { color: "#93a1b0" });
           }, { width: 300, spacing: 2 });
           ui.label(got ? t["achUnlocked"]! : t["achLocked"]!, { tone: got ? "accent" : "muted" });

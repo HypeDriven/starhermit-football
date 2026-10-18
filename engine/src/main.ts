@@ -5,9 +5,12 @@
 // StarHermit runtime's host API v1. The match simulation is server.js, shared
 // with the platform and the browser (see sim.ts); the strings are the
 // browser's own tables (see i18n.ts).
+import { shown } from "./logic/glyphs.ts";
 import { frame, onFixedUpdate, onRender, onStart, onUpdate, openMenu, setFixedRate } from "starhermit:engine";
 import type { JsonValue } from "starhermit:engine";
 import { PerspectiveCamera, renderer, scene } from "starhermit:scene";
+import type { CanvasTexture } from "starhermit:scene";
+import { canvasTexture, makeCanvas } from "./world/resources.ts";
 import { exitPointerLock, gamepads, onKey, onPointerButton, onTouch, pointerLocked, primaryPointer } from "starhermit:input";
 import { settings } from "starhermit:storage";
 import type { Room, RoomInvite } from "starhermit:platform";
@@ -283,7 +286,7 @@ async function onMatchReady(room: Room, isRejoin = false): Promise<void> {
 function showResult(r: MatchResult): void {
   disposeMatch();
   menuScene.start();
-  result = { title: resultTitle(r.winner, r.myTeam), score: `${r.score[0]} – ${r.score[1]}`, stats: r.stats, rank: "" };
+  result = { title: resultTitle(r.winner, r.myTeam), score: shown(`${r.score[0]} – ${r.score[1]}`), stats: r.stats, rank: "" };
   void showMatchRank(r);
   showScreen("result");
 }
@@ -431,11 +434,47 @@ function pollStartButton(): void {
 }
 
 // ── UI ──
+
+/** The browser's logo (.logo: weight 800, letter spacing 0.12 em, FOOTBALL
+ * in the accent, a green glow), drawn once at 64 px. */
+let logo: CanvasTexture | null = null;
+function logoTexture(): CanvasTexture {
+  if (logo) return logo;
+  const size = 64;
+  const pad = 24; // room for the glow
+  const first = "STARHERMIT ";
+  const [c, ctx] = makeCanvas(1200, size + pad * 2);
+  const style = (): void => {
+    ctx.font = `800 ${size}px sans-serif`;
+    ctx.letterSpacing = `${0.12 * size}px`;
+  };
+  style();
+  c.width = Math.min(1200, Math.ceil(ctx.measureText(first).width + ctx.measureText("FOOTBALL").width) + pad * 2);
+  style(); // resizing resets the context
+  ctx.textBaseline = "middle";
+  ctx.shadowColor = "rgba(39,174,96,0.6)";
+  ctx.shadowBlur = 24;
+  ctx.fillStyle = TEXT;
+  ctx.fillText(first, pad, pad + size / 2);
+  ctx.fillStyle = ACCENT;
+  ctx.fillText("FOOTBALL", pad + ctx.measureText(first).width, pad + size / 2);
+  logo = canvasTexture(c);
+  return logo;
+}
+
 function menuUi(): void {
   const mine = me();
   const online = !!mine;
   const t = platformStrings();
-  ui.heading("STARHERMIT  FOOTBALL");
+  {
+    // clamp(2rem, 7vw, 4rem) as the browser sizes it, within the window
+    const f = frame();
+    const vw = f.width / f.scale;
+    const lg = logoTexture();
+    const px = Math.max(32, Math.min(64, vw * 0.07)); // the font size
+    const w = Math.min((lg.width * px) / 64, vw * 0.94);
+    ui.image("STARHERMIT FOOTBALL", lg, { width: w, height: (w * lg.height) / lg.width });
+  }
   ui.label(online
     ? T("Signed in as {name}", { name: displayNameNow(mine.userId) ?? mine.displayName })
     : T("Offline mode — practice only (launch via StarHermit for multiplayer)"), { tone: "muted" });

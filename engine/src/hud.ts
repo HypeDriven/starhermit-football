@@ -4,6 +4,7 @@
 // event banners, the mouse camera hint, the ☰ match-menu button and the mic
 // toggle. Window coordinates are physical pixels; sizes are the browser's
 // CSS pixels times frame().scale.
+import { shown } from "./logic/glyphs.ts";
 import { frame } from "starhermit:engine";
 import type { ColorLike } from "starhermit:engine";
 import * as draw from "starhermit:draw";
@@ -70,10 +71,12 @@ export function createHud(): Hud {
   let visible = false;
   let homeName = "HOME";
   let awayName = "AWAY";
-  let score = "0–0";
+  let score = shown("0 – 0");
   let clockTime = 0;
   let clockHalf = 1;
   let clockLength = 180;
+  /** The browser's clock reads "00:00" until play first sets it. */
+  let clockSet = false;
   let power = 0;
   let bannerText = "";
   let bannerStart = 0;
@@ -107,7 +110,7 @@ export function createHud(): Hud {
     const crestSize = 1.5 * 16 * s;
     const home = T(homeName);
     const away = T(awayName);
-    const clock = formatClock(clockTime, clockHalf, clockLength, T);
+    const clock = clockSet ? formatClock(clockTime, clockHalf, clockLength, T) : "00:00";
     const wHome = draw.measureText(home, { size: small }).width;
     const wAway = draw.measureText(away, { size: small }).width;
     const wScore = draw.measureText(score, { size: big }).width;
@@ -250,6 +253,7 @@ export function createHud(): Hud {
         bannerText = "";
         mouseHint = false;
         menuVisible = false;
+        clockSet = false;
       }
     },
     setTeamNames(h: string, a: string): void {
@@ -257,9 +261,10 @@ export function createHud(): Hud {
       awayName = a;
     },
     setScore(h: number, a: number): void {
-      score = `${h}–${a}`;
+      score = shown(`${h} – ${a}`); // the bar's flex gap around the separator
     },
     setClock(time: number, half: number, halfLength: number): void {
+      clockSet = true;
       clockTime = time;
       clockHalf = half;
       clockLength = halfLength;

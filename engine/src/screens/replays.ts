@@ -1,5 +1,6 @@
 // Archived replays of my online matches (the browser's js/replays.js): date,
 // sides, score and a WATCH button that opens the 3D replay viewer.
+import { shown } from "../logic/glyphs.ts";
 import * as ui from "starhermit:ui";
 import type { ReplaySummary } from "starhermit:platform";
 import type { Audio } from "../audio.ts";
@@ -23,7 +24,7 @@ async function sidesFor(r: ReplaySummary): Promise<string> {
       for (let pid = 0; pid < ts * 2; pid++) {
         const seat = seats[pid];
         if (!seat) continue;
-        const name = seat.userId ? await displayName(seat.userId) : `${seat.name ?? ""} (AI)`;
+        const name = seat.userId ? await displayName(seat.userId) : shown(`${seat.name ?? ""} (AI)`);
         teams[pid < ts ? 0 : 1]!.push(name);
       }
       if (teams[0]!.length || teams[1]!.length) return sidesLine(teams);
@@ -67,7 +68,7 @@ export class ReplaysScreen {
       else if (!this.items.length && !this.hint) ui.label(T("No replays yet — finish an online match."), { tone: "muted" });
       for (const r of this.items ?? []) {
         const result = r.result as { score?: [number, number] } | null;
-        const score = result && Array.isArray(result.score) ? `${result.score[0]} – ${result.score[1]}` : "–";
+        const score = result && Array.isArray(result.score) ? shown(`${result.score[0]} – ${result.score[1]}`) : "-";
         ui.row(`replay-${r.sessionId}`, () => {
           ui.column(`rd-${r.sessionId}`, () => ui.label(formatReplayDate(r.finishedAt, locale), { tone: "muted" }), { width: 150 });
           ui.column(`rn-${r.sessionId}`, () => ui.label(this.sides.get(r.sessionId) ?? "…"), { width: 250 });

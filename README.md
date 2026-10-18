@@ -32,8 +32,9 @@ The game is served as a static site — there is no build step.
   through the runtime. A release archive (the signed runtime plus this
   package) comes from the engine checkout:
   `cargo starhermit package --script /path/to/starhermit-engine-football`.
-  The runtime runs it once it ships its script engine and host-API bindings;
-  until then `starhermit … --check` validates the package. See `spec.md`
+  Runtimes with the script engine and host-API bindings run it (engine
+  branch `h1b-script-bindings` until it merges); `starhermit … --check`
+  validates the package and plays 120 frames headless. See `spec.md`
   section 16.
 
 ## Modes
