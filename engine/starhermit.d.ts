@@ -1,8 +1,8 @@
 // Copied unchanged below this note from starhermit-engine
-// crates/starhermit-runtime/api/starhermit.d.ts at commit aba1f53 (2026-10-17,
+// crates/starhermit-runtime/api/starhermit.d.ts at commit 86495e0 (2026-10-18,
 // branch h1b-script-bindings): host API v1 with the football port's decisions.
 // Refresh it from the runtime when the contract changes; the sha256 of the
-// original file is 01a60bdda4042d58425c8b3e8e08ec559cb7cab96f1c0ad28b19c77b5556108a.
+// original file is a36a1fcb3969d4624fd9e75413ca9705597672d30b231b2799c65e8d1edee414.
 
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -507,7 +507,8 @@ declare module "starhermit:input" {
         readonly radius: number;
       };
   /** Shows these controls on touch screens (null hides them); at most 16
-   * (RangeError). Actions they name must be declared (TypeError). */
+   * and 16 KiB as JSON (RangeError). Actions they name must be declared
+   * (TypeError). */
   export function setTouchControls(controls: readonly TouchControl[] | null): void;
 
   // -- Gamepads ---------------------------------------------------------------
@@ -530,7 +531,8 @@ declare module "starhermit:input" {
   export function rumble(strong: number, weak: number, durationMs: number, slot?: number): void;
   /** Vibrates the device itself (a phone), as `navigator.vibrate`, at most
    * 5,000 ms, unless the player turned vibration off; does nothing where
-   * the device cannot. */
+   * the device cannot, and (as browsers' user activation) until the player
+   * has pressed something since the game started. */
   export function vibrate(durationMs: number): void;
 }
 
@@ -542,11 +544,15 @@ declare module "starhermit:storage" {
   // `NotAllowedError`. Storage is the game's own (no other game or package
   // can read it), kept per game, player and environment.
 
-  /** Game-private key/value storage on this device, written atomically and
-   * synchronously. Keys are 1–120 bytes of UTF-8 text; a value is at most
+  /** Game-private key/value storage on this device. A write is seen by
+   * every read at once and reaches the disk atomically as the frame (or
+   * lifecycle call) ends, so a key set many times a frame is written once.
+   * Keys are 1–120 bytes of UTF-8 text; a value is at most
    * `engine.limits.storage_key_kib` (1 MiB); the game holds at most
    * `storage_mib` (64 MiB), each key counted in whole 4 KiB blocks, and at
-   * most 4,096 keys. Past any of these a write throws a RangeError and
+   * most 4,096 keys; and it writes at most 16 MiB at once, refilled at
+   * 4 MiB a second (keys counted in whole blocks, rewrites of a key in the
+   * same frame free). Past any of these a write throws a RangeError and
    * changes nothing. */
   export interface KeyValueStorage {
     get(key: string): Uint8Array | null;
@@ -827,7 +833,8 @@ declare module "starhermit:scene" {
     constructor();
     /** Rejects with a TypeError for a bad path, an Error named
      * `NotFoundError` for a missing file and `EncodingError` for an image it
-     * cannot decode; RangeError past the texture budget. */
+     * cannot decode; RangeError past the texture budget or with 128 loads
+     * already waiting. */
     loadAsync(path: string): Promise<Texture>;
     load(path: string, onLoad?: (texture: Texture) => void, onError?: (error: Error) => void): Texture;
   }
@@ -1776,7 +1783,8 @@ declare module "starhermit:audio" {
   }
   /** Decodes a package file (WAV, Ogg Vorbis, Ogg Opus). Rejects with a
    * TypeError for a bad path, `NotFoundError`, `EncodingError` for data it
-   * cannot decode, RangeError past the budget. */
+   * cannot decode, RangeError past the budget or with 128 decodes already
+   * waiting. */
   export function loadClip(path: string): Promise<AudioClip>;
   /** From samples (−1..1): one array per channel (1–8), 8–192 kHz;
    * non-finite samples throw a TypeError. */
@@ -1983,7 +1991,8 @@ declare module "starhermit:audio" {
     /** Equal lengths of at least 2 (`IndexSizeError`); coefficients whose
      * unnormalized wave exceeds the float range are a RangeError. */
     createPeriodicWave(real: Float32Array | readonly number[], imag: Float32Array | readonly number[], constraints?: { disableNormalization?: boolean }): PeriodicWave;
-    /** Decodes WAV, Ogg Vorbis or Ogg Opus bytes (mono or stereo). */
+    /** Decodes WAV, Ogg Vorbis or Ogg Opus bytes (mono or stereo); at most
+     * 128 decodes wait at once (RangeError). */
     decodeAudioData(data: ArrayBuffer | Uint8Array): Promise<AudioBuffer>;
     /** Decodes a package file. */
     loadBuffer(path: string): Promise<AudioBuffer>;
@@ -2489,8 +2498,9 @@ declare module "starhermit:script" {
   /** Evaluates a classic (non-module) package script in the game's own
    * realm, synchronously, so its globals (a shared simulation published on
    * `globalThis`) become available; it runs on the calling callback's fuel.
-   * Throws a TypeError for a bad path, `NotFoundError`, a `SyntaxError` for
-   * a script that does not parse, or what the script throws. */
+   * Throws a TypeError for a bad path or a file that is not a script
+   * (.js, .mjs, .ts or .mts), `NotFoundError`, a `SyntaxError` for a script
+   * that does not parse, or what the script throws. */
   export function loadClassic(path: string): void;
 
   /** The context the platform passes a server script; local callers supply
@@ -2528,9 +2538,14 @@ declare module "starhermit:script" {
   /** A server script as the platform runs it: every call evaluates it in a
    * fresh isolated realm (the parse is cached) with the platform's rules
    * (no imports, no `Date`, no `Math.random`, no timers; JSON in and out;
-   * `ctx.now` and `ctx.random` from the context) and its own fuel (the
-   * manifest's `fuel_ms` per call; running out throws a RangeError). The
-   * script's own exceptions are rethrown with its file and line. */
+   * `ctx.now` and `ctx.random` from the context, and `Intl` dates read
+   * `ctx.now` as the clock) and its own fuel (the manifest's `fuel_ms` per
+   * call; running out throws a RangeError). A context is at most 256 KiB
+   * of JSON and a result (or the declarations) at most 64 KB (RangeError).
+   * Its work is the game's: the instructions it ran count against the
+   * game's call, its memory comes out of the game's heap, and stopping the
+   * game stops it. The script's own exceptions are rethrown with its file
+   * and line. */
   export interface PlatformScript {
     /** The script's static declarations, read once. */
     readonly tickRateHz: number | null;
@@ -2540,9 +2555,11 @@ declare module "starhermit:script" {
     onPlayerMessage(ctx: SessionContext): ScriptResult;
     onTick(ctx: SessionContext): ScriptResult;
   }
-  /** Loads a package script that defines `globalThis.game` with
-   * `createSession`, `onPlayerMessage` and `onTick`. Throws a TypeError for
-   * a bad path, `NotFoundError`, a `SyntaxError`, or a TypeError when it
-   * defines no `game` with those functions. At most 16 sandboxes. */
+  /** Loads a package script (at most 2 MB, the platform's limit) that
+   * defines `globalThis.game` with `createSession`, `onPlayerMessage` and
+   * `onTick`. Throws a TypeError for a bad path, `NotFoundError`, a
+   * `SyntaxError`, a TypeError when it defines no `game` with those
+   * functions, or a RangeError for a `tickRateHz` that is not above 0 and
+   * at most 1000. At most 16 sandboxes. */
   export function sandbox(path: string): PlatformScript;
 }

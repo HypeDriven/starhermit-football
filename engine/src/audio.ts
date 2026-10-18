@@ -269,13 +269,17 @@ export function createAudio(): Audio {
       const entry = e as { event?: unknown; name?: unknown } | null;
       if (!entry || typeof entry.event !== "string" || typeof entry.name !== "string") continue;
       const event = entry.event;
-      ctx.loadBuffer(`sfx/${entry.name}.opus`)
-        .then((buf) => {
-          clips.set(event, buf);
-        })
-        .catch(() => {
-          // synth fallback for this event
-        });
+      try {
+        ctx.loadBuffer(`sfx/${entry.name}.opus`)
+          .then((buf) => {
+            clips.set(event, buf);
+          })
+          .catch(() => {
+            // synth fallback for this event
+          });
+      } catch {
+        // past the host's 128 waiting decodes: synth fallback for this event
+      }
     }
   }
 

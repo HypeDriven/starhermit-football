@@ -1,7 +1,7 @@
 # Host API gaps found by the football port
 
 What the native client (`engine/src`) still needs from host API v1
-(`engine/starhermit.d.ts`, copied from the runtime at aba1f53, which answered
+(`engine/starhermit.d.ts`, copied from the runtime at 86495e0, which answered
 the port's earlier lists: module specifiers and their queries, fuel,
 rotation, audio lifetimes, the game socket's envelopes, rooms, instance
 attributes, geometry, projection, draw, UI areas and tones, input sources
