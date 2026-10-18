@@ -1,9 +1,10 @@
 // Copied unchanged below this note from starhermit-engine
-// crates/starhermit-runtime/api/starhermit.d.ts at commit 0f3a320 (2026-10-18,
-// branch script-next): host API v1 with the football port's decisions, R2's
-// rendering, system fonts and WebP. Refresh it from the runtime when the
-// contract changes; the sha256 of the original file is
-// ffebf09bf78967a90cab8a2a8fac213f1aaf732a934dc9ac0bdc958546f9e816.
+// crates/starhermit-runtime/api/starhermit.d.ts at commit 1d0cf8f (2026-10-18,
+// branch next-review): host API v1 with the football port's decisions, R2's
+// rendering, system fonts (through the generic families only) and WebP.
+// Refresh it from the runtime when the contract changes; the sha256 of the
+// original file is
+// 8073768aa7f67e444ae4751dd53620825b63da6c1aa4a407a111ffdf6237ec71.
 
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -891,8 +892,9 @@ declare module "starhermit:scene" {
    * floats for light above white, a CanvasTexture or a package image) or a
    * CubeTexture. It is made off the game's thread and lights the scene a
    * few frames later (see `environmentReady`); a game holds at most 8
-   * (RangeError), each counting about 1.4 MiB against the image budget.
-   * `fromScene` throws a TypeError: there is no render-to-texture. */
+   * (RangeError), each counting about 1.4 MiB against the image budget,
+   * and images waiting for their prefilters hold at most 256 MiB together
+   * (RangeError; cube faces are squares of at most 2,048). `fromScene` throws a TypeError: there is no render-to-texture. */
   export class PMREMGenerator {
     constructor(renderer?: Renderer);
     fromEquirectangular(texture: Texture): { readonly texture: Texture; readonly width: number; readonly height: number; dispose(): void };
@@ -1517,8 +1519,9 @@ declare module "starhermit:canvas" {
    * WebP's first frame; rejects with an Error named `EncodingError` for
    * data it cannot decode, a RangeError past 4,096 pixels on a side). Images
    * decode off the game's thread, two at a time, and settle as a frame
-   * begins; at most 128 wait at once (RangeError). ImageData and canvases
-   * are copied at once. */
+   * begins; at most 128 wait at once, an image's bytes are at most 16 MiB
+   * and those waiting at most 64 MiB together (RangeError, before they are
+   * copied). ImageData and canvases are copied at once. */
   export function createImageBitmap(source: string | Uint8Array | ArrayBuffer | ImageData | OffscreenCanvas): Promise<ImageBitmap>;
 
   /** Straight-alpha RGBA8 pixels, as the web's. */
@@ -1701,8 +1704,9 @@ declare module "starhermit:canvas" {
      * CSS unit, line height, families); families are the fonts added with
      * `fonts.add` and the generic families (`sans-serif`, `serif`,
      * `monospace`, `system-ui`, `cursive`, `fantasy`), which map to the
-     * operating system's fonts as browsers map them (see `starhermit:draw`)
-     * with the engine's pixel font (`starhermit pixel`) last. Characters a
+     * operating system's fonts as browsers map them (see `starhermit:draw`;
+     * the system's families have no names of their own here) with the
+     * engine's pixel font (`starhermit pixel`) last. Characters a
      * face lacks draw with the next face that has them. Default
      * `10px sans-serif`. */
     font: string;
@@ -1745,7 +1749,8 @@ declare module "starhermit:canvas" {
     load(): Promise<FontFace>;
   }
   /** The fonts canvases (and `draw.text`) can use, as `document.fonts`. At
-   * most 64 faces and 64 MiB of font data (RangeError). */
+   * most 64 faces and 64 MiB of font data (RangeError); a face deleted and
+   * added again counts once. */
   export interface FontFaceSet {
     add(font: FontFace): this;
     delete(font: FontFace): boolean;
@@ -1784,7 +1789,10 @@ declare module "starhermit:draw" {
   // still draws ASCII. On common systems that covers Latin-1, Latin
   // Extended-A and general punctuation (`é`, `ß`, `–`, `’`); symbols such as
   // `★` depend on the system. The runtime ships no font file and reads
-  // fonts only from the system's font directories. Exact metrics (widths,
+  // fonts only from the system's font directories; games name them only
+  // by the generic families (a system family's own name, such as `Arial`,
+  // is not a family here, so text cannot tell which fonts the system has).
+  // Exact metrics (widths,
   // line heights) differ between systems, as on the web: measure text
   // (`measureText`) rather than assume widths.
 
@@ -1816,7 +1824,9 @@ declare module "starhermit:draw" {
     /** A family added with `canvas.fonts`, a generic family (`system-ui`,
      * the default, `sans-serif`, `serif`, `monospace`, `cursive`,
      * `fantasy`) or `starhermit pixel` (the pixel font, crisp at multiples
-     * of 10); any other name throws a TypeError. */
+     * of 10); any other name draws as `sans-serif`, as browsers fall back.
+     * The system's own families (Arial, DejaVu Sans) are reached only
+     * through the generic families. */
     font?: string;
     /** Where `x` is: the text's start (default), center or end. */
     align?: "start" | "center" | "end";
@@ -1824,7 +1834,7 @@ declare module "starhermit:draw" {
      * face added under it (or the system's bold face) is used; a family
      * without a bold face draws a synthesized bold at 600 and more. */
     weight?: string;
-    /** Extra pixels between characters. */
+    /** Extra pixels between characters (within ±1,024). */
     letterSpacing?: number;
     /** Drawn first under the text, offset by `x`/`y` pixels. */
     shadow?: { color: ColorLike; x: number; y: number };
@@ -1834,7 +1844,10 @@ declare module "starhermit:draw" {
   }
   /** `y` is the top of the first line. */
   export function text(text: string, x: number, y: number, options?: TextOptions): void;
-  export function measureText(text: string, options?: Pick<TextOptions, "size" | "font" | "maxWidth">): { width: number; height: number };
+  /** The size `text` draws at with these options: the same faces (the
+   * weight's), letter spacing, wrap width and direction, so a width
+   * measured here is the width drawn. */
+  export function measureText(text: string, options?: Pick<TextOptions, "size" | "font" | "weight" | "letterSpacing" | "maxWidth" | "direction">): { width: number; height: number };
   export interface ImageOptions extends Clip, Rotation {
     /** Part of the source in its own pixels (default all of it). */
     source?: { x: number; y: number; width: number; height: number };

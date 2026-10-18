@@ -10,6 +10,7 @@
 // The host graph is bounded (nodes, connections, render cost), so every
 // short-lived chain releases its nodes when its source ends, and a sound
 // that does not fit is dropped rather than failing the game.
+import { lowOnFuel, nextFrame } from "./tasks.ts";
 import { context } from "starhermit:audio";
 import type { AudioBuffer, AudioBusNode, AudioNode, BiquadFilterNode, GainNode, OscillatorNode } from "starhermit:audio";
 import { settings } from "starhermit:storage";
@@ -110,8 +111,9 @@ export function createAudio(): Audio {
 
   const ready = (): boolean => built;
 
-  // White noise with a mild 1/f tilt so raw loops feel less harsh.
-  function buildNoiseBuffer(): AudioBuffer {
+  // White noise with a mild 1/f tilt so raw loops feel less harsh; two
+  // seconds of stereo samples, made a block at a time across frames.
+  async function buildNoiseBuffer(): Promise<AudioBuffer> {
     const len = Math.floor(ctx.sampleRate * 2);
     const buf = ctx.createBuffer(2, len, ctx.sampleRate);
     const data = new Float32Array(len);
@@ -121,6 +123,7 @@ export function createAudio(): Audio {
         const white = Math.random() * 2 - 1;
         last = last * 0.94 + white * 0.06;
         data[i] = (white * 0.55 + last * 3.2) * 0.5;
+        if ((i & 4095) === 4095 && lowOnFuel()) await nextFrame();
       }
       buf.copyToChannel(data, ch);
     }
@@ -210,8 +213,10 @@ export function createAudio(): Audio {
     }
   }
 
+  let building = false;
   function build(): void {
-    if (built) return;
+    if (built || building) return;
+    building = true;
     try {
       const m = ctx.createGain();
       m.gain.value = muted ? 0 : 1;
@@ -236,11 +241,16 @@ export function createAudio(): Audio {
       crowd.connect(reverbSend);
       crowdBus = crowd;
 
-      noiseBuffer = buildNoiseBuffer();
-      buildCrowdBed(crowd, noiseBuffer);
-      built = true;
-      applyExcitement(ctx.currentTime);
-      loadClips();
+      // sounds play once the noise (a few frames of work) and the crowd bed exist
+      void buildNoiseBuffer()
+        .then((noise) => {
+          noiseBuffer = noise;
+          buildCrowdBed(crowd, noise);
+          built = true;
+          applyExcitement(ctx.currentTime);
+          loadClips();
+        })
+        .catch((e: unknown) => console.warn("audio: the synthesis graph could not be built:", String(e)));
     } catch (e) {
       console.warn("audio: the synthesis graph could not be built:", String(e));
     }

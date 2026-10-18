@@ -1,7 +1,7 @@
 # Host API gaps found by the football port
 
 What the native client (`engine/src`) still needs from host API v1
-(`engine/starhermit.d.ts`, copied from the runtime at 0f3a320, which answered
+(`engine/starhermit.d.ts`, copied from the runtime at 1d0cf8f, which answered
 the port's earlier lists: module specifiers and their queries, fuel,
 rotation, audio lifetimes, the game socket's envelopes, rooms, instance
 attributes, geometry, projection, draw, UI areas and tones, input sources
@@ -9,7 +9,9 @@ and bindings, preferences, bold text, session ends and sign-in (also from
 UI buttons), report context, large textures, and R2's rendering: tone
 mapping and HDR light, normal maps, physical and Lambert materials,
 environments, four shadow casters with focus, points, anisotropy; system
-fonts for the generic families; WebP images). Each
+fonts for the generic families, which are now the only names the system's
+fonts have, so the port's font values name only generic families; WebP
+images; measureText with weight and letter spacing). Each
 entry names the module and member, the semantics wanted, why football needs
 it, and what the port does meanwhile. Nothing here is football-specific.
 
@@ -37,16 +39,6 @@ release build, the engine's football probe and its full-match probe at
 cover the browser's text (the port's ASCII folding is gone), and retained
 instancing took the per-frame host cost of the crowd away (the game thread
 now takes 3.7–3.9 ms a frame at the median, 4.3–4.9 ms at p95).
-
-3. **`starhermit:draw` — `measureText` leaves out weight and letter
-   spacing.** Its options are `size`, `font` and `maxWidth`, while `text`
-   draws `weight` (bold faces are wider) and `letterSpacing` (added after
-   each character), so bold or spaced text measures narrower than it draws.
-   The HUD lays out bold names, the bold spaced score, the bold clock and
-   the spaced mouse hint in panels from these widths. Wanted: `weight` and
-   `letterSpacing` in `measureText`'s options (as a canvas's `font` and
-   `letterSpacing` do for its `measureText`). Meanwhile the port adds the
-   spacing itself and the bold excess shows as tighter gaps.
 
 4. **Runtime — periodic game-thread stalls.** Since the R2 runtime
    (bdf60c8, and still at 0f3a320) the full-match probe shows stalls of

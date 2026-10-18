@@ -9,6 +9,8 @@
 //                go up at 30 Hz over the games socket and server-timed
 //                snapshots are adaptively interpolated. Leave/rejoin, AI
 //                stand-ins and the stretcher ceremony are the server's.
+import { beginLoading, reportLoading } from "./progress.ts";
+import { breathe } from "./tasks.ts";
 import { frame } from "starhermit:engine";
 import { Vector3 } from "starhermit:scene";
 import type { PerspectiveCamera, Scene } from "starhermit:scene";
@@ -207,10 +209,22 @@ export class MatchController {
     return view;
   }
 
-  private buildPlayers(): void {
+  /** The footballers one at a time across frames (each builds its canvas
+   * textures and meshes), for the match's loading screen. */
+  private async buildPlayersSliced(): Promise<boolean> {
+    const build = this.build;
+    const alive = (): boolean => !this.disposed && build === this.build;
     for (const v of this.views) v?.dispose();
     this.views = [];
-    for (const p of this.state!.players) this.views[p.id] = this.makeViewFor(p);
+    const players = this.state!.players;
+    for (let i = 0; i < players.length; i++) {
+      const p = players[i]!;
+      this.views[p.id] = this.makeViewFor(p);
+      reportLoading(0.97 + (0.03 * (i + 1)) / players.length);
+      await breathe();
+      if (!alive()) return false;
+    }
+    return true;
   }
 
   // ── public: start modes ───────────────────────────────────────────────────
@@ -245,8 +259,9 @@ export class MatchController {
     this.S.clearAiPlans(st);
     this.stage = "loading";
     try {
+      beginLoading();
       if (!(await this.buildWorld())) return;
-      this.buildPlayers();
+      if (!(await this.buildPlayersSliced())) return;
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       console.error("match world build failed:", message);

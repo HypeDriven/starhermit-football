@@ -103,7 +103,7 @@ function numberTexture(number: number, shirt: string): CanvasTexture {
   if (tex) return tex;
   const [c, ctx] = makeCanvas(256, 256);
   const fill = contrastFor(shirt);
-  ctx.font = 'bold 170px "Arial Black", Arial, sans-serif';
+  ctx.font = "bold 170px sans-serif"; // the browser's "Arial Black", Arial (generic families only)
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.lineWidth = 10;

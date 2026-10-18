@@ -45,7 +45,7 @@ async function build(): Promise<Texture | null> {
   const lampDistance = Math.hypot(30, 24, 22);
   const halfW = 4.5 / lampDistance;
   const halfH = 2 / lampDistance;
-  await sliced(h, 8, (row) => {
+  await sliced(h, 1, (row) => {
     const lat = (0.5 - (row + 0.5) / h) * Math.PI;
     const y = Math.sin(lat);
     const cl = Math.cos(lat);

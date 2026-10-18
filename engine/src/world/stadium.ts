@@ -56,6 +56,7 @@ import { reducedMotion } from "../prefs.ts";
 import type { Pitch } from "../sim.ts";
 import { breathe, lowOnFuel, nextFrame, sliced } from "../tasks.ts";
 import { MAX_FLASHES, MAX_HAZE } from "../../../js/gfx.js";
+import { reportLoading } from "../progress.ts";
 import { stadiumEnvironment } from "./environment.ts";
 import { ResourceBag, canvasTexture, makeCanvas } from "./resources.ts";
 
@@ -108,32 +109,46 @@ export interface Stadium {
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 /** Merges primitive geometries into one non-indexed geometry with position,
- * normal and uv (the browser's mergeGeoms), releasing the parts. */
+ * normal and uv (the browser's mergeGeoms), releasing the parts. One pass
+ * expands each part's index straight into the merged arrays: the runtime's
+ * toNonIndexed and computeBoundingSphere took 17 ms for the stands' 108
+ * boxes, and the runtime never reads a geometry's bounding sphere. */
 function mergeGeoms(geoms: BufferGeometry[]): BufferGeometry {
-  const parts = geoms.map((g) => (g.getIndex() ? g.toNonIndexed() : g));
   let vCount = 0;
-  for (const g of parts) vCount += g.getAttribute("position")!.count;
+  for (const g of geoms) vCount += g.getIndex()?.count ?? g.getAttribute("position")!.count;
   const pos = new Float32Array(vCount * 3);
   const nor = new Float32Array(vCount * 3);
   const uv = new Float32Array(vCount * 2);
-  let o3 = 0;
-  let o2 = 0;
-  for (const g of parts) {
-    const p = g.getAttribute("position")!;
-    pos.set(p.array, o3);
-    const n = g.getAttribute("normal");
-    if (n) nor.set(n.array, o3);
-    const u = g.getAttribute("uv");
-    if (u) uv.set(u.array, o2);
-    o3 += p.count * 3;
-    o2 += p.count * 2;
+  let v = 0;
+  for (const g of geoms) {
+    const p = g.getAttribute("position")!.array;
+    const n = g.getAttribute("normal")?.array;
+    const u = g.getAttribute("uv")?.array;
+    const index = g.getIndex()?.array;
+    const count = index ? index.length : p.length / 3;
+    for (let i = 0; i < count; i++, v++) {
+      const s = index ? index[i]! : i;
+      const o = v * 3;
+      const so = s * 3;
+      pos[o] = p[so]!;
+      pos[o + 1] = p[so + 1]!;
+      pos[o + 2] = p[so + 2]!;
+      if (n) {
+        nor[o] = n[so]!;
+        nor[o + 1] = n[so + 1]!;
+        nor[o + 2] = n[so + 2]!;
+      }
+      if (u) {
+        uv[v * 2] = u[s * 2]!;
+        uv[v * 2 + 1] = u[s * 2 + 1]!;
+      }
+    }
+    g.dispose();
   }
-  for (const g of new Set([...geoms, ...parts])) g.dispose();
   const out = new BufferGeometry();
   out.setAttribute("position", new BufferAttribute(pos, 3));
   out.setAttribute("normal", new BufferAttribute(nor, 3));
   out.setAttribute("uv", new BufferAttribute(uv, 2));
-  out.computeBoundingSphere();
   return out;
 }
 
@@ -212,6 +227,10 @@ async function makeGrassTexture(L: number, W: number, detailed: boolean, w: numb
   if (detailed) {
     // broad, soft turf variation so the pitch is not a flat print
     for (let i = 0; i < 90; i++) {
+      if (i % 10 === 9 && lowOnFuel()) {
+        await nextFrame();
+        if (!alive()) return null;
+      }
       const x = Math.random() * w;
       const y = Math.random() * h;
       const r = (30 + Math.random() * 110) * k;
@@ -246,7 +265,7 @@ async function makeGrassTexture(L: number, W: number, detailed: boolean, w: numb
     wear(0, 0, 3, 3, 0.25);
   }
   // per-pixel grass grain noise, a band of rows at a time
-  const rows = 32;
+  const rows = 4;
   for (let y0 = 0; y0 < h; y0 += rows) {
     if (!alive()) return null;
     const rh = Math.min(rows, h - y0);
@@ -259,6 +278,7 @@ async function makeGrassTexture(L: number, W: number, detailed: boolean, w: numb
       d[i + 2] = d[i + 2]! + n * 0.8;
     }
     ctx.putImageData(img, 0, y0);
+    reportLoading(0.35 + (0.28 * y0) / h);
     if (lowOnFuel()) await nextFrame();
   }
   // sparse lighter/darker flecks for extra texture
@@ -300,7 +320,8 @@ async function makeGrassNormal(L: number, W: number, w: number, alive: () => boo
       d[o + 3] = 255;
     }
     row = next;
-    if (y % 16 === 15 && lowOnFuel()) {
+    reportLoading(0.65 + (0.3 * y) / h);
+    if (lowOnFuel()) {
       await nextFrame();
       if (!alive()) return null;
     }
@@ -435,10 +456,10 @@ function makeLedTexture(): CanvasTexture {
     ctx.fillStyle = fg;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = "italic 900 72px Arial, Helvetica, sans-serif";
+    ctx.font = "italic 900 72px sans-serif"; // the browser's Arial, Helvetica (generic families only)
     ctx.fillText(word, x + segW / 2, 56);
     ctx.globalAlpha = 0.65;
-    ctx.font = "700 22px Arial, Helvetica, sans-serif";
+    ctx.font = "700 22px sans-serif";
     ctx.fillText("OFFICIAL CLUB PARTNER", x + segW / 2, 102);
     ctx.globalAlpha = 1;
     ctx.fillStyle = "rgba(255,255,255,0.28)";
@@ -481,13 +502,13 @@ function makeSignTexture(): CanvasTexture {
   ctx.fillStyle = "#ffffff";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.font = "900 52px Arial, Helvetica, sans-serif";
+  ctx.font = "900 52px sans-serif";
   // the browser's "★ STARHERMIT FC ★", with the stars drawn as paths (the
   // host's built-in font has no ★)
   const text = "STARHERMIT FC";
-  // fit the line (the built-in face is wider than Arial)
+  // fit the line (the system's sans-serif may be wider than Arial)
   const k = Math.min(1, 480 / (ctx.measureText(text).width + 2 * ctx.measureText(" ").width + 80));
-  ctx.font = `900 ${Math.floor(52 * k)}px Arial, Helvetica, sans-serif`;
+  ctx.font = `900 ${Math.floor(52 * k)}px sans-serif`;
   ctx.fillText(text, 256, 50);
   const half = ctx.measureText(text).width / 2;
   const gap = ctx.measureText(" ").width;
@@ -596,6 +617,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   lines.receiveShadow = true;
   lines.renderOrder = 1;
   root.add(lines);
+  reportLoading(0.04);
   await breathe();
 
   // ── goals (mirrored trapezoid nets, wholly behind each goal line) ──
@@ -643,6 +665,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     map: bag.add(makeNetTexture()), color: 0xdfe6ea, alphaTest: 0.3, side: DoubleSide, roughness: 0.9,
   }));
   root.add(netMesh);
+  reportLoading(0.08);
   await breathe();
   if (!alive()) return abandon();
 
@@ -686,6 +709,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
         seatCoords.push(x * cos + r.z * sin, r.top, -x * sin + r.z * cos);
       }
     }
+    reportLoading(0.1);
     await breathe();
   }
   const stands = mesh(mergeGeoms(standGeoms), new MeshStandardMaterial({ color: 0x181c23, roughness: 0.95 }));
@@ -710,7 +734,8 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     seatMesh.setColorAt(0, col);
     const m = seatMesh.instanceMatrix.array as Float32Array;
     const c = seatMesh.instanceColor!.array as Float32Array;
-    await sliced(nSeatPos, 500, (i) => {
+    await sliced(nSeatPos, 200, (i) => {
+      if (i % 200 === 0) reportLoading(0.12 + (0.08 * i) / nSeatPos);
       const o = i * 16;
       m[o] = 1; m[o + 1] = 0; m[o + 2] = 0; m[o + 3] = 0;
       m[o + 4] = 0; m[o + 5] = 1; m[o + 6] = 0; m[o + 7] = 0;
@@ -755,7 +780,8 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     const col = new Color();
     crowdMesh.setColorAt(0, col);
     const ccol = crowdMesh.instanceColor!.array as Float32Array;
-    await sliced(cN, 500, (i) => {
+    await sliced(cN, 200, (i) => {
+      if (i % 200 === 0) reportLoading(0.2 + (0.1 * i) / cN);
       const si = crowdIdx[i]!;
       const x = seatCoords[si * 3]!;
       const y = seatCoords[si * 3 + 1]! + 0.62;
@@ -785,6 +811,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   root.add(crowdMesh);
   lambertTwin(seatMesh);
   lambertTwin(crowdMesh);
+  await breathe();
   if (!alive()) {
     crowdGeo.dispose();
     return abandon();
@@ -836,6 +863,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   }));
   coneMesh.renderOrder = 8;
   root.add(coneMesh);
+  reportLoading(0.32);
   await breathe();
 
   // bright glow on each lamp bank (HDR, so bloom picks it up when on)
@@ -909,6 +937,8 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   root.add(hemi);
   root.add(amb);
 
+  await breathe();
+
   // ── LED advertising boards ringing the pitch ──
   const ledTex = bag.add(makeLedTexture());
   const ledGeoms: BufferGeometry[] = [];
@@ -949,6 +979,8 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   tunnelSign.position.set(-L / 2 - 1.05, tunH + 0.9, 0);
   root.add(tunnelSign);
 
+  await breathe();
+
   // ── dugouts on the south (+z) touchline ──
   const dugGeoms: BufferGeometry[] = [];
   for (const dx of [-7.5, 7.5]) {
@@ -986,6 +1018,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   }
   const flagPoles = mesh(mergeGeoms(flagPoleGeoms), new MeshStandardMaterial({ color: 0xe8c93b, roughness: 0.6 }));
   root.add(flagPoles);
+  reportLoading(0.35);
   await breathe();
 
   // ── particles: camera flashes in the stands + haze drifting in the beams ──
@@ -1139,6 +1172,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   // the pitch textures exist before the stadium shows
   requested = `${q.grass}|${q.lines}|${q.detail}`;
   await rebuildTextures(q, generation);
+  reportLoading(0.97);
   if (!alive()) {
     crowdGeo.dispose();
     disposeTextures();

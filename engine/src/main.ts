@@ -29,6 +29,7 @@ import type { MatchResult } from "./match.ts";
 import { MenuScene } from "./menuScene.ts";
 import { GameClient, RosterClient } from "./net.ts";
 import { P, copyText, displayNameNow, errorMessage, inviteLinkNow, me } from "./platform.ts";
+import { loadingFraction } from "./progress.ts";
 import { pollQuality } from "./quality.ts";
 import { ReplayViewer } from "./replayView.ts";
 import { AchievementsScreen } from "./screens/achievements.ts";
@@ -759,6 +760,13 @@ function loadingScreen(text: string): void {
   const logo = 22.4 * s; // .small-logo 1.4rem
   draw.text("STARHERMIT FOOTBALL", f.width / 2, f.height / 2 - logo * 1.2, { size: logo, color: TEXT, align: "center", letterSpacing: 0.12 * logo, weight: "800" });
   draw.text(text, f.width / 2, f.height / 2 + logo * 0.4, { size: 16 * s, color: MUTED, align: "center" });
+  // how far the build has got (the native loading screen's addition)
+  const bw = 200 * s;
+  const bh = 4 * s;
+  const bx = f.width / 2 - bw / 2;
+  const by = f.height / 2 + logo * 0.4 + 30 * s;
+  draw.rect(bx, by, bw, bh, [1, 1, 1, 0.12]);
+  draw.rect(bx, by, bw * loadingFraction(), bh, ACCENT);
 }
 
 // ── lifecycle ──

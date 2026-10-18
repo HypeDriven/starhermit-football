@@ -186,8 +186,8 @@ export function createMatchChat(sessionId: string, myUserId: string | null): Mat
           } else {
             const own = String(m.senderId ?? "").toLowerCase() === me;
             const label = `${displayNameNow(m.senderId) ?? "…"} `;
-            draw.text(label, lx, ly, { size, color: own ? ACCENT2 : "#9fb0c0", clip });
-            lx += draw.measureText(label, { size }).width;
+            draw.text(label, lx, ly, { size, color: own ? ACCENT2 : "#9fb0c0", weight: "700", clip });
+            lx += draw.measureText(label, { size, weight: "700" }).width;
             draw.text(oneLine(m.content ?? ""), lx, ly, { size, color: "#d7e1e9", clip });
           }
         }

@@ -107,13 +107,12 @@ export function createHud(): Hud {
     const home = T(homeName);
     const away = T(awayName);
     const clock = clockSet ? formatClock(clockTime, clockHalf, clockLength, T) : "00:00";
-    // the bar's letter spacing (0.05em) is drawn after each character;
-    // measuring leaves it out
-    const spaced = (text: string, size: number): number => draw.measureText(text, { size }).width + 0.05 * size * [...text].length;
+    // the bar's bold text with its 0.05em letter spacing
+    const spaced = (text: string, size: number): number => draw.measureText(text, { size, weight: "800", letterSpacing: 0.05 * size }).width;
     const wHome = spaced(home, small);
     const wAway = spaced(away, small);
     const wScore = spaced(score, big);
-    const wClock = draw.measureText(clock, { size: clockSize }).width;
+    const wClock = draw.measureText(clock, { size: clockSize, weight: "800" }).width;
     const padX = 1.1 * 16 * s;
     const padY = 0.4 * 16 * s;
     const inner = crestSize + gap + wHome + gap + wScore + gap + wAway + gap + crestSize + gap * 2 + wClock;
@@ -194,7 +193,7 @@ export function createHud(): Hud {
     const text = T("CLICK THE PITCH FOR MOUSE CAMERA · LEFT SHOOT · RIGHT PASS · MIDDLE TACKLE");
     const size = 11.2 * s; // #mouse-hint 0.7rem
     const spacing = 0.06 * size;
-    const tw = draw.measureText(text, { size }).width + spacing * [...text].length;
+    const tw = draw.measureText(text, { size, weight: "700", letterSpacing: spacing }).width;
     const padX = 0.8 * 16 * s;
     const padY = 0.45 * 16 * s;
     const w = tw + padX * 2;
@@ -229,7 +228,7 @@ export function createHud(): Hud {
     }
     const label = micMuted ? T("MIC OFF · M") : T("MIC ON · M");
     const size = 11.52 * s; // #btn-mic 0.72rem
-    const tw = draw.measureText(label, { size }).width;
+    const tw = draw.measureText(label, { size, weight: "700" }).width;
     const w = tw + 0.7 * 16 * s * 2;
     const h = size + 0.3 * 16 * s * 2;
     // left of the ☰ button when it shows

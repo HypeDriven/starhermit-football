@@ -37,7 +37,9 @@ export function createNameTag(name: string, opts: { color?: string; isYou?: bool
   const fontPx = 30 * SS;
   const padX = 16 * SS;
   const padY = 9 * SS;
-  const font = `bold ${fontPx}px "Segoe UI", system-ui, Arial, sans-serif`;
+  // the browser's "Segoe UI", system-ui, Arial: the runtime names the
+  // system's fonts only by the generic families
+  const font = `bold ${fontPx}px system-ui, sans-serif`;
 
   const [canvas, ctx] = makeCanvas(2, 2);
   ctx.font = font;

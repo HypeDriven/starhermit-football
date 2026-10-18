@@ -11,6 +11,8 @@ import type { Prop } from "./world/ball.ts";
 import { HAIRS, TEAM_KITS, kitFor } from "./world/kits.ts";
 import { createPlayerMesh } from "./world/player.ts";
 import type { PlayerView } from "./world/player.ts";
+import { beginLoading, reportLoading } from "./progress.ts";
+import { breathe } from "./tasks.ts";
 import { buildStadium } from "./world/stadium.ts";
 import { currentQuality } from "./quality.ts";
 import type { Stadium } from "./world/stadium.ts";
@@ -47,19 +49,22 @@ export class MenuScene {
     return this.wanted && !this.stadium;
   }
 
-  private newMatch(): void {
+  /** A fresh exhibition; its footballers build one a frame. */
+  private async newMatch(alive: () => boolean): Promise<void> {
     this.S.clearAiPlans(this.state);
     const roster: RosterSeat[] = [];
     for (let i = 0; i < TEAM_SIZE * 2; i++) roster.push({ userId: null, name: this.S.takeAiName(), isAi: true });
     this.state = this.S.createMatch({ teamSize: TEAM_SIZE, roster, seed: (Math.random() * 1e9) | 0 });
     this.S.resetKickoff(this.state, Math.random() < 0.5 ? 0 : 1);
-    this.buildViews();
+    await this.buildViews(alive);
   }
 
-  private buildViews(): void {
+  private async buildViews(alive: () => boolean): Promise<void> {
     for (const v of this.views) v.dispose();
     this.views = [];
-    for (const p of this.state!.players) {
+    const players = this.state!.players;
+    for (let i = 0; i < players.length; i++) {
+      const p = players[i]!;
       const view = createPlayerMesh({
         kit: kitFor(p.team, p.role, p.slot),
         skin: Math.random(),
@@ -70,6 +75,9 @@ export class MenuScene {
       });
       this.scene.add(view.group);
       this.views[p.id] = view;
+      reportLoading(0.97 + (0.03 * (i + 1)) / players.length);
+      await breathe();
+      if (!alive()) return;
     }
   }
 
@@ -78,17 +86,21 @@ export class MenuScene {
     this.wanted = true;
     const generation = ++this.generation;
     const alive = (): boolean => this.wanted && generation === this.generation;
+    beginLoading();
     void buildStadium(this.scene, this.S.pitchFor(TEAM_SIZE), currentQuality(), alive).then((stadium) => {
       if (!stadium) return;
       if (!alive()) {
         stadium.dispose();
         return;
       }
-      this.stadium = stadium;
       stadium.crowd.setExcitement(0.55);
       this.ball = makeBall(this.S.BALL_R);
       this.scene.add(this.ball.mesh);
-      this.newMatch();
+      // running (and the menu showing) once the footballers are there too
+      return this.newMatch(alive).then(() => {
+        if (alive()) this.stadium = stadium;
+        else stadium.dispose();
+      });
     }).catch((e: unknown) => {
       this.failed = true;
       console.error("menu backdrop build failed:", e instanceof Error ? e.message : String(e));
@@ -140,7 +152,8 @@ export class MenuScene {
     const st = this.state;
     if (!this.running || !st) return;
     if (st.phase === "end") {
-      this.newMatch(); // full time → kick off a fresh exhibition
+      const generation = this.generation;
+      void this.newMatch(() => this.wanted && generation === this.generation); // full time → kick off a fresh exhibition
       return;
     }
     for (let i = 0; i < st.players.length; i++) {
