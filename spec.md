@@ -696,10 +696,13 @@ browser code:
   interface language, the device's for a guest → en-US), following preference changes live;
   `js/platform-i18n.js` (account strings) is imported as a module. `js/gfx.js` is imported as a
   module: the runtime's quality tier (its Options menu, `frame().quality`, the same four names)
-  selects the game's preset content — shadow-map size, grass and line texture sizes (the markings
-  are one mirrored corner quarter, so Ultra's 4096 px fit the canvas bound), the detailed pitch,
-  crowd density and capsule LOD, camera flashes and haze, bloom (0.55 on saturated colors, the
-  host's equivalent of the browser's HDR threshold 1.3) — and changes apply live. SETTINGS overrides the three
+  selects the game's preset content — shadow-map size and the opposite tower's second caster, grass
+  and line texture sizes (the markings are one mirrored corner quarter, so Ultra's 4096 px fit the
+  canvas bound), the detailed pitch with its mow-stripe normal map, crowd density and capsule LOD,
+  Lambert stands, seats and crowd on Low, camera flashes and haze (points), the floodlit
+  environment map (Reflections, intensity 0.35) and bloom (threshold 1.3, 0.55) — and changes apply
+  live. The scene renders ACES filmic at exposure 1 with the browser's HDR emissives (lamps, LED
+  boards, tunnel sign, flashes), the clearcoat ball and the gold coin. SETTINGS overrides the three
   categories that are the game's own content (pitch detail, crowd, flashes and haze) in the
   `graphics` game setting the browser also keeps. Render scale, anti-aliasing, adaptive resolution,
   frame-rate limits and the sound volumes and concurrent-sound limit are the runtime's own options
@@ -745,12 +748,11 @@ browser code:
 - **Voice.** The SDK's voice room for the session's conversation (open mic; the runtime asks for the
   microphone and shows its indicator); each speaker's volume and pan follow the two footballers'
   distance and side at 10 Hz (section 9's falloff).
-- **Where it differs.** No WebP art (above); no tone mapping, ambient occlusion, colour grade,
-  environment reflections, pitch normal map, clearcoat ball, Lambert low tier or second shadow
-  caster, and colors clamp to 0–1 (the host has none of these yet); the detailed pitch bakes the
-  normal map's stronger mow stripes into its colours and the kickoff coin is less metallic with a
-  faint glow in place of the reflection; camera flashes and haze are sprites whose flash
-  brightness is their size; text uses the runtime's pixel font, which has ASCII and a few symbols
+- **Where it differs.** No WebP art (above); no ambient occlusion or colour grade, and bloom has the
+  host's radius (the host has no such passes); the floodlit environment is written as a
+  latitude-longitude image of the browser's environment scene (`world/environment.ts`, the host has
+  no render-to-texture); the detailed pitch keeps one grass texture at a time with its normal map
+  (switching rebuilds it); text uses the runtime's pixel font, which has ASCII and a few symbols
   only, so typographic dashes and quotes show as ASCII and accented letters without accents
   (`logic/glyphs.ts`);
   SETTINGS keeps the game language, the game's mute, the quality line with its three content

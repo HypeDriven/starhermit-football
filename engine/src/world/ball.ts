@@ -1,6 +1,6 @@
 // The match ball (a canvas-drawn pentagon pattern on a sphere) and the
 // kickoff coin, as match.js, menuScene.js and replayview.js build them.
-import { CylinderGeometry, Mesh, MeshStandardMaterial, SphereGeometry } from "starhermit:scene";
+import { CylinderGeometry, Mesh, MeshPhysicalMaterial, MeshStandardMaterial, SphereGeometry } from "starhermit:scene";
 import { ResourceBag, canvasTexture, makeCanvas } from "./resources.ts";
 
 export interface Prop {
@@ -27,11 +27,10 @@ export function makeBall(radius: number): Prop {
   }
   const tex = bag.add(canvasTexture(cv));
   tex.anisotropy = 4;
-  // The browser's glossy MeshPhysicalMaterial (clearcoat 0.9) has no host
-  // counterpart; the standard material keeps its roughness.
   const mesh = new Mesh(
     bag.add(new SphereGeometry(radius, 24, 18)),
-    bag.add(new MeshStandardMaterial({ map: tex, roughness: 0.5 })),
+    // glossy match ball: clearcoat catches the floodlights (and the stadium reflections)
+    bag.add(new MeshPhysicalMaterial({ map: tex, roughness: 0.5, clearcoat: 0.9, clearcoatRoughness: 0.12 })),
   );
   mesh.castShadow = true;
   return { mesh, dispose: () => { mesh.removeFromParent(); bag.dispose(); } };
@@ -41,11 +40,8 @@ export function makeCoin(): Prop {
   const bag = new ResourceBag();
   const mesh = new Mesh(
     bag.add(new CylinderGeometry(0.12, 0.12, 0.02, 24)),
-    // The browser's gold (metalness 0.9, roughness 0.25) shines with the
-    // environment map Reflections adds; the host has no environment, where
-    // such a metal shows almost black, so the coin is less metallic with a
-    // faint gold glow standing in for the reflection.
-    bag.add(new MeshStandardMaterial({ color: 0xf7d774, metalness: 0.45, roughness: 0.3, emissive: 0x4a3810 })),
+    // gold: it shines with the stadium environment (Reflections)
+    bag.add(new MeshStandardMaterial({ color: 0xf7d774, metalness: 0.9, roughness: 0.25 })),
   );
   mesh.visible = false;
   return { mesh, dispose: () => { mesh.removeFromParent(); bag.dispose(); } };

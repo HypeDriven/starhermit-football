@@ -1,8 +1,8 @@
 // Copied unchanged below this note from starhermit-engine
-// crates/starhermit-runtime/api/starhermit.d.ts at commit 86495e0 (2026-10-18,
-// branch h1b-script-bindings): host API v1 with the football port's decisions.
-// Refresh it from the runtime when the contract changes; the sha256 of the
-// original file is a36a1fcb3969d4624fd9e75413ca9705597672d30b231b2799c65e8d1edee414.
+// crates/starhermit-runtime/api/starhermit.d.ts at commit bdf60c8 (2026-10-18,
+// branch r2-exposure): host API v1 with the football port's decisions and R2's
+// rendering. Refresh it from the runtime when the contract changes; the sha256
+// of the original file is 358d8b8e715ff1071503def43fc1e61069652ab0819ff4a3235437dd5496cbc5.
 
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -784,6 +784,34 @@ declare module "starhermit:scene" {
   export const LinearMipmapNearestFilter: "linear-mipmap-nearest";
   export const NearestMipmapLinearFilter: "nearest-mipmap-linear";
   export const LinearMipmapLinearFilter: "linear-mipmap-linear";
+  /** `renderer.toneMapping` operators (three.js's numbers and formulas;
+   * `CustomToneMapping` draws as `NoToneMapping`). */
+  export const NoToneMapping: 0;
+  export const LinearToneMapping: 1;
+  export const ReinhardToneMapping: 2;
+  export const CineonToneMapping: 3;
+  export const ACESFilmicToneMapping: 4;
+  export const CustomToneMapping: 5;
+  export const AgXToneMapping: 6;
+  export const NeutralToneMapping: 7;
+  /** `Texture.mapping` (three.js's numbers). */
+  export const UVMapping: 300;
+  export const CubeReflectionMapping: 301;
+  export const CubeRefractionMapping: 302;
+  export const EquirectangularReflectionMapping: 303;
+  export const EquirectangularRefractionMapping: 304;
+  export const CubeUVReflectionMapping: 306;
+  /** `DataTexture` types and format (three.js's numbers). */
+  export const UnsignedByteType: 1009;
+  export const FloatType: 1015;
+  export const HalfFloatType: 1016;
+  export const RGBAFormat: 1023;
+  /** Color spaces, kept for ports: color maps are read as sRGB, data maps
+   * (normal, roughness, metalness, occlusion) as plain values, output is
+   * sRGB. */
+  export const NoColorSpace: "";
+  export const SRGBColorSpace: "srgb";
+  export const LinearSRGBColorSpace: "srgb-linear";
 
   // -- Textures ---------------------------------------------------------------
   /** An RGBA8 image on the GPU (sRGB-encoded), at most 4,096 pixels on a
@@ -807,12 +835,20 @@ declare module "starhermit:scene" {
     repeat: Vector2;
     rotation: number;
     center: Vector2;
-    /** Accepted and kept for ports; the engine has no anisotropic filtering
-     * yet, so it does not change sampling. */
+    /** Anisotropic filtering, 1–16 samples along the slope (three.js;
+     * default 1). */
     anisotropy: number;
+    /** As an environment (`scene.environment`, `envMap`, `PMREMGenerator`):
+     * `EquirectangularReflectionMapping` for latitude-longitude images;
+     * any 2D texture is taken as one. */
+    mapping: number;
+    colorSpace: string;
     /** Set to re-upload a canvas or data texture's pixels this frame (the
-     * upload counts against the frame's 96 MiB upload bound). */
+     * upload counts against the frame's 96 MiB upload bound); each `true`
+     * counts in `version`, and an environment made from the texture is
+     * made again. */
     needsUpdate: boolean;
+    readonly version: number;
     /** Releases the GPU image; materials using it draw without it. Using a
      * disposed texture throws a TypeError. */
     dispose(): void;
@@ -822,12 +858,54 @@ declare module "starhermit:scene" {
     constructor(canvas: OffscreenCanvas);
     readonly canvas: OffscreenCanvas;
   }
-  /** Straight-alpha RGBA8 pixels, rows top to bottom (`width × height × 4`
-   * bytes, else TypeError). */
+  /** Straight-alpha RGBA pixels, rows top to bottom (`width × height × 4`
+   * values, else TypeError): bytes (sRGB-encoded) or linear floats
+   * (`FloatType`; shown sRGB-encoded and clamped as an image, kept linear
+   * and above 1 as an environment). */
   export class DataTexture extends Texture {
-    constructor(data: Uint8Array | Uint8ClampedArray, width: number, height: number);
-    readonly data: Uint8Array;
+    constructor(data: Uint8Array | Uint8ClampedArray | Float32Array, width: number, height: number, format?: number, type?: number);
+    readonly data: Uint8Array | Float32Array;
+    readonly type: number;
+    readonly image: { readonly width: number; readonly height: number; readonly data: Uint8Array | Float32Array };
   }
+  /** Six images of an environment (three.js `CubeTexture`; faces +X, −X,
+   * +Y, −Y, +Z, −Z, squares of one size): package paths or textures. Not
+   * an image materials show: `scene.environment`, `envMap` and
+   * `PMREMGenerator.fromCubemap` take it. */
+  export class CubeTexture extends Texture {
+    constructor(images?: readonly (string | Texture)[]);
+    readonly images: readonly (string | Texture)[];
+  }
+  /** Package images as a CubeTexture; the faces decode as the environment
+   * is made (`onLoad` is called at once). */
+  export class CubeTextureLoader {
+    constructor();
+    setPath(path: string): this;
+    load(urls: readonly string[], onLoad?: (texture: CubeTexture) => void, onProgress?: unknown, onError?: (error: Error) => void): CubeTexture;
+    loadAsync(urls: readonly string[]): Promise<CubeTexture>;
+  }
+  /** Prefiltered environment lighting (three.js `PMREMGenerator`): image-based
+   * diffuse and specular light for standard, physical and Lambert
+   * materials, from a latitude-longitude texture (a DataTexture of linear
+   * floats for light above white, a CanvasTexture or a package image) or a
+   * CubeTexture. It is made off the game's thread and lights the scene a
+   * few frames later (see `environmentReady`); a game holds at most 8
+   * (RangeError), each counting about 1.4 MiB against the image budget.
+   * `fromScene` throws a TypeError: there is no render-to-texture. */
+  export class PMREMGenerator {
+    constructor(renderer?: Renderer);
+    fromEquirectangular(texture: Texture): { readonly texture: Texture; readonly width: number; readonly height: number; dispose(): void };
+    fromCubemap(cube: CubeTexture): { readonly texture: Texture; readonly width: number; readonly height: number; dispose(): void };
+    fromScene(): never;
+    compileEquirectangularShader(): void;
+    compileCubemapShader(): void;
+    dispose(): void;
+  }
+  /** Whether an environment value (a PMREM texture, or a texture or cube
+   * texture given to `scene.environment` or `envMap`) has finished
+   * prefiltering; false while its images decode or it prefilters, and for
+   * null. */
+  export function environmentReady(value: Texture | null): boolean;
   /** Loads package images (PNG) through the engine's decoders. */
   export class TextureLoader {
     constructor();
@@ -885,6 +963,9 @@ declare module "starhermit:scene" {
     clone(): BufferGeometry;
     /** Releases the GPU mesh (it is made again if drawn). */
     dispose(): void;
+    /** Which vertices `Points` draw (meshes draw all). */
+    readonly drawRange: { start: number; count: number };
+    setDrawRange(start: number, count: number): void;
   }
   /** One geometry from several (three.js's `BufferGeometryUtils.
    * mergeGeometries`): they must share their attributes (all indexed or
@@ -925,8 +1006,9 @@ declare module "starhermit:scene" {
 
   // -- Materials ----------------------------------------------------------------
   export interface MaterialParameters {
-    /** Base color (default white). Components above 1 (three.js HDR
-     * colors) show saturated: lighting clamps colors to 0–1. */
+    /** Base color (default white), linear; components above 1 (three.js
+     * HDR colors, up to 65504) light brighter than white, which tone mapping
+     * and bloom take. */
     color?: ColorInput;
     /** Base color texture, multiplied by `color`. */
     map?: Texture | null;
@@ -968,6 +1050,10 @@ declare module "starhermit:scene" {
     polygonOffsetFactor: number;
     polygonOffsetUnits: number;
     visible: boolean;
+    /** An environment this material reflects instead of
+     * `scene.environment` (standard, physical and Lambert materials; see
+     * `PMREMGenerator`). */
+    envMap: Texture | null;
     clone(): this;
     dispose(): void;
   }
@@ -979,10 +1065,18 @@ declare module "starhermit:scene" {
     /** Light the surface gives off whatever lights it (default black). */
     emissive?: ColorInput;
     emissiveMap?: Texture | null;
-    /** Default 1. */
+    /** Default 1; above 1 drives bloom. */
     emissiveIntensity?: number;
+    normalMap?: Texture | null;
+    normalScale?: Vector2;
+    roughnessMap?: Texture | null;
+    metalnessMap?: Texture | null;
+    aoMap?: Texture | null;
+    aoMapIntensity?: number;
+    envMap?: Texture | null;
+    envMapIntensity?: number;
   }
-  /** Metallic/roughness (glTF-style) shading. */
+  /** Metallic/roughness (glTF-style) shading with three.js's maps. */
   export class MeshStandardMaterial extends Material {
     constructor(parameters?: MeshStandardMaterialParameters);
     metalness: number;
@@ -990,6 +1084,72 @@ declare module "starhermit:scene" {
     emissive: Color;
     emissiveMap: Texture | null;
     emissiveIntensity: number;
+    /** Tangent-space normals (OpenGL convention: green up), x and y scaled
+     * by `normalScale` (default (1, 1); flip y for maps with green down);
+     * the tangent frame comes from screen-space derivatives. */
+    normalMap: Texture | null;
+    normalScale: Vector2;
+    /** Roughness times the map's green, metalness times its blue (glTF;
+     * one image may hold both). */
+    roughnessMap: Texture | null;
+    metalnessMap: Texture | null;
+    /** Ambient occlusion from the red channel, scaled by `aoMapIntensity`
+     * (default 1). */
+    aoMap: Texture | null;
+    aoMapIntensity: number;
+    /** Scales the environment's light (default 1). */
+    envMapIntensity: number;
+  }
+  export interface MeshPhysicalMaterialParameters extends MeshStandardMaterialParameters {
+    /** 0–1 (default 0). */
+    clearcoat?: number;
+    /** 0–1 (default 0). */
+    clearcoatRoughness?: number;
+  }
+  /** A standard material with a clear coat over it (three.js
+   * `MeshPhysicalMaterial`: `clearcoat`, `clearcoatRoughness`; its other
+   * physical properties are kept but not drawn). */
+  export class MeshPhysicalMaterial extends MeshStandardMaterial {
+    constructor(parameters?: MeshPhysicalMaterialParameters);
+    clearcoat: number;
+    clearcoatRoughness: number;
+  }
+  export interface MeshLambertMaterialParameters extends MaterialParameters {
+    emissive?: ColorInput;
+    emissiveMap?: Texture | null;
+    emissiveIntensity?: number;
+    normalMap?: Texture | null;
+    normalScale?: Vector2;
+    aoMap?: Texture | null;
+    aoMapIntensity?: number;
+    envMap?: Texture | null;
+  }
+  /** Diffuse light only (three.js `MeshLambertMaterial`), cheaper than
+   * standard shading. */
+  export class MeshLambertMaterial extends Material {
+    constructor(parameters?: MeshLambertMaterialParameters);
+    emissive: Color;
+    emissiveMap: Texture | null;
+    emissiveIntensity: number;
+    normalMap: Texture | null;
+    normalScale: Vector2;
+    aoMap: Texture | null;
+    aoMapIntensity: number;
+  }
+  export interface PointsMaterialParameters extends MaterialParameters {
+    /** Pixels (default 1), times the display's pixel ratio, at most 1,024. */
+    size?: number;
+    /** Shrinks with distance (default true): `size` × half the view's height
+     * over the view depth, as three.js. */
+    sizeAttenuation?: boolean;
+  }
+  /** Points' material (three.js `PointsMaterial`): unlit, double-sided,
+   * squares facing the view; `map` covers each square, `vertexColors` takes
+   * the geometry's colors. */
+  export class PointsMaterial extends Material {
+    constructor(parameters?: PointsMaterialParameters);
+    size: number;
+    sizeAttenuation: boolean;
   }
   /** Unlit: shows `color` × `map` whatever lights the scene. */
   export class MeshBasicMaterial extends Material {
@@ -1085,6 +1245,16 @@ declare module "starhermit:scene" {
     /** Multiplies the material color (default white). */
     setColorAt(index: number, color: Color): void;
   }
+  /** Points (three.js `Points`): a square per vertex of the geometry's
+   * `position` in its draw range, colored by its `color` attribute when the
+   * material has `vertexColors`. Each point counts as a mesh instance (a
+   * scene draws at most 65,536 points in 1,024 Points objects); points cast
+   * no shadows. */
+  export class Points extends Object3D {
+    constructor(geometry?: BufferGeometry, material?: PointsMaterial);
+    geometry: BufferGeometry;
+    material: PointsMaterial;
+  }
   /** A quad facing the view; `scale.x`/`scale.y` are its size (world units)
    * and `center` the point placed at its position (0–1 from bottom-left).
    * Sprites cast no shadows. */
@@ -1128,9 +1298,10 @@ declare module "starhermit:scene" {
 
   // -- Lights ---------------------------------------------------------------------
   // Intensities are in the engine's convention (top of file). At most 16
-  // lights besides ambient light draw, and one shadow-casting light: the
-  // first directional or spot light (in scene order) with `castShadow`
-  // casts; other lights' shadows are ignored.
+  // lights besides ambient light draw, and four shadow-casting lights: the
+  // first four directional or spot lights (in scene order) with
+  // `castShadow` cast, each with its own shadow map; other lights' shadows
+  // are ignored.
   export abstract class Light extends Object3D {
     color: Color;
     intensity: number;
@@ -1139,10 +1310,11 @@ declare module "starhermit:scene" {
   export class AmbientLight extends Light {
     constructor(color?: ColorInput, intensity?: number);
   }
-  /** Shadow settings of the casting light. */
+  /** Shadow settings of a casting light. */
   export interface LightShadow {
-    /** The shadow map's size, 64–4096 (the quality setting may lower it). */
-    mapSize: number;
+    /** The shadow map's size, 64–4096 (the quality setting may lower it):
+     * a number, or three.js's vector (its larger side). */
+    mapSize: number | Vector2;
     /** Directional: how far along the view shadows reach (default 40 m);
      * spot: how far from the light. */
     distance: number;
@@ -1154,6 +1326,12 @@ declare module "starhermit:scene" {
     normalBias: number;
     /** Spot: the shadow camera's near plane (default 0.5 m). */
     near: number;
+    /** Spot: the part of the cone the shadow map covers, 0 < focus ≤ 1
+     * (three.js `shadow.focus`, default 1). */
+    focus: number;
+    /** three.js's shadow camera: its `near` and `far` are `near` and
+     * `distance`. */
+    readonly camera: { near: number; far: number };
   }
   /** Light from `position` toward `target`'s position (three.js); both may
    * be anywhere in the graph. */
@@ -1210,26 +1388,43 @@ declare module "starhermit:scene" {
     /** The clear color behind everything (default black); null keeps black. */
     background: Color | null;
     fog: Fog | FogExp2 | null;
+    /** Lights standard, physical and Lambert materials without an `envMap`
+     * (three.js): a PMREM texture, a latitude-longitude texture or a
+     * CubeTexture (made into a prefiltered environment once per texture
+     * version; one that cannot be lights nothing, with a warning). */
+    environment: Texture | null;
+    /** Default 1. */
+    environmentIntensity: number;
+    /** Turns the environment (three.js `environmentRotation`). */
+    readonly environmentRotation: Euler;
   }
   export const scene: Scene;
 
   /** How the scene is drawn. The player's graphics settings (Options ›
-   * Graphics) decide anti-aliasing (MSAA, FXAA), the shadow map's largest
+   * Graphics) decide anti-aliasing (MSAA, FXAA), the shadow maps' largest
    * size, render scale, frame rate and whether bloom draws at all; the game
-   * decides the camera, lights, shadows on or off, fog, bloom's threshold
-   * and intensity and materials. The engine renders in sRGB without tone
-   * mapping or HDR output (three.js's `toneMapping` has no equivalent yet);
-   * colors are clamped to 0–1 after lighting. */
+   * decides the camera, lights, shadows on or off, fog, tone mapping,
+   * bloom's threshold and intensity and materials. Light is linear and may
+   * exceed 1 (half-float range); `toneMapping` maps it to the display
+   * (none: clamped at 1), sRGB-encoded. */
   export interface Renderer {
     /** The camera the scene is seen through; nothing 3D draws without one.
      * It need not be in the scene graph. */
     camera: Camera | null;
     readonly shadowMap: { enabled: boolean };
-    /** Bloom from pixels brighter than `threshold` (null: none; the quality
-     * setting may turn it off). Colors are clamped to 0–1 after lighting, so
-     * the threshold is taken within 0–1: a three.js HDR threshold above 1
-     * blooms only saturated colors. A negative intensity acts as 0. */
+    /** Bloom from linear light brighter than `threshold` (null: none; the
+     * quality setting may turn it off), three.js `UnrealBloomPass`-like:
+     * above 1 only over-bright light (emissive surfaces driven past 1)
+     * blooms. Negative values act as 0. */
     bloom: { threshold: number; intensity: number } | null;
+    /** three.js `toneMapping` (`NoToneMapping`, `LinearToneMapping`,
+     * `ReinhardToneMapping`, `CineonToneMapping`, `ACESFilmicToneMapping`,
+     * `AgXToneMapping`, `NeutralToneMapping`) with `toneMappingExposure`
+     * (default 1), applied to everything the scene draws. */
+    toneMapping: number;
+    toneMappingExposure: number;
+    /** Kept for ports; output is sRGB. */
+    outputColorSpace: string;
   }
   export const renderer: Renderer;
 

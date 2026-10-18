@@ -22,3 +22,12 @@ test("each runtime quality tier takes the game's preset content", () => {
   assert.equal(asTier("bogus"), "balanced");
   assert.equal(contentQuality("bogus").tier, "balanced");
 });
+
+test("reflections and the Lambert materials follow the presets", () => {
+  assert.equal(contentQuality("low").lambert, true);
+  assert.equal(contentQuality("balanced").lambert, false);
+  assert.equal(contentQuality("low").reflections, false);
+  assert.equal(contentQuality("high").reflections, true);
+  assert.equal(contentQuality("ultra").secondCaster, true);
+  assert.equal(contentQuality("high").secondCaster, false);
+});

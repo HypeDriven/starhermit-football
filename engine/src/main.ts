@@ -8,7 +8,7 @@
 import { shown } from "./logic/glyphs.ts";
 import { frame, onFixedUpdate, onRender, onStart, onUpdate, openMenu, setFixedRate } from "starhermit:engine";
 import type { JsonValue } from "starhermit:engine";
-import { PerspectiveCamera, renderer, scene } from "starhermit:scene";
+import { ACESFilmicToneMapping, PerspectiveCamera, renderer, scene } from "starhermit:scene";
 import type { CanvasTexture } from "starhermit:scene";
 import { canvasTexture, makeCanvas } from "./world/resources.ts";
 import { exitPointerLock, gamepads, onKey, onPointerButton, onTouch, pointerLocked, primaryPointer } from "starhermit:input";
@@ -40,13 +40,17 @@ import { sim } from "./sim.ts";
 import { createVoice } from "./voice.ts";
 
 // ── renderer ──
-// Tone mapping, resolution, anti-aliasing and frame pacing are the
-// runtime's; the stadium sets shadows and bloom per quality tier.
+// Resolution, anti-aliasing and frame pacing are the runtime's; the game
+// sets tone mapping as the browser does, and the stadium sets shadows,
+// reflections and bloom per quality tier.
 const camera = new PerspectiveCamera(55, 16 / 9, 0.1, 800);
 camera.position.set(0, 20, -30);
 renderer.camera = camera;
 renderer.shadowMap.enabled = true;
 renderer.bloom = null;
+// js/graphics.js: ACES filmic at exposure 1
+renderer.toneMapping = ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
 
 // ── services ──
 const audio = createAudio();

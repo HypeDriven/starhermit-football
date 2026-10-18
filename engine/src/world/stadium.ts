@@ -1,12 +1,14 @@
 // The procedural night-match stadium (the browser's js/world/stadium.js):
 // striped pitch with line markings, goals with nets, a two-tier seated bowl
 // with an instanced animated crowd, floodlight towers with light cones, lamp
-// glows and one shadow-casting spotlight, scrolling LED boards, tunnel,
-// dugouts, corner flags, camera flashes and haze. Everything is generated in
-// code. The parts with a cost follow the runtime's quality tier through the
-// game's own presets (logic/quality.ts over js/gfx.js): shadow-map size, the
-// grass and line texture sizes, the detailed pitch, crowd density and LOD,
-// particles and bloom.
+// glows and shadow-casting spotlights, scrolling LED boards, tunnel,
+// dugouts, corner flags, camera flashes and haze (points), and the floodlit
+// environment map for reflections. Everything is generated in code. The
+// parts with a cost follow the runtime's quality tier through the game's own
+// presets (logic/quality.ts over js/gfx.js): shadow-map size and the second
+// caster, the grass and line texture sizes, the detailed pitch (with its
+// mow-stripe normal map), crowd density and LOD, Lambert materials on Low,
+// particles, reflections and bloom.
 //
 // The build and the texture rebuilds slice their work across frames when the
 // running call's fuel runs low (tasks.ts).
@@ -21,6 +23,7 @@ import {
   Color,
   ConeGeometry,
   CylinderGeometry,
+  DataTexture,
   DoubleSide,
   Float32BufferAttribute,
   Fog,
@@ -29,9 +32,12 @@ import {
   InstancedMesh,
   Mesh,
   MeshBasicMaterial,
+  MeshLambertMaterial,
   MeshStandardMaterial,
   MirroredRepeatWrapping,
   PlaneGeometry,
+  Points,
+  PointsMaterial,
   Quaternion,
   RepeatWrapping,
   SphereGeometry,
@@ -41,7 +47,7 @@ import {
   Vector3,
   renderer,
 } from "starhermit:scene";
-import type { CanvasTexture, Fog as FogType, FogExp2, Scene } from "starhermit:scene";
+import type { CanvasTexture, Fog as FogType, FogExp2, Material, Scene, Texture } from "starhermit:scene";
 import { budgets, usage } from "starhermit:engine";
 import type { Vec3Like } from "../logic/math.ts";
 import type { ContentQuality } from "../logic/quality.ts";
@@ -49,6 +55,8 @@ import { onQuality } from "../quality.ts";
 import { reducedMotion } from "../prefs.ts";
 import type { Pitch } from "../sim.ts";
 import { breathe, lowOnFuel, nextFrame, sliced } from "../tasks.ts";
+import { MAX_FLASHES, MAX_HAZE } from "../../../js/gfx.js";
+import { stadiumEnvironment } from "./environment.ts";
 import { ResourceBag, canvasTexture, makeCanvas } from "./resources.ts";
 
 const DEFAULT_PITCH: Pitch = { L: 105, W: 68, goalW: 7.32, goalH: 2.44, boxD: 16.5, boxW: 40.32 };
@@ -76,14 +84,9 @@ const HEMI_DAY = 1.05 / Math.PI;
 const AMB_NIGHT = 0.35 / Math.PI;
 const AMB_DAY = 0.6 / Math.PI;
 const TOWER_H = 30;
-/** three.js's UnrealBloomPass(strength 0.55, radius 0.45, threshold 1.3).
- * The browser's HDR threshold of 1.3 blooms only what lighting pushes past
- * white (lamp faces, flashes); the engine clamps colors to 0–1 before bloom,
- * so the nearest equivalent is blooming only saturated pixels. */
-const BLOOM = { threshold: 1, intensity: 0.55 };
-/** three.js points' size (sizeAttenuation) as a sprite's world size at the
- * match camera's 55° field of view. */
-const POINT_TO_SPRITE = 0.52;
+/** three.js's UnrealBloomPass(strength 0.55, radius 0.45, threshold 1.3):
+ * only over-bright light (lamp faces, flashes, hot highlights) blooms. */
+const BLOOM = { threshold: 1.3, intensity: 0.55 };
 /** The canvas pixel bound (8,388,608 per canvas). */
 const MAX_CANVAS_PIXELS = 8388608;
 
@@ -160,13 +163,14 @@ function cylinderBetween(list: BufferGeometry[], a: Vector3, b: Vector3, radius 
   list.push(g);
 }
 
-/** A texture width that fits the canvas bound and what is left of the
- * engine's texture budget (with mipmaps), halving from the preset's. */
-function fitTextureWidth(want: number, aspect: number): number {
+/** A texture width that fits the canvas bound and, for `copies` images of
+ * that size (with mipmaps), 60 % of what is left of the engine's texture
+ * budget, halving from the preset's. */
+function fitTextureWidth(want: number, aspect: number, copies = 1): number {
   let w = Math.min(want, 4096, Math.floor(Math.sqrt(MAX_CANVAS_PIXELS / aspect)));
   try {
     const free = budgets().textureBytes - usage().textureBytes;
-    while (w > 512 && w * w * aspect * 4 * (4 / 3) > free * 0.5) w = Math.floor(w / 2);
+    while (w > 512 && w * w * aspect * 4 * (4 / 3) * copies > free * 0.6) w = Math.floor(w / 2);
   } catch {
     // no budget figures: the bounds above stand
   }
@@ -201,14 +205,8 @@ async function makeGrassTexture(L: number, W: number, detailed: boolean, w: numb
   const [c, ctx] = makeCanvas(w, h);
   const bands = 16; // mow bands along the length (x axis)
   const bw = w / bands;
-  // The browser's detailed pitch tilts alternate bands with a normal map
-  // (normalScale 0.9), which under the floodlights makes the stripes about
-  // 2.5 times as strong as the colours alone; the host has no normal maps,
-  // so the detailed texture bakes that difference into the colours.
-  const light = detailed ? "#337735" : "#2f6d31";
-  const dark = detailed ? "#265628" : "#2a602c";
   for (let i = 0; i < bands; i++) {
-    ctx.fillStyle = i % 2 ? light : dark;
+    ctx.fillStyle = i % 2 ? "#2f6d31" : "#2a602c";
     ctx.fillRect(Math.floor(i * bw), 0, Math.ceil(bw) + 1, h);
   }
   if (detailed) {
@@ -271,6 +269,48 @@ async function makeGrassTexture(L: number, W: number, detailed: boolean, w: numb
     ctx.fillRect(Math.random() * w, Math.random() * h, 2 * k, 2 * k);
   }, alive);
   return alive() ? canvasTexture(c) : null;
+}
+
+/** The detailed pitch's normal map (the browser's makeGrassNormal): the mow
+ * bands tilt alternately along the length (the stripes' sheen under the
+ * floodlights) over per-pixel blade relief. Same size as the grass texture;
+ * rows are made a band at a time when the call's fuel runs low. */
+async function makeGrassNormal(L: number, W: number, w: number, alive: () => boolean): Promise<DataTexture | null> {
+  const h = Math.max(2, Math.round((w * W) / L));
+  const d = new Uint8Array(w * h * 4);
+  const bw = w / 16;
+  // random heights, wrapping at the edges as the browser's
+  const first = new Float32Array(w);
+  for (let x = 0; x < w; x++) first[x] = Math.random();
+  let row = first;
+  for (let y = 0; y < h; y++) {
+    const next = y + 1 < h ? new Float32Array(w) : first;
+    if (next !== first) for (let x = 0; x < w; x++) next[x] = Math.random();
+    for (let x = 0; x < w; x++) {
+      const band = Math.floor(x / bw) % 2 ? 1 : -1;
+      const hx = row[(x + 1) % w]! - row[x]!;
+      const hy = next[x]! - row[x]!;
+      const nx = band * 0.22 - hx * 0.35;
+      const ny = -hy * 0.35;
+      const len = Math.sqrt(nx * nx + ny * ny + 1);
+      const o = (y * w + x) * 4;
+      d[o] = ((nx / len) * 0.5 + 0.5) * 255;
+      d[o + 1] = ((ny / len) * 0.5 + 0.5) * 255;
+      d[o + 2] = ((1 / len) * 0.5 + 0.5) * 255;
+      d[o + 3] = 255;
+    }
+    row = next;
+    if (y % 16 === 15 && lowOnFuel()) {
+      await nextFrame();
+      if (!alive()) return null;
+    }
+  }
+  const tex = new DataTexture(d, w, h);
+  tex.wrapS = RepeatWrapping;
+  tex.wrapT = RepeatWrapping;
+  tex.anisotropy = 4;
+  tex.needsUpdate = true;
+  return tex;
 }
 
 /** The markings at `Wpx` pixels across the pitch's length. They are
@@ -487,6 +527,9 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   const root = new Group();
   root.name = "stadium";
   const prevBackground = scene.background;
+  const prevEnvironment = scene.environment;
+  let wantEnvironment = false;
+  let envShown: Texture | null = null;
   const prevFog: FogType | FogExp2 | null = scene.fog;
 
   const mesh = (geometry: BufferGeometry, material: MeshStandardMaterial | MeshBasicMaterial): Mesh => {
@@ -520,9 +563,12 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
 
   // Grass and line textures are built at the preset budget's size by
   // applyQuality (rebuilt when the tier changes).
-  let grassPlainTex: CanvasTexture | null = null;
-  let grassDetailTex: CanvasTexture | null = null; // built on first use
-  let grassSize = 0;
+  // One grass texture at a time (plain, or detailed with its normal map):
+  // Ultra's 2048-px pair, the plain one and the markings would not fit the
+  // texture budget together. Switching rebuilds.
+  let grassTex: CanvasTexture | null = null;
+  let grassNormalTex: DataTexture | null = null;
+  let grassDetailed = false;
   const grassMat = new MeshStandardMaterial({ roughness: 0.95 });
   const grass = mesh(new PlaneGeometry(L + 0.6, W + 0.6), grassMat);
   grass.rotation.x = -Math.PI / 2;
@@ -533,8 +579,8 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   let linesTex: CanvasTexture | null = null;
   let linesSize = 0;
   const disposeTextures = (): void => {
-    grassPlainTex?.dispose();
-    grassDetailTex?.dispose();
+    grassTex?.dispose();
+    grassNormalTex?.dispose();
     linesTex?.dispose();
   };
   const linesMat = new MeshStandardMaterial({
@@ -644,6 +690,15 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   }
   const stands = mesh(mergeGeoms(standGeoms), new MeshStandardMaterial({ color: 0x181c23, roughness: 0.95 }));
   root.add(stands);
+  // Material class per preset budget: Lambert twins on Low for the stands,
+  // seats and crowd (each entry: the mesh, its [standard, Lambert] pair).
+  const lambertSwap: [Mesh, [Material, Material]][] = [];
+  let lambertOn = false;
+  const lambertTwin = (m: Mesh): void => {
+    const base = m.material as MeshStandardMaterial;
+    lambertSwap.push([m, [base, bag.add(new MeshLambertMaterial({ color: base.color.clone() }))]]);
+  };
+  lambertTwin(stands);
   if (!alive()) return abandon();
 
   // seats: translation matrices and colors written straight into the
@@ -728,6 +783,8 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     crowdMesh.instanceColor!.needsUpdate = true;
   }
   root.add(crowdMesh);
+  lambertTwin(seatMesh);
+  lambertTwin(crowdMesh);
   if (!alive()) {
     crowdGeo.dispose();
     return abandon();
@@ -808,19 +865,31 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   spot.shadow.bias = -0.0004;
   root.add(spot);
   root.add(spot.target);
-  // Fit the spot's shadow range to the pitch (plus the goals and a margin).
-  {
+  // Fit a spot's shadow frustum to the pitch (plus the goals and a margin) so
+  // every shadow-map texel lands on the play area instead of the stands.
+  const fitShadow = (light: SpotLight): void => {
+    const pos = light.position;
+    const dir = light.target.position.clone().sub(pos).normalize();
+    let maxA = 0;
     let near = Infinity;
     let far = 0;
-    const pos = spot.position;
+    const v = new Vector3();
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) for (const y of [0, 3]) {
-      const d = Math.hypot(sx * (L / 2 + 4) - pos.x, y - pos.y, sz * (W / 2 + 3) - pos.z);
-      near = Math.min(near, d);
-      far = Math.max(far, d);
+      v.set(sx * (L / 2 + 4), y, sz * (W / 2 + 3)).sub(pos);
+      const dist = v.length();
+      near = Math.min(near, dist);
+      far = Math.max(far, dist);
+      maxA = Math.max(maxA, Math.acos(Math.min(1, Math.max(-1, dir.dot(v) / dist)))); // three.js angleTo
     }
-    spot.shadow.near = Math.max(1, near * 0.7);
-    spot.shadow.distance = far * 1.1;
-  }
+    light.shadow.focus = Math.min(1, Math.max(0.3, (maxA * 1.04) / light.angle));
+    light.shadow.camera.near = Math.max(1, near * 0.7);
+    light.shadow.camera.far = far * 1.1;
+  };
+  fitShadow(spot);
+  const setShadow = (light: SpotLight, size: number): void => {
+    light.castShadow = size > 0;
+    if (size > 0) light.shadow.mapSize = size;
+  };
   const fillSpots: SpotLight[] = [];
   for (const [cx, cz] of [[1, -1], [-1, 1], [-1, -1]] as [number, number][]) {
     const f = new SpotLight(0xe8f0ff, FILL_INTENSITY, 0, 0.75, 0.6, 0);
@@ -830,6 +899,11 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     root.add(f.target);
     fillSpots.push(f);
   }
+  // the opposite tower also casts at the top shadow tier: the classic
+  // floodlit double shadow under every player
+  const spot2 = fillSpots[2]!;
+  spot2.shadow.bias = -0.0004;
+  fitShadow(spot2);
   const hemi = new HemisphereLight(0x8fb4e8, 0x0e1a12, HEMI_NIGHT);
   const amb = new AmbientLight(0x223048, AMB_NIGHT);
   root.add(hemi);
@@ -915,79 +989,93 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   await breathe();
 
   // ── particles: camera flashes in the stands + haze drifting in the beams ──
-  // three.js points in the browser; sprites here (one shared material each),
-  // a flash's brightness read as its size. Pools grow to the tier's budget.
-  const flashMat = bag.add(new SpriteMaterial({ map: glowTex, color: 0xffffff, transparent: true, depthWrite: false, blending: AdditiveBlending, fog: false }));
-  const hazeMat = bag.add(new SpriteMaterial({ map: glowTex, color: 0x8397bd, transparent: true, opacity: 0.4, depthWrite: false, blending: AdditiveBlending, fog: false }));
-  const flashes: Sprite[] = [];
-  const flashLife: number[] = [];
-  const haze: Sprite[] = [];
-  const hazeBaseY: number[] = [];
-  const hazePh: number[] = [];
+  // Pools sized for the largest budget; the budget sets how many are drawn
+  // and animated (draw ranges).
+  const flashPos = new Float32Array(MAX_FLASHES * 3);
+  const flashCol = new Float32Array(MAX_FLASHES * 3);
+  const flashLife = new Float32Array(MAX_FLASHES);
+  for (let i = 0; i < MAX_FLASHES; i++) {
+    const k = (Math.random() * Math.max(1, cN)) | 0;
+    flashPos[i * 3] = baseX[k] ?? 0;
+    flashPos[i * 3 + 1] = (baseY[k] ?? 0) + 0.55;
+    flashPos[i * 3 + 2] = baseZ[k] ?? 0;
+  }
+  const flashGeo = bag.add(new BufferGeometry());
+  flashGeo.setAttribute("position", new BufferAttribute(flashPos, 3));
+  const flashColAttr = new BufferAttribute(flashCol, 3);
+  flashGeo.setAttribute("color", flashColAttr);
+  const flashes = new Points(flashGeo, bag.add(new PointsMaterial({
+    map: glowTex, size: 1.1, vertexColors: true, transparent: true, depthWrite: false,
+    blending: AdditiveBlending, fog: false,
+  })));
+  flashes.renderOrder = 7;
+  root.add(flashes);
+
+  const hazePos = new Float32Array(MAX_HAZE * 3);
+  const hazeBaseY = new Float32Array(MAX_HAZE);
+  const hazePh = new Float32Array(MAX_HAZE);
+  for (let i = 0; i < MAX_HAZE; i++) {
+    const [cx, cz] = corners[i % 4]!;
+    const hx = cx * (L / 2 + 22);
+    const hy = TOWER_H + 1.2;
+    const hz = cz * (W / 2 + 22);
+    const tx = cx * L * 0.15;
+    const tz = cz * W * 0.15;
+    const f = 0.12 + Math.random() * 0.7;
+    const r = f * Math.hypot(tx - hx, -hy, tz - hz) * 0.25 * Math.sqrt(Math.random());
+    const a = Math.random() * Math.PI * 2;
+    hazePos[i * 3] = hx + (tx - hx) * f + Math.cos(a) * r;
+    hazeBaseY[i] = hy - hy * f + Math.sin(a) * r * 0.6;
+    hazePos[i * 3 + 1] = hazeBaseY[i]!;
+    hazePos[i * 3 + 2] = hz + (tz - hz) * f + Math.sin(a) * r;
+    hazePh[i] = Math.random() * Math.PI * 2;
+  }
+  const hazeGeo = bag.add(new BufferGeometry());
+  const hazePosAttr = new BufferAttribute(hazePos, 3);
+  hazeGeo.setAttribute("position", hazePosAttr);
+  const haze = new Points(hazeGeo, bag.add(new PointsMaterial({
+    map: glowTex, size: 0.32, color: 0x8397bd, transparent: true, opacity: 0.4, depthWrite: false,
+    blending: AdditiveBlending, fog: false,
+  })));
+  haze.renderOrder = 8;
+  root.add(haze);
   let flashN = 0;
   let hazeN = 0;
-  const particles = new Group();
-  particles.renderOrder = 7;
-  root.add(particles);
-  const growFlashes = (n: number): void => {
-    while (flashes.length < n) {
-      const k = (Math.random() * Math.max(1, cN)) | 0;
-      const s = new Sprite(flashMat);
-      s.position.set(baseX[k] ?? 0, (baseY[k] ?? 0) + 0.55, baseZ[k] ?? 0);
-      s.scale.setScalar(0);
-      s.visible = false;
-      s.renderOrder = 7;
-      particles.add(s);
-      flashes.push(s);
-      flashLife.push(0);
-    }
-  };
-  const growHaze = (n: number): void => {
-    while (haze.length < n) {
-      const i = haze.length;
-      const [cx, cz] = corners[i % 4]!;
-      const hx = cx * (L / 2 + 22);
-      const hy = TOWER_H + 1.2;
-      const hz = cz * (W / 2 + 22);
-      const tx = cx * L * 0.15;
-      const tz = cz * W * 0.15;
-      const f = 0.12 + Math.random() * 0.7;
-      const p0x = hx + (tx - hx) * f;
-      const p0y = hy + (0 - hy) * f;
-      const p0z = hz + (tz - hz) * f;
-      const r = f * Math.hypot(tx - hx, -hy, tz - hz) * 0.25 * Math.sqrt(Math.random());
-      const a = Math.random() * Math.PI * 2;
-      const s = new Sprite(hazeMat);
-      const y = p0y + Math.sin(a) * r * 0.6;
-      s.position.set(p0x + Math.cos(a) * r, y, p0z + Math.sin(a) * r);
-      s.scale.setScalar(0.32 * POINT_TO_SPRITE);
-      s.renderOrder = 8;
-      particles.add(s);
-      haze.push(s);
-      hazeBaseY.push(y);
-      hazePh.push(Math.random() * Math.PI * 2);
-    }
-  };
 
   // ── quality ──
   let night = true;
   let particlesOn = false;
-  let detailOn = false;
+  let grassWant = 0;
   let generation = 0;
   let disposed = false;
   async function rebuildTextures(want: ContentQuality, gen: number): Promise<void> {
     const live = (): boolean => !disposed && gen === generation;
-    const gw = fitTextureWidth(want.grass, (W + 0.6) / (L + 0.6));
-    if (gw !== grassSize || (want.detail && !grassDetailTex)) {
-      const plain = gw !== grassSize || !grassPlainTex ? await makeGrassTexture(L + 0.6, W + 0.6, false, gw, live) : grassPlainTex;
-      if (!live() || !plain) return;
-      const detail = want.detail ? await makeGrassTexture(L + 0.6, W + 0.6, true, gw, live) : null;
-      if (!live()) return;
-      if (plain !== grassPlainTex) grassPlainTex?.dispose();
-      grassDetailTex?.dispose();
-      grassPlainTex = plain;
-      grassDetailTex = detail;
-      grassSize = gw;
+    const aspect = (W + 0.6) / (L + 0.6);
+    if (want.grass !== grassWant || want.detail !== grassDetailed || !grassTex) {
+      // the old pair goes first (the pitch shows its base colour meanwhile)
+      grassMat.map = null;
+      grassMat.normalMap = null;
+      grassMat.color.setHex(0x2c652e);
+      grassTex?.dispose();
+      grassNormalTex?.dispose();
+      grassTex = grassNormalTex = null;
+      const gw = fitTextureWidth(want.grass, aspect, want.detail ? 2 : 1);
+      const tex = await makeGrassTexture(L + 0.6, W + 0.6, want.detail, gw, live);
+      const normal = tex && live() && want.detail ? await makeGrassNormal(L + 0.6, W + 0.6, gw, live) : null;
+      if (!live() || !tex || (want.detail && !normal)) {
+        tex?.dispose();
+        normal?.dispose();
+        return;
+      }
+      grassTex = tex;
+      grassNormalTex = normal;
+      grassDetailed = want.detail;
+      grassWant = want.grass;
+      grassMat.color.setHex(0xffffff);
+      grassMat.map = tex;
+      grassMat.normalMap = normal;
+      grassMat.normalScale.set(0.9, 0.9);
+      grassMat.roughness = want.detail ? 0.82 : 0.95;
     }
     // the canvas is a quarter of the markings (see makeLinesTexture)
     const lw = 2 * fitTextureWidth(want.lines / 2, W / L);
@@ -1002,12 +1090,6 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
       linesSize = lw;
       linesMat.map = tex;
     }
-    setDetail(want.detail);
-  }
-  function setDetail(on: boolean): void {
-    detailOn = on && !!grassDetailTex;
-    grassMat.map = detailOn ? grassDetailTex : grassPlainTex;
-    grassMat.roughness = detailOn ? 0.82 : 0.95;
   }
   let requested = "";
   function applyQuality(want: ContentQuality): void {
@@ -1017,11 +1099,25 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
       const gen = ++generation;
       void rebuildTextures(want, gen).catch((e: unknown) => console.warn("stadium textures:", e instanceof Error ? e.message : String(e)));
     }
-    if (grassMat.map) setDetail(want.detail);
-    spot.castShadow = want.shadowMap > 0;
-    if (want.shadowMap > 0) spot.shadow.mapSize = want.shadowMap;
-    // The host casts from one light: the top tier's second caster (the
-    // floodlit double shadow) is not drawn.
+    setShadow(spot, want.shadowMap);
+    // the opposite tower also casts at the top shadow tier
+    setShadow(spot2, want.secondCaster ? want.shadowMap : 0);
+    if (want.lambert !== lambertOn) {
+      lambertOn = want.lambert;
+      for (const [m, twins] of lambertSwap) m.material = lambertOn ? twins[1] : twins[0];
+    }
+    wantEnvironment = want.reflections;
+    if (!want.reflections) {
+      if (scene.environment === envShown) scene.environment = null;
+      envShown = null;
+    } else {
+      void stadiumEnvironment().then((env) => {
+        if (disposed || !wantEnvironment || !env) return;
+        envShown = env;
+        scene.environment = env;
+        scene.environmentIntensity = 0.35;
+      });
+    }
     const body = `${want.body[0]},${want.body[1]}`;
     if (body !== crowdBody) {
       crowdBody = body;
@@ -1032,13 +1128,12 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     }
     crowdMesh.count = Math.max(1, Math.min(cN, Math.round((want.crowdFull ? cN : sparseN) * want.crowdShare)));
     particlesOn = want.particles;
-    flashN = want.particles ? want.flashes : 0;
-    hazeN = want.particles ? want.haze : 0;
-    growFlashes(flashN);
-    growHaze(hazeN);
-    for (let i = 0; i < flashes.length; i++) if (i >= flashN) flashes[i]!.visible = false;
-    for (let i = 0; i < haze.length; i++) haze[i]!.visible = i < hazeN;
-    particles.visible = particlesOn && night;
+    flashN = Math.min(MAX_FLASHES, want.flashes);
+    hazeN = Math.min(MAX_HAZE, want.haze);
+    flashGeo.setDrawRange(0, flashN);
+    hazeGeo.setDrawRange(0, hazeN);
+    for (let i = flashN; i < MAX_FLASHES; i++) flashLife[i] = 0;
+    flashes.visible = haze.visible = particlesOn && night;
     renderer.bloom = want.bloom ? { ...BLOOM } : null;
   }
   // the pitch textures exist before the stadium shows
@@ -1121,7 +1216,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     const still = reducedMotion();
 
     // camera flashes: a trickle all match, bursts when the crowd erupts
-    if (particles.visible) {
+    if (flashes.visible) {
       if (!still) {
         let spawn = step * (2 + 40 * pulseV + 6 * exc);
         while (spawn > 0 && flashN > 0) {
@@ -1129,14 +1224,20 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
           spawn -= 1;
         }
       }
+      // HDR white (up to 7) so bloom takes the flashes
       for (let i = 0; i < flashN; i++) {
         const life = (flashLife[i] = Math.max(0, flashLife[i]! - step));
-        const s = flashes[i]!;
-        s.visible = life > 0 && !still;
-        if (life > 0) s.scale.setScalar(1.1 * POINT_TO_SPRITE * (0.4 + (life / 0.14) * 1.6));
+        const v = still ? 0 : (life / 0.14) * 7;
+        flashCol[i * 3] = v;
+        flashCol[i * 3 + 1] = v;
+        flashCol[i * 3 + 2] = v * 1.08;
       }
-      // haze drifts slowly up and down through the beams
-      if (!still) for (let i = 0; i < hazeN; i++) haze[i]!.position.y = hazeBaseY[i]! + Math.sin(t * 0.25 + hazePh[i]!) * 0.8;
+      flashColAttr.needsUpdate = true;
+    }
+    // haze drifts slowly up and down through the beams
+    if (haze.visible && !still) {
+      for (let i = 0; i < hazeN; i++) hazePos[i * 3 + 1] = hazeBaseY[i]! + Math.sin(t * 0.25 + hazePh[i]!) * 0.8;
+      hazePosAttr.needsUpdate = true;
     }
 
     // floodlight flicker (subtle mains hum; steady with reduced motion)
@@ -1159,7 +1260,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     for (const f of fillSpots) f.visible = night;
     coneMesh.visible = night;
     for (const g of lampGlows) g.visible = night;
-    particles.visible = particlesOn && night;
+    flashes.visible = haze.visible = particlesOn && night;
     lampMat.emissiveIntensity = night ? 2.4 : 0.25;
     skyMat.map = night ? skyTexNight : skyTexDay;
     background.setHex(night ? 0x04060d : 0x6f87a3);
@@ -1174,6 +1275,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     scene.remove(root);
     if (scene.background === background) scene.background = prevBackground;
     if (scene.fog === fog) scene.fog = prevFog;
+    if (envShown && scene.environment === envShown) scene.environment = prevEnvironment;
     renderer.bloom = null;
     disposeTextures();
     crowdGeo.dispose();

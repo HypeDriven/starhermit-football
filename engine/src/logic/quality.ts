@@ -15,7 +15,11 @@ export interface ContentQuality {
   /** The opposite tower casts too (the floodlit double shadow). */
   secondCaster: boolean;
   bloom: boolean;
-  /** The detailed pitch (turf variation and worn goalmouths). */
+  /** The floodlit-stadium environment map (Reflections). */
+  reflections: boolean;
+  /** Lambert twins for the stands, seats and crowd (the Low budget). */
+  lambert: boolean;
+  /** The detailed pitch (turf variation, worn goalmouths, mow-stripe normal map). */
   detail: boolean;
   /** Full or the evenly spread half crowd. */
   crowdFull: boolean;
@@ -46,6 +50,8 @@ export function contentQuality(tierName: string): ContentQuality {
     shadowMap: (SHADOW_MAP as Record<string, number>)[shadows] ?? 0,
     secondCaster: shadows === "high",
     bloom: presetTier(tier, "bloom") === "on",
+    reflections: presetTier(tier, "reflections") === "on",
+    lambert: b.material === "lambert",
     detail: presetTier(tier, "detail") === "detailed",
     crowdFull: presetTier(tier, "crowd") === "full",
     particles: presetTier(tier, "particles") === "on",
