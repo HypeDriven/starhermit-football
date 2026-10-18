@@ -5,7 +5,6 @@
 // under them (T focuses it, Enter sends, Escape cancels). Best-effort: any
 // failure degrades to a status line or silence — the match never depends
 // on chat. The field lays out in its own corner with starhermit:ui's area.
-import { shown } from "./logic/glyphs.ts";
 import { frame } from "starhermit:engine";
 import type { Unsubscribe } from "starhermit:engine";
 import * as draw from "starhermit:draw";
@@ -14,7 +13,7 @@ import * as ui from "starhermit:ui";
 import type { ChatChannel, ChatMessage } from "starhermit:platform";
 import { ChatLog, SendLimiter } from "./logic/chat.ts";
 import { oneLine } from "./logic/format.ts";
-import { ACCENT2, BORDER, PANEL, crisp, panel } from "./hud.ts";
+import { ACCENT2, BORDER, PANEL, panel } from "./hud.ts";
 import { P, displayNameNow, errorKind } from "./platform.ts";
 import { T } from "./i18n.ts";
 
@@ -157,7 +156,7 @@ export function createMatchChat(sessionId: string, myUserId: string | null): Mat
       if (!visible || !started) return;
       const f = frame();
       const s = f.scale;
-      const size = crisp(10 * s);
+      const size = 12.48 * s; // #match-chat 0.78rem
       const lineH = size * 1.3;
       const rect = this.fieldRect();
       const x = rect.x;
@@ -183,13 +182,13 @@ export function createMatchChat(sessionId: string, myUserId: string | null): Mat
         } else {
           const m = tail[i]!;
           if (m.kind && m.kind !== "text") {
-            draw.text(shown(oneLine(m.content ?? "")), lx, ly, { size, color: "#93a1b0", clip });
+            draw.text(oneLine(m.content ?? ""), lx, ly, { size, color: "#93a1b0", clip });
           } else {
             const own = String(m.senderId ?? "").toLowerCase() === me;
             const label = `${displayNameNow(m.senderId) ?? "…"} `;
             draw.text(label, lx, ly, { size, color: own ? ACCENT2 : "#9fb0c0", clip });
             lx += draw.measureText(label, { size }).width;
-            draw.text(shown(oneLine(m.content ?? "")), lx, ly, { size, color: "#d7e1e9", clip });
+            draw.text(oneLine(m.content ?? ""), lx, ly, { size, color: "#d7e1e9", clip });
           }
         }
         ly += lineH;

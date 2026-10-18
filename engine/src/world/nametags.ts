@@ -1,6 +1,5 @@
 // Floating nickname plates above players' heads (spec.md §5.4): one canvas
 // texture per player, drawn once — zero per-frame cost.
-import { shown } from "../logic/glyphs.ts";
 import { LinearMipmapLinearFilter, Sprite, SpriteMaterial } from "starhermit:scene";
 import type { OffscreenCanvasRenderingContext2D } from "starhermit:canvas";
 import { canvasTexture, makeCanvas } from "./resources.ts";
@@ -33,7 +32,7 @@ export interface NameTag {
 export function createNameTag(name: string, opts: { color?: string; isYou?: boolean } = {}): NameTag {
   const color = opts.color || "#cccccc";
   const isYou = !!opts.isYou;
-  const label = shown(String(name ?? ""));
+  const label = String(name ?? "");
 
   const fontPx = 30 * SS;
   const padX = 16 * SS;

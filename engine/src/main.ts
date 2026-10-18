@@ -5,10 +5,11 @@
 // StarHermit runtime's host API v1. The match simulation is server.js, shared
 // with the platform and the browser (see sim.ts); the strings are the
 // browser's own tables (see i18n.ts).
-import { shown } from "./logic/glyphs.ts";
 import { frame, onFixedUpdate, onRender, onStart, onUpdate, openMenu, setFixedRate } from "starhermit:engine";
 import type { JsonValue } from "starhermit:engine";
 import { ACESFilmicToneMapping, PerspectiveCamera, renderer, scene } from "starhermit:scene";
+import { createImageBitmap } from "starhermit:canvas";
+import type { ImageBitmap, OffscreenCanvas } from "starhermit:canvas";
 import type { CanvasTexture } from "starhermit:scene";
 import { canvasTexture, makeCanvas } from "./world/resources.ts";
 import { exitPointerLock, gamepads, onKey, onPointerButton, onTouch, pointerLocked, primaryPointer } from "starhermit:input";
@@ -17,7 +18,7 @@ import type { Room, RoomInvite } from "starhermit:platform";
 import * as draw from "starhermit:draw";
 import * as ui from "starhermit:ui";
 import { createAudio } from "./audio.ts";
-import { ACCENT, BORDER, MUTED, TEXT, createHud, crisp } from "./hud.ts";
+import { ACCENT, BORDER, MUTED, TEXT, createHud } from "./hud.ts";
 import { T, loadLanguages, platformStrings, refreshLanguage, upper } from "./i18n.ts";
 import { createInput } from "./input.ts";
 import { resultTitle, statsLines } from "./logic/format.ts";
@@ -290,7 +291,7 @@ async function onMatchReady(room: Room, isRejoin = false): Promise<void> {
 function showResult(r: MatchResult): void {
   disposeMatch();
   menuScene.start();
-  result = { title: resultTitle(r.winner, r.myTeam), score: shown(`${r.score[0]} – ${r.score[1]}`), stats: r.stats, rank: "" };
+  result = { title: resultTitle(r.winner, r.myTeam), score: `${r.score[0]} – ${r.score[1]}`, stats: r.stats, rank: "" };
   void showMatchRank(r);
   showScreen("result");
 }
@@ -730,20 +731,46 @@ function screensUi(): void {
   }, { align: "center", justify: "center", width, height, spacing: 16 });
 }
 
-/** The browser's #loading: the logo over the key art's plain colour (the
- * key art is a WebP image, which the engine does not decode). */
+/** The browser's #loading: the logo over the key art (cover-fitted) under
+ * a dark veil, the plain colour while the image decodes or if it fails. */
+let keyArt: ImageBitmap | null = null;
+let veil: OffscreenCanvas | null = null;
 function loadingScreen(text: string): void {
   const f = frame();
   const s = f.scale;
   draw.rect(0, 0, f.width, f.height, "#05070c");
-  const logo = crisp(22 * s);
+  if (keyArt) {
+    const k = Math.max(f.width / keyArt.width, f.height / keyArt.height);
+    const w = keyArt.width * k;
+    const h = keyArt.height * k;
+    draw.image(keyArt, (f.width - w) / 2, (f.height - h) / 2, w, h);
+  }
+  if (!veil) {
+    // linear-gradient(rgba(5,7,12,0.55), rgba(5,7,12,0.85))
+    const [c, g] = makeCanvas(1, 64);
+    const lg = g.createLinearGradient(0, 0, 0, 64);
+    lg.addColorStop(0, "rgba(5,7,12,0.55)");
+    lg.addColorStop(1, "rgba(5,7,12,0.85)");
+    g.fillStyle = lg;
+    g.fillRect(0, 0, 1, 64);
+    veil = c;
+  }
+  draw.image(veil, 0, 0, f.width, f.height);
+  const logo = 22.4 * s; // .small-logo 1.4rem
   draw.text("STARHERMIT FOOTBALL", f.width / 2, f.height / 2 - logo * 1.2, { size: logo, color: TEXT, align: "center", letterSpacing: 0.12 * logo, weight: "800" });
-  draw.text(text, f.width / 2, f.height / 2 + logo * 0.4, { size: crisp(14 * s), color: MUTED, align: "center" });
+  draw.text(text, f.width / 2, f.height / 2 + logo * 0.4, { size: 16 * s, color: MUTED, align: "center" });
 }
 
 // ── lifecycle ──
 onStart(() => {
   setFixedRate(60);
+  createImageBitmap("assets/keyart-night-stadium.webp")
+    .then((img) => {
+      keyArt = img;
+    })
+    .catch(() => {
+      // the plain colour stays
+    });
   loadLanguages(); // the game's string tables and language resolver
   sim(); // evaluate server.js once: the shared simulation
   // The synthesis graph, its noise buffer and the clips build in an entry

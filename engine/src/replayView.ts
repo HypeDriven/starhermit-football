@@ -9,7 +9,7 @@ import type { PerspectiveCamera, Scene } from "starhermit:scene";
 import * as draw from "starhermit:draw";
 import * as ui from "starhermit:ui";
 import type { Hud } from "./hud.ts";
-import { crisp, panel } from "./hud.ts";
+import { panel } from "./hud.ts";
 import { FollowRig } from "./logic/camera.ts";
 import { interpPlayer } from "./logic/interp.ts";
 import type { BallEntity, InterpEntity } from "./logic/interp.ts";
@@ -238,7 +238,7 @@ export class ReplayViewer {
     const f = frame();
     const s = f.scale;
     if (this.message) {
-      const size = crisp(10 * s * 1.4);
+      const size = 14 * s;
       const tw = draw.measureText(this.message, { size }).width;
       const w = tw + 2.8 * 16 * s;
       const h = size + 2 * 16 * s;

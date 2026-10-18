@@ -1,8 +1,9 @@
 // Copied unchanged below this note from starhermit-engine
-// crates/starhermit-runtime/api/starhermit.d.ts at commit bdf60c8 (2026-10-18,
-// branch r2-exposure): host API v1 with the football port's decisions and R2's
-// rendering. Refresh it from the runtime when the contract changes; the sha256
-// of the original file is 358d8b8e715ff1071503def43fc1e61069652ab0819ff4a3235437dd5496cbc5.
+// crates/starhermit-runtime/api/starhermit.d.ts at commit 0f3a320 (2026-10-18,
+// branch script-next): host API v1 with the football port's decisions, R2's
+// rendering, system fonts and WebP. Refresh it from the runtime when the
+// contract changes; the sha256 of the original file is
+// ffebf09bf78967a90cab8a2a8fac213f1aaf732a934dc9ac0bdc958546f9e816.
 
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -906,7 +907,8 @@ declare module "starhermit:scene" {
    * prefiltering; false while its images decode or it prefilters, and for
    * null. */
   export function environmentReady(value: Texture | null): boolean;
-  /** Loads package images (PNG) through the engine's decoders. */
+  /** Loads package images (PNG or WebP; an animated WebP's first frame)
+   * through the engine's decoders. */
   export class TextureLoader {
     constructor();
     /** Rejects with a TypeError for a bad path, an Error named
@@ -1502,7 +1504,7 @@ declare module "starhermit:canvas" {
     /** A copy of the current pixels as an image. */
     transferToImageBitmap(): ImageBitmap;
   }
-  /** A decoded image (package PNGs, a canvas copy). */
+  /** A decoded image (package PNG and WebP images, a canvas copy). */
   export class ImageBitmap {
     #private;
     private constructor();
@@ -1511,8 +1513,12 @@ declare module "starhermit:canvas" {
     /** Releases it; drawing it afterwards throws `InvalidStateError`. */
     close(): void;
   }
-  /** Decodes a package image (PNG) or PNG bytes (rejects with an Error
-   * named `EncodingError` for data it cannot decode). */
+  /** Decodes a package image or image bytes, PNG or WebP (an animated
+   * WebP's first frame; rejects with an Error named `EncodingError` for
+   * data it cannot decode, a RangeError past 4,096 pixels on a side). Images
+   * decode off the game's thread, two at a time, and settle as a frame
+   * begins; at most 128 wait at once (RangeError). ImageData and canvases
+   * are copied at once. */
   export function createImageBitmap(source: string | Uint8Array | ArrayBuffer | ImageData | OffscreenCanvas): Promise<ImageBitmap>;
 
   /** Straight-alpha RGBA8 pixels, as the web's. */
@@ -1694,8 +1700,11 @@ declare module "starhermit:canvas" {
     /** CSS font shorthand (style, small-caps, weight, stretch, size in any
      * CSS unit, line height, families); families are the fonts added with
      * `fonts.add` and the generic families (`sans-serif`, `serif`,
-     * `monospace`, `system-ui`), which map to the engine's built-in fonts.
-     * Default `10px sans-serif`. */
+     * `monospace`, `system-ui`, `cursive`, `fantasy`), which map to the
+     * operating system's fonts as browsers map them (see `starhermit:draw`)
+     * with the engine's pixel font (`starhermit pixel`) last. Characters a
+     * face lacks draw with the next face that has them. Default
+     * `10px sans-serif`. */
     font: string;
     textAlign: CanvasTextAlign;
     textBaseline: CanvasTextBaseline;
@@ -1763,6 +1772,21 @@ declare module "starhermit:draw" {
   // most 16,384 items a frame, 4,096 characters a text and 65,536
   // characters a frame (RangeError). The runtime's own interface always
   // draws above it.
+  //
+  // Fonts. Text in no family the game added draws with the operating
+  // system's fonts, as browsers map the generic families: `system-ui` (the
+  // default; Segoe UI on Windows, DejaVu Sans on Linux), `sans-serif`
+  // (Arial, Liberation Sans or DejaVu Sans), `serif`, `monospace`,
+  // `cursive` and `fantasy`; characters a face lacks take the next face
+  // that has them (other system families, Segoe UI Symbol on Windows), and
+  // the engine's 5 × 7 pixel font (`starhermit pixel`, printable ASCII,
+  // `· × — …` and the arrows) comes last, so a machine without system fonts
+  // still draws ASCII. On common systems that covers Latin-1, Latin
+  // Extended-A and general punctuation (`é`, `ß`, `–`, `’`); symbols such as
+  // `★` depend on the system. The runtime ships no font file and reads
+  // fonts only from the system's font directories. Exact metrics (widths,
+  // line heights) differ between systems, as on the web: measure text
+  // (`measureText`) rather than assume widths.
 
   export interface Clip {
     /** Only the part inside this window rectangle draws. */
@@ -1786,17 +1810,19 @@ declare module "starhermit:draw" {
     origin?: { x: number; y: number };
   }
   export interface TextOptions extends Clip, Rotation {
-    /** Pixels (default 16). The built-in pixel font is crisp at multiples of
-     * 10; fonts added with `canvas.fonts` scale smoothly. */
+    /** Pixels (default 16). */
     size?: number;
     color?: ColorLike;
-    /** A family added with `canvas.fonts` (default: the built-in font). */
+    /** A family added with `canvas.fonts`, a generic family (`system-ui`,
+     * the default, `sans-serif`, `serif`, `monospace`, `cursive`,
+     * `fantasy`) or `starhermit pixel` (the pixel font, crisp at multiples
+     * of 10); any other name throws a TypeError. */
     font?: string;
     /** Where `x` is: the text's start (default), center or end. */
     align?: "start" | "center" | "end";
     /** A `FontFace` weight of the family (`"bold"`, `"700"`); the nearest
-     * face added under it is used. The built-in font draws a synthesized
-     * bold at weights of 600 and more. */
+     * face added under it (or the system's bold face) is used; a family
+     * without a bold face draws a synthesized bold at 600 and more. */
     weight?: string;
     /** Extra pixels between characters. */
     letterSpacing?: number;
@@ -1944,8 +1970,9 @@ declare module "starhermit:ui" {
   export function setTheme(theme: Theme): void;
   /** The font the UI lays out and draws its text with: a family added with
    * `canvas.fonts` (any case) at the face nearest `weight` (synthesized
-   * bold for the built-in font at 600 and more); null returns to the
-   * built-in font. A family never added throws a TypeError. */
+   * bold at 600 and more for a family without a bold face), falling back
+   * to the system's faces; null returns to the default faces (`system-ui`,
+   * see `starhermit:draw`). A family never added throws a TypeError. */
   export function setFont(font: { family?: string; weight?: string } | null): void;
 }
 

@@ -4,7 +4,6 @@
 // remint here. Every call can fail with a PlatformError; online features
 // degrade to a clear "online unavailable" message instead of failing the
 // game.
-import { shown } from "./logic/glyphs.ts";
 import * as P from "starhermit:platform";
 import { clipboard } from "starhermit:engine";
 import type { PlatformError, Player } from "starhermit:platform";
@@ -75,8 +74,8 @@ export function displayName(userId: string | null | undefined): Promise<string> 
   let hit = displayNames.get(key);
   if (!hit) {
     hit = P.profile(userId)
-      .then((p) => shown(p.displayName || fallbackName(userId)))
-      .catch(() => shown(fallbackName(userId)))
+      .then((p) => p.displayName || fallbackName(userId))
+      .catch(() => fallbackName(userId))
       .then((n) => {
         resolvedNames.set(key, n);
         return n;

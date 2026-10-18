@@ -1,11 +1,16 @@
-// The two club crests. The browser shows assets/crest-blue.webp and
-// crest-red.webp (a royal blue shield with a silver heron, a crimson shield
-// with a gold wolf); the engine decodes PNG images only, so the native
-// client draws a stand-in shield in each club's colors once, as a canvas
-// (overlay) and a texture (UI).
+// The two club crests, assets/crest-blue.webp and crest-red.webp (a royal
+// blue shield with a silver heron, a crimson shield with a gold wolf), as
+// the browser's .crest shows them: round, cover-fitted on #0a0e14 with a
+// 1px #2c3e50 rim. One canvas each (overlay) with a texture of it (UI); a
+// shield in the club's colors stands in while the image decodes or if it
+// cannot be.
 import { CanvasTexture } from "starhermit:scene";
+import { createImageBitmap } from "starhermit:canvas";
 import type { OffscreenCanvas } from "starhermit:canvas";
 import { makeCanvas } from "./resources.ts";
+
+const FILES = ["assets/crest-blue.webp", "assets/crest-red.webp"] as const;
+const SIZE = 96;
 
 const CRESTS = [
   { field: "#1f4fa8", rim: "#c9d2dc", charge: "#e4e9ef" }, // BLUE: silver on royal blue
@@ -24,7 +29,8 @@ export function crest(team: number): Crest {
   const hit = made[i];
   if (hit) return hit;
   const c = CRESTS[i];
-  const [canvas, g] = makeCanvas(64, 64);
+  const [canvas, g] = makeCanvas(SIZE, SIZE);
+  g.scale(SIZE / 64, SIZE / 64); // the stand-in is drawn on a 64-unit grid
   g.fillStyle = "#0a0e14";
   g.beginPath();
   g.arc(32, 32, 32, 0, Math.PI * 2);
@@ -58,9 +64,34 @@ export function crest(team: number): Crest {
   g.closePath();
   g.fillStyle = c.charge;
   g.fill();
+  g.setTransform(1, 0, 0, 1, 0, 0);
   const texture = new CanvasTexture(canvas);
   texture.needsUpdate = true;
   const out = { canvas, texture };
   made[i] = out;
+  createImageBitmap(FILES[i])
+    .then((img) => {
+      const r = SIZE / 2;
+      g.clearRect(0, 0, SIZE, SIZE);
+      g.save();
+      g.beginPath();
+      g.arc(r, r, r, 0, Math.PI * 2);
+      g.fillStyle = "#0a0e14";
+      g.fill();
+      g.clip();
+      const k = Math.max(SIZE / img.width, SIZE / img.height);
+      g.drawImage(img, (SIZE - img.width * k) / 2, (SIZE - img.height * k) / 2, img.width * k, img.height * k);
+      g.restore();
+      g.beginPath();
+      g.arc(r, r, r - 2, 0, Math.PI * 2);
+      g.strokeStyle = "#2c3e50";
+      g.lineWidth = 4; // 1px at the bar's 24px
+      g.stroke();
+      img.close();
+      texture.needsUpdate = true;
+    })
+    .catch(() => {
+      // the stand-in stays
+    });
   return out;
 }

@@ -4,7 +4,6 @@
 // event banners, the mouse camera hint, the ☰ match-menu button and the mic
 // toggle. Window coordinates are physical pixels; sizes are the browser's
 // CSS pixels times frame().scale.
-import { shown } from "./logic/glyphs.ts";
 import { frame } from "starhermit:engine";
 import type { ColorLike } from "starhermit:engine";
 import * as draw from "starhermit:draw";
@@ -58,10 +57,6 @@ export function panel(x: number, y: number, w: number, h: number, r: number, s: 
   draw.strokeRoundRect(x, y, w, h, r, border, Math.max(1, s));
 }
 
-/** Pixel-font sizes are crisp at multiples of 10 (physical pixels). */
-export function crisp(px: number): number {
-  return Math.max(10, Math.round(px / 10) * 10);
-}
 
 function inside(b: HudButton, x: number, y: number): boolean {
   return b.w > 0 && x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
@@ -71,7 +66,7 @@ export function createHud(): Hud {
   let visible = false;
   let homeName = "HOME";
   let awayName = "AWAY";
-  let score = shown("0 – 0");
+  let score = "0 – 0";
   let clockTime = 0;
   let clockHalf = 1;
   let clockLength = 180;
@@ -103,17 +98,21 @@ export function createHud(): Hud {
   }
 
   function drawScorebar(W: number, s: number, top: number): void {
-    const big = crisp(20 * s);
-    const small = crisp(10 * s);
-    const clockSize = small * 1.4;
+    // the browser's #scorebar sizes: 1.25rem, names 0.8rem, clock 0.9rem
+    const big = 20 * s;
+    const small = 12.8 * s;
+    const clockSize = 14.4 * s;
     const gap = 0.6 * 16 * s;
     const crestSize = 1.5 * 16 * s;
     const home = T(homeName);
     const away = T(awayName);
     const clock = clockSet ? formatClock(clockTime, clockHalf, clockLength, T) : "00:00";
-    const wHome = draw.measureText(home, { size: small }).width;
-    const wAway = draw.measureText(away, { size: small }).width;
-    const wScore = draw.measureText(score, { size: big }).width;
+    // the bar's letter spacing (0.05em) is drawn after each character;
+    // measuring leaves it out
+    const spaced = (text: string, size: number): number => draw.measureText(text, { size }).width + 0.05 * size * [...text].length;
+    const wHome = spaced(home, small);
+    const wAway = spaced(away, small);
+    const wScore = spaced(score, big);
     const wClock = draw.measureText(clock, { size: clockSize }).width;
     const padX = 1.1 * 16 * s;
     const padY = 0.4 * 16 * s;
@@ -128,14 +127,15 @@ export function createHud(): Hud {
     const mid = top + h / 2;
     draw.image(crest(0).canvas, cx, mid - crestSize / 2, crestSize, crestSize);
     cx += crestSize + gap;
-    draw.text(home, cx, mid - small / 2, { size: small, color: "#9fb0c0", weight: "800" });
+    draw.text(home, cx, mid - small / 2, { size: small, color: "#9fb0c0", letterSpacing: 0.05 * small, weight: "800" });
     cx += wHome + gap;
-    draw.text(score, cx, mid - big / 2, { size: big, color: TEXT, letterSpacing: 0.05 * 20 * s, weight: "800" });
+    draw.text(score, cx, mid - big / 2, { size: big, color: TEXT, letterSpacing: 0.05 * big, weight: "800" });
     cx += wScore + gap;
-    draw.text(away, cx, mid - small / 2, { size: small, color: "#9fb0c0", weight: "800" });
+    draw.text(away, cx, mid - small / 2, { size: small, color: "#9fb0c0", letterSpacing: 0.05 * small, weight: "800" });
     cx += wAway + gap;
     draw.image(crest(1).canvas, cx, mid - crestSize / 2, crestSize, crestSize);
     cx += crestSize + gap * 2;
+    // unspaced: the engine's football probe reads the clock as one text
     draw.text(clock, cx, mid - clockSize / 2, { size: clockSize, color: ACCENT2, weight: "800" });
   }
 
@@ -155,7 +155,7 @@ export function createHud(): Hud {
     ];
     draw.polygon(tri(1.35), [0, 0, 0, 0.45]); // the glyph's dark text shadow
     draw.polygon(tri(1), "#ffffff");
-    const size = crisp(10 * s);
+    const size = 11.2 * s; // #ball-arrow-dist 0.7rem
     draw.text(arrowDist, cx, cy + 14 * s, { size, color: "#ffffff", align: "center", weight: "700", shadow: { color: [0, 0, 0, 0.8], x: 0, y: s } });
   }
 
@@ -192,8 +192,9 @@ export function createHud(): Hud {
   function drawMouseHint(W: number, H: number, s: number, bottomInset: number): void {
     if (!mouseHint) return;
     const text = T("CLICK THE PITCH FOR MOUSE CAMERA · LEFT SHOOT · RIGHT PASS · MIDDLE TACKLE");
-    const size = crisp(10 * s);
-    const tw = draw.measureText(text, { size }).width;
+    const size = 11.2 * s; // #mouse-hint 0.7rem
+    const spacing = 0.06 * size;
+    const tw = draw.measureText(text, { size }).width + spacing * [...text].length;
     const padX = 0.8 * 16 * s;
     const padY = 0.45 * 16 * s;
     const w = tw + padX * 2;
@@ -201,7 +202,7 @@ export function createHud(): Hud {
     const x = W / 2 - w / 2;
     const y = H - Math.max(24 * s, bottomInset) - h;
     panel(x, y, w, h, 7 * s, s, "rgba(255,255,255,0.2)", [4 / 255, 9 / 255, 15 / 255, 0.78]);
-    draw.text(text, x + padX, y + padY, { size, color: "#d7e1e9", letterSpacing: 0.06 * 11 * s, weight: "700" });
+    draw.text(text, x + padX, y + padY, { size, color: "#d7e1e9", letterSpacing: spacing, weight: "700" });
   }
 
   function drawMenuButton(W: number, s: number, top: number, right: number): void {
@@ -227,7 +228,7 @@ export function createHud(): Hud {
       return;
     }
     const label = micMuted ? T("MIC OFF · M") : T("MIC ON · M");
-    const size = crisp(10 * s);
+    const size = 11.52 * s; // #btn-mic 0.72rem
     const tw = draw.measureText(label, { size }).width;
     const w = tw + 0.7 * 16 * s * 2;
     const h = size + 0.3 * 16 * s * 2;
@@ -261,7 +262,7 @@ export function createHud(): Hud {
       awayName = a;
     },
     setScore(h: number, a: number): void {
-      score = shown(`${h} – ${a}`); // the bar's flex gap around the separator
+      score = `${h} – ${a}`; // the bar's flex gap around the separator
     },
     setClock(time: number, half: number, halfLength: number): void {
       clockSet = true;

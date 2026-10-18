@@ -672,9 +672,9 @@ headless; the engine's ignored football probe (`STARHERMIT_FOOTBALL_DIR=<repo> c
 | 3D model (TRELLIS) | — | — | not called for (see section 8) | n/a |
 | Humanoid animation (Kimodo) | — | — | not called for: procedural rig; football kicks/dives are out of distribution | n/a |
 
-The native client plays the same SFX clips (the engine decodes Ogg Opus). It cannot show the WebP
-key art and crests (the engine decodes PNG images only): its loading screen is the key art's plain
-colour, and the score bar and lobby use a stand-in shield in each club's colors drawn in code.
+The native client plays the same SFX clips (the engine decodes Ogg Opus) and shows the same WebP key
+art (its loading screen) and crests (score bar, lobby); a shield in each club's colors drawn in code
+stands in while a crest decodes or if it cannot be.
 
 ## 16. Native client (StarHermit runtime)
 
@@ -748,13 +748,12 @@ browser code:
 - **Voice.** The SDK's voice room for the session's conversation (open mic; the runtime asks for the
   microphone and shows its indicator); each speaker's volume and pan follow the two footballers'
   distance and side at 10 Hz (section 9's falloff).
-- **Where it differs.** No WebP art (above); no ambient occlusion or colour grade, and bloom has the
-  host's radius (the host has no such passes); the floodlit environment is written as a
-  latitude-longitude image of the browser's environment scene (`world/environment.ts`, the host has
-  no render-to-texture); the detailed pitch keeps one grass texture at a time with its normal map
-  (switching rebuilds it); text uses the runtime's pixel font, which has ASCII and a few symbols
-  only, so typographic dashes and quotes show as ASCII and accented letters without accents
-  (`logic/glyphs.ts`);
+- **Where it differs.** No ambient occlusion or colour grade, and bloom has the host's radius (the
+  host has no such passes); the floodlit environment is written as a latitude-longitude image of the
+  browser's environment scene (`world/environment.ts`, the host has no render-to-texture); the
+  detailed pitch keeps one grass texture at a time with its normal map (switching rebuilds it); text
+  uses the system's fonts for the generic families, as the browser's CSS does, with the HUD's CSS
+  sizes; the tunnel sign's stars are drawn as paths (★ depends on the system's fonts);
   SETTINGS keeps the game language, the game's mute, the quality line with its three content
   overrides and Report a problem; the Settings and
   Report-a-problem labels the browser keeps in `js/settings.js` and `game-options.js`, and text that
