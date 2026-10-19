@@ -21,7 +21,8 @@ import type { GameInput } from "./input.ts";
 import { FollowRig, ballArrow } from "./logic/camera.ts";
 import type { Arrow, ArrowBox } from "./logic/camera.ts";
 import {
-  ceremonyAt, createJitterState, interpBall, interpPlayer, noteArrival, parseSnap, pickPair, renderTime, snapTime, trimSnaps,
+  blankCeremony, ceremonyAt, createJitterState, interpBall, interpPlayer, noteArrival, parseSnap, pickPair, renderTime, snapTime,
+  trimSnaps,
 } from "./logic/interp.ts";
 import type { CeremonySnap, InterpPair, ParsedSnap } from "./logic/interp.ts";
 import { matchSeats } from "./logic/lobby.ts";
@@ -103,6 +104,10 @@ export class MatchController {
   private inputTimer = 0;
   private inputSeq = 0;
   private snaps: ParsedSnap[] = [];
+  /** Snapshots dropped from the buffer, filled again by the next ones. */
+  private readonly spareSnaps: ParsedSnap[] = [];
+  /** The ceremony blended between two snapshots, rewritten each frame. */
+  private readonly cerBlend = blankCeremony();
   private readonly jitter = createJitterState();
   private localKickFeedbackAt = -Infinity;
   private prediction: Prediction | null = null;
@@ -507,13 +512,17 @@ export class MatchController {
       interpPlayer(st.players[i]!, pa, pb, k, extrap);
     }
     interpBall(st.ball, a.b, b.b, k, extrap, this.S.BALL_R, this.S.GRAVITY);
-    this.curCer = ceremonyAt(a, b, k);
+    this.curCer = ceremonyAt(a, b, k, this.cerBlend);
   }
 
   onSnapshot(snap: Record<string, unknown>): void {
     if (this.mode !== "online" || !this.state) return;
-    const parsed = parseSnap(snap);
-    if (!parsed) return;
+    const spare = this.spareSnaps.pop() ?? null;
+    const parsed = parseSnap(snap, spare);
+    if (!parsed) {
+      if (spare) this.spareSnaps.push(spare);
+      return;
+    }
     const st = this.state;
     const arrived = now();
     parsed.arrived = arrived;
@@ -526,7 +535,7 @@ export class MatchController {
     }
 
     this.snaps.push(parsed);
-    trimSnaps(this.snaps, parsed.at);
+    trimSnaps(this.snaps, parsed.at, this.spareSnaps);
 
     // reconcile flow state
     st.score[0] = parsed.sc[0];
