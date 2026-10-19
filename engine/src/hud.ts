@@ -21,6 +21,11 @@ export const TEXT = "#eef2f5";
 export const MUTED = "#93a1b0";
 
 const BANNER_POP_S = 0.35;
+// Fills and shadows the HUD draws every frame, made once.
+const GLYPH_SHADOW: ColorLike = [0, 0, 0, 0.45];
+const POWER_FILL: ColorLike = [0, 0, 0, 0.55];
+const HINT_FILL: ColorLike = [4 / 255, 9 / 255, 15 / 255, 0.78];
+const MENU_FILL: ColorLike = [4 / 255, 9 / 255, 15 / 255, 0.7];
 /** The ball arrow's box (glyph + label) for its clamp, CSS px. */
 export const ARROW_HALF = { width: 20, height: 22 };
 
@@ -139,6 +144,23 @@ export function createHud(): Hud {
   // The arrow's two triangles, refilled each frame.
   const glyph: [number, number][] = [[0, 0], [0, 0], [0, 0]];
   const glyphShadow: [number, number][] = [[0, 0], [0, 0], [0, 0]];
+  // Text options and colors drawn every frame, kept rather than made each
+  // frame (their sizes follow the window's scale, the banner's colors its
+  // fade): fewer collections in play (40 instead of 44 in 8,000 frames).
+  const nameStyle = { size: 0, color: "#9fb0c0", letterSpacing: 0, weight: "800" };
+  const scoreStyle = { size: 0, color: TEXT, letterSpacing: 0, weight: "800" };
+  const clockStyle = { size: 0, color: ACCENT2, weight: "800" };
+  const arrowShadow = { color: [0, 0, 0, 0.8] as ColorLike, x: 0, y: 0 };
+  const arrowStyle = { size: 0, color: "#ffffff", align: "center" as const, weight: "700", shadow: arrowShadow };
+  const hintStyle = { size: 0, color: "#d7e1e9", letterSpacing: 0, weight: "700" };
+  const powerClip = { clip: { x: 0, y: 0, width: 0, height: 0 } };
+  const glow: [number, number, number, number] = [39 / 255, 174 / 255, 96 / 255, 0];
+  const glowNext = { color: glow, x: 0, y: 0 };
+  const glowPair = { size: 0, letterSpacing: 0, weight: "900", color: glow, align: "center" as const, shadow: glowNext };
+  const glowLast = { size: 0, letterSpacing: 0, weight: "900", color: glow, align: "center" as const };
+  const bannerWhite: [number, number, number, number] = [1, 1, 1, 0];
+  const bannerDrop = { color: [0, 0, 0, 0] as [number, number, number, number], x: 0, y: 0 };
+  const bannerStyle = { size: 0, letterSpacing: 0, weight: "900", align: "center" as const, color: bannerWhite, shadow: bannerDrop };
 
   /** The match clock's text, formatted again only when its second, the
    * half or the language changes. */
@@ -195,16 +217,21 @@ export function createHud(): Hud {
     const mid = top + h / 2;
     draw.image(crest(0).canvas, cx, mid - crestSize / 2, crestSize, crestSize);
     cx += crestSize + gap;
-    draw.text(home, cx, mid - small / 2, { size: small, color: "#9fb0c0", letterSpacing: 0.05 * small, weight: "800" });
+    nameStyle.size = small;
+    nameStyle.letterSpacing = 0.05 * small;
+    draw.text(home, cx, mid - small / 2, nameStyle);
     cx += wHome + gap;
-    draw.text(score, cx, mid - big / 2, { size: big, color: TEXT, letterSpacing: 0.05 * big, weight: "800" });
+    scoreStyle.size = big;
+    scoreStyle.letterSpacing = 0.05 * big;
+    draw.text(score, cx, mid - big / 2, scoreStyle);
     cx += wScore + gap;
-    draw.text(away, cx, mid - small / 2, { size: small, color: "#9fb0c0", letterSpacing: 0.05 * small, weight: "800" });
+    draw.text(away, cx, mid - small / 2, nameStyle);
     cx += wAway + gap;
     draw.image(crest(1).canvas, cx, mid - crestSize / 2, crestSize, crestSize);
     cx += crestSize + gap * 2;
     // unspaced: the engine's football probe reads the clock as one text
-    draw.text(time, cx, mid - clockSize / 2, { size: clockSize, color: ACCENT2, weight: "800" });
+    clockStyle.size = clockSize;
+    draw.text(time, cx, mid - clockSize / 2, clockStyle);
   }
 
   function drawArrow(s: number): void {
@@ -225,10 +252,12 @@ export function createHud(): Hud {
       out[2]![1] = cy - dy * 8 * s * k - py * 10 * s * k;
       return out;
     };
-    draw.polygon(tri(glyphShadow, 1.35), [0, 0, 0, 0.45]); // the glyph's dark text shadow
+    draw.polygon(tri(glyphShadow, 1.35), GLYPH_SHADOW); // the glyph's dark text shadow
     draw.polygon(tri(glyph, 1), "#ffffff");
     const size = 11.2 * s; // #ball-arrow-dist 0.7rem
-    draw.text(arrowDist, cx, cy + 14 * s, { size, color: "#ffffff", align: "center", weight: "700", shadow: { color: [0, 0, 0, 0.8], x: 0, y: s } });
+    arrowStyle.size = size;
+    arrowShadow.y = s;
+    draw.text(arrowDist, cx, cy + 14 * s, arrowStyle);
   }
 
   function drawPower(W: number, H: number, s: number, bottomInset: number): void {
@@ -237,9 +266,16 @@ export function createHud(): Hud {
     const h = 12 * s;
     const x = W / 2 - w / 2;
     const y = H - (H * 0.18 + bottomInset) - h;
-    panel(x, y, w, h, 6 * s, s, BORDER, [0, 0, 0, 0.55]);
+    panel(x, y, w, h, 6 * s, s, BORDER, POWER_FILL);
     const fw = Math.round(w * power);
-    if (fw > 0) draw.image(gradient, x, y, fw, h, { clip: { x, y, width: w, height: h } });
+    if (fw > 0) {
+      const c = powerClip.clip;
+      c.x = x;
+      c.y = y;
+      c.width = w;
+      c.height = h;
+      draw.image(gradient, x, y, fw, h, powerClip);
+    }
   }
 
   function drawBanner(W: number, H: number, s: number, now: number): void {
@@ -255,15 +291,17 @@ export function createHud(): Hud {
     // to a call where the shadow is the next copy (the host lays the text
     // out once a call; equal translucent copies blend the same in any
     // order), then the dark drop shadow and white
-    const glow: [number, number, number, number] = [39 / 255, 174 / 255, 96 / 255, 0.25 * alpha];
-    const next = { color: glow, x: 2 * s, y: 0 };
-    draw.text(bannerText, W / 2 - 4 * s, y, { size, letterSpacing: spacing, weight: "900", color: glow, align: "center", shadow: next });
-    draw.text(bannerText, W / 2, y, { size, letterSpacing: spacing, weight: "900", color: glow, align: "center", shadow: next });
-    draw.text(bannerText, W / 2 + 4 * s, y, { size, letterSpacing: spacing, weight: "900", color: glow, align: "center" });
-    draw.text(bannerText, W / 2, y, {
-      size, letterSpacing: spacing, weight: "900", align: "center", color: [1, 1, 1, alpha],
-      shadow: { color: [0, 0, 0, 0.8 * alpha], x: 0, y: 2 * s },
-    });
+    glow[3] = 0.25 * alpha;
+    glowNext.x = 2 * s;
+    glowPair.size = glowLast.size = bannerStyle.size = size;
+    glowPair.letterSpacing = glowLast.letterSpacing = bannerStyle.letterSpacing = spacing;
+    draw.text(bannerText, W / 2 - 4 * s, y, glowPair);
+    draw.text(bannerText, W / 2, y, glowPair);
+    draw.text(bannerText, W / 2 + 4 * s, y, glowLast);
+    bannerWhite[3] = alpha;
+    bannerDrop.color[3] = 0.8 * alpha;
+    bannerDrop.y = 2 * s;
+    draw.text(bannerText, W / 2, y, bannerStyle);
   }
 
   function drawMouseHint(W: number, H: number, s: number, bottomInset: number): void {
@@ -278,8 +316,10 @@ export function createHud(): Hud {
     const h = size + padY * 2;
     const x = W / 2 - w / 2;
     const y = H - Math.max(24 * s, bottomInset) - h;
-    panel(x, y, w, h, 7 * s, s, "rgba(255,255,255,0.2)", [4 / 255, 9 / 255, 15 / 255, 0.78]);
-    draw.text(text, x + padX, y + padY, { size, color: "#d7e1e9", letterSpacing: spacing, weight: "700" });
+    panel(x, y, w, h, 7 * s, s, "rgba(255,255,255,0.2)", HINT_FILL);
+    hintStyle.size = size;
+    hintStyle.letterSpacing = spacing;
+    draw.text(text, x + padX, y + padY, hintStyle);
   }
 
   function drawMenuButton(W: number, s: number, top: number, right: number): void {
@@ -291,7 +331,7 @@ export function createHud(): Hud {
     menu.x = W - Math.max(8 * s, right) - size;
     menu.y = Math.max(8 * s, top);
     menu.w = menu.h = size;
-    panel(menu.x, menu.y, size, size, 10 * s, s, "rgba(255,255,255,0.3)", [4 / 255, 9 / 255, 15 / 255, 0.7]);
+    panel(menu.x, menu.y, size, size, 10 * s, s, "rgba(255,255,255,0.3)", MENU_FILL);
     // ☰ as three bars
     for (let i = -1; i <= 1; i++) {
       const y = menu.y + size / 2 + i * 6 * s;
