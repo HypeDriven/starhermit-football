@@ -1,7 +1,7 @@
 # Host API gaps found by the football port
 
 What the native client (`engine/src`) still needs from host API v1
-(`engine/starhermit.d.ts`, copied from the runtime at 1d0cf8f, which answered
+(`engine/starhermit.d.ts`, copied from the runtime at 09cc88b, which answered
 the port's earlier lists: module specifiers and their queries, fuel,
 rotation, audio lifetimes, the game socket's envelopes, rooms, instance
 attributes, geometry, projection, draw, UI areas and tones, input sources
@@ -11,7 +11,8 @@ mapping and HDR light, normal maps, physical and Lambert materials,
 environments, four shadow casters with focus, points, anisotropy; system
 fonts for the generic families, which are now the only names the system's
 fonts have, so the port's font values name only generic families; WebP
-images; measureText with weight and letter spacing). Each
+images; measureText with weight and letter spacing; `starhermit:world`'s
+tables, kernels and instance bindings). Each
 entry names the module and member, the semantics wanted, why football needs
 it, and what the port does meanwhile. Nothing here is football-specific.
 
@@ -107,12 +108,30 @@ the reference title's numbers can be checked against it.
    widths and strings until they change, and the banner draws its glow
    two copies a call (the second as the call's shadow, one layout).
 
-9. **`starhermit:world` — per-entity animation runs interpreted.** The
-   crowd's sway and bounce (an eighth of the ~8,400 spectators a frame,
-   as the browser does) cost about 0.65 ms a frame after its shake-free
-   path, about 0.6 µs a spectator, mostly typed-array reads and writes;
-   the haze drift about 0.1 ms. Wanted: a table with a kernel and an
-   instance binding, as in the plan's sway example (`table("crowd", …)`,
-   `kernel(crowd, (r, u, f) => …)`, `bind.instances(crowdMesh, crowd,
-   …)`), the camera flashes as an emitter and the haze as an oscillator,
-   so every spectator could move every frame for less.
+9. **`starhermit:world` — per-entity animation ran interpreted: answered
+   by `starhermit:world` 1 (09cc88b).** The crowd's sway and bounce (about
+   0.65 ms a frame for an eighth of the ~8,400 spectators) and the haze's
+   drift (0.1 ms) are now kernels over tables, the crowd drawn by
+   `bind.instances` and the haze's points drawing its position column:
+   every spectator moves every frame, the script's share is a few uniforms
+   (about 0.003 ms), and the kernels take about 0.29 ms. The game thread
+   takes about what it took (see 10). The camera flashes stay script (their
+   spawning is random; 0.003 ms); the flags, LED scroll and floodlight
+   flicker wait for node and material bindings, and the footballers' poses
+   for node bindings or the rig evaluator.
+
+10. **`starhermit:world` — what the crowd still costs natively.** On the
+   Linux probe (09cc88b, 8,400 spectators): `Math.sin` and `Math.cos` cost
+   about 30 ns a call in a kernel (the interpreter's own functions, for
+   identical results), so the browser's formula, five sines a spectator,
+   took 0.80 ms, three 0.58 ms and one 0.29 ms; the port sums the slow
+   sway's sines from the clock's (uniforms) and each spectator's phase
+   sines (columns). `bind.instances` composes every live row every frame,
+   changed or not (about 0.4 ms here), and a `yaw` mapping adds a sine and
+   a cosine a row (0.6 ms more), so the port binds a quaternion column.
+   Branches compute both sides, so the boo's shake is a second kernel the
+   script swaps in. Wanted: faster `Math` in kernels with the same
+   results (vectorized, or the yaw's precomputed), bindings that compose
+   only rows a kernel or the script changed, and a kernel stride (a
+   rotating 1/n of the rows a run) so a game can keep the browser's
+   eighth of the crowd a frame for an eighth of the cost.

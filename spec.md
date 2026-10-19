@@ -710,8 +710,11 @@ browser code:
 - **World and HUD.** Stadium, footballers, procedural animation (`logic/pose.ts` is
   `animator.js`'s math), name tags, officials, ball and coin are rebuilt on `starhermit:scene` with
   `starhermit:canvas` textures; light intensities are the browser's divided by π (the host's light
-  convention); merged static meshes go through the host's geometry transforms; crowd motion writes
-  the instance matrices in place and sends one range a frame. Each frame does only what changed:
+  convention); merged static meshes go through the host's geometry transforms. The crowd's sway
+  and bounce and the haze's drift are `starhermit:world` kernels the runtime runs natively every
+  frame over every spectator and haze point (the browser moves an eighth of the crowd a frame), and
+  an instance binding draws the crowd from its table; the script sets only their uniforms (a boo
+  swaps in the kernel with the shake). Each frame does only what changed:
   a footballer's joints are the meshes of their body parts (18 scene nodes, where the browser's
   joint groups make 33) and turn only when their angles change, camera flashes resend their
   colours only while one is lit, and the HUD keeps its strings and text widths until they change.
