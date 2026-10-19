@@ -136,3 +136,17 @@ the reference title's numbers can be checked against it.
    and the game thread's median in play from 2.22 to 2.03 ms on the Linux
    probe. The binding still takes a quaternion column (the facing is
    fixed).
+
+11. **Runtime — collections in play.** On the probe at 31c9411 the game's
+   heap collects about every 175 frames (25.6 → 21.6 MiB, ~15,000 objects;
+   threshold 256 MiB, so not the threshold) and each collection takes 2–5
+   ms (`starhermit-script`'s `collect`), the in-match frames above 2.5 ms.
+   The HUD's draw calls make more than half of the garbage in play
+   (without the HUD, 11 collections in 4,000 frames of play instead of
+   25): the draw prelude makes a 4-element array a call in `clip()` and
+   spreads it into the native call (`prelude/draw.ts` 6–9, 13–124), `text`
+   and `image` make `options ?? {}` and `image` a 12-element `rest` array.
+   Wanted: draw calls that allocate nothing (fixed native arities, the
+   clip read field by field) and cheaper collections. Meanwhile the HUD
+   keeps its own options and colors (44 → 40 collections in 8,000
+   frames).

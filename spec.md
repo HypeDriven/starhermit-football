@@ -723,7 +723,9 @@ browser code:
   text widths until they change.
   The per-pixel grass and the ~20k
   instances are built a slice at a time whenever the running call's fuel runs low (a "Loading…"
-  screen covers the first menu and each match). The player's reduced-motion preference stills the
+  screen covers the first menu and each match; a stadium a mode lets go is kept for the next with the
+  same pitch, so the menu's backdrop after full time, a 5-a-side match after the menu and the
+  replay viewer show it again within a frame instead of building it again). The player's reduced-motion preference stills the
   floodlight flicker, camera flashes and haze, as `prefers-reduced-motion` does in the browser. The HUD (score bar with crests, clock, ball arrow
   clamped inside the window, power bar, banners, mouse hint, ☰ and mic buttons, chat lines) is
   drawn with `starhermit:draw`; menus, lobby, invites, controls, leaderboard, replays,

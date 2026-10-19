@@ -585,8 +585,25 @@ function makeSignTexture(): CanvasTexture {
 
 /** Builds the stadium into `scene` over several frames at quality `q`;
  * `alive` turning false (the owner was disposed) abandons the build. */
+/** The last stadium a mode let go (dispose), kept for the next one with
+ * the same pitch: the browser builds a stadium within a frame, the port in
+ * about 80 frames of 8 ms slices, which the result card (the menu's
+ * backdrop), a 5-a-side match's loading and the replay viewer would spend
+ * rebuilding the same stadium. At most one is kept; another pitch frees it
+ * before building. */
+let parked: { key: string; scene: Scene; root: Group; show(q: ContentQuality): Stadium; free(): void } | null = null;
+/** The stadium whose spectators and haze the world tables hold. */
+let tablesFilledBy: Group | null = null;
+
 export async function buildStadium(scene: Scene, pitch: Pitch | null, q: ContentQuality, alive: () => boolean): Promise<Stadium | null> {
   const p: Pitch = { ...DEFAULT_PITCH, ...(pitch ?? {}) };
+  const key = `${p.L}|${p.W}|${p.goalW}|${p.goalH}|${p.boxD}|${p.boxW}`;
+  if (parked !== null) {
+    const spare = parked;
+    parked = null;
+    if (spare.key === key && spare.scene === scene && spare.root === tablesFilledBy) return alive() ? spare.show(q) : ((parked = spare), null);
+    spare.free();
+  }
   const L = p.L;
   const W = p.W;
   const goalW = Math.min(p.goalW, W - 2);
@@ -599,11 +616,12 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
 
   const root = new Group();
   root.name = "stadium";
-  const prevBackground = scene.background;
-  const prevEnvironment = scene.environment;
+  // what the scene showed before this stadium (restored when it goes)
+  let prevBackground = scene.background;
+  let prevEnvironment = scene.environment;
   let wantEnvironment = false;
   let envShown: Texture | null = null;
-  const prevFog: FogType | FogExp2 | null = scene.fog;
+  let prevFog: FogType | FogExp2 | null = scene.fog;
 
   const mesh = (geometry: BufferGeometry, material: MeshStandardMaterial | MeshBasicMaterial): Mesh => {
     bag.add(geometry);
@@ -855,6 +873,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   };
   rows.clear();
   rows.spawn(cN);
+  tablesFilledBy = root;
   let crowdBody = `${q.body[0]},${q.body[1]}`;
   let crowdGeo: BufferGeometry = new CapsuleGeometry(0.17, 0.5, q.body[0], q.body[1]);
   const crowdMat = bag.add(new MeshStandardMaterial({ roughness: 0.9 }));
@@ -1287,24 +1306,52 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     disposeTextures();
     return abandon();
   }
-  scene.background = background;
-  scene.fog = fog;
-  scene.add(root);
-  applyQuality(q);
-  const unsubscribeQuality = onQuality(applyQuality);
-  // The crowd and the haze move natively each frame after onUpdate; update
-  // below only sets their uniforms.
-  // The crowd: an eighth of it a frame, and only those rows composed again.
-  const swayRun = schedule.update(w.sway, { t: 0, amp: 0, spd: 0, sway: 0, shake: 0 }, { slices: 8 });
-  const driftRun = schedule.update(w.drift, { t: 0, amp: 0 });
-  const crowdBinding = bind.instances(crowdMesh, rows, { position: ["x", "y", "z"], rotation: "q", scale: ["s", "sy", "s"], track: true });
 
-  // ── animation state + public handle ──
+  // ── animation state ──
   let t = 0;
   let excTarget = 0;
   let exc = 0;
   let pulseV = 0;
   let booV = 0;
+  // The crowd and the haze move natively each frame after onUpdate; update
+  // below only sets their uniforms. The crowd: an eighth of it a frame, and
+  // only those rows composed again.
+  let swayRun = schedule.update(w.sway, { t: 0, amp: 0, spd: 0, sway: 0, shake: 0 }, { slices: 8 });
+  let driftRun = schedule.update(w.drift, { t: 0, amp: 0 });
+  let crowdBinding = bind.instances(crowdMesh, rows, { position: ["x", "y", "z"], rotation: "q", scale: ["s", "sy", "s"], track: true });
+  let unsubscribeQuality = (): void => {};
+
+  /** Puts the stadium in the scene with a new build's state (again, for a
+   * kept one). */
+  function show(want: ContentQuality): void {
+    disposed = false;
+    prevBackground = scene.background;
+    prevEnvironment = scene.environment;
+    prevFog = scene.fog;
+    scene.background = background;
+    scene.fog = fog;
+    scene.add(root);
+    t = excTarget = exc = pulseV = booV = 0;
+    if (tunnelFade !== 1) {
+      tunnelFade = 1;
+      for (const m of [tunnelMat, tunnelDarkMat]) {
+        m.transparent = false;
+        m.opacity = 1;
+        m.depthWrite = true;
+      }
+    }
+    for (let n = 0; n < litN; n++) {
+      const i = flashLit[n]!;
+      flashLife[i] = 0;
+      flashCol[i * 3] = flashCol[i * 3 + 1] = flashCol[i * 3 + 2] = 0;
+    }
+    litN = 0;
+    flashColAttr.needsUpdate = true;
+    hazePosAttr.needsUpdate = true;
+    applyQuality(want);
+    unsubscribeQuality = onQuality(applyQuality);
+  }
+  show(q);
 
   function update(dt: number, camera: Vec3Like): void {
     const step = Math.min(dt || 0, 0.1);
@@ -1410,7 +1457,8 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     amb.intensity = night ? AMB_NIGHT : AMB_DAY;
   }
 
-  function dispose(): void {
+  /** Takes the stadium out of the scene, keeping what it is made of. */
+  function hide(): void {
     disposed = true;
     unsubscribeQuality();
     swayRun.cancel();
@@ -1421,12 +1469,38 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     if (scene.fog === fog) scene.fog = prevFog;
     if (envShown && scene.environment === envShown) scene.environment = prevEnvironment;
     renderer.bloom = null;
+    // a texture rebuild cut short runs again when the stadium shows
+    requested = "";
+  }
+
+  function free(): void {
     disposeTextures();
     crowdGeo.dispose();
     bag.dispose();
   }
 
-  return {
+  /** Kept for the next stadium with this pitch (see parked). */
+  function dispose(): void {
+    if (disposed) return;
+    hide();
+    parked?.free();
+    parked = {
+      key,
+      scene,
+      root,
+      show(want: ContentQuality): Stadium {
+        rows.touch();
+        swayRun = schedule.update(w.sway, { t: 0, amp: 0, spd: 0, sway: 0, shake: 0 }, { slices: 8 });
+        driftRun = schedule.update(w.drift, { t: 0, amp: 0 });
+        crowdBinding = bind.instances(crowdMesh, rows, { position: ["x", "y", "z"], rotation: "q", scale: ["s", "sy", "s"], track: true });
+        show(want);
+        return handle;
+      },
+      free,
+    };
+  }
+
+  const handle: Stadium = {
     update,
     crowd: {
       setExcitement(level: number): void {
@@ -1443,4 +1517,5 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     applyQuality,
     dispose,
   };
+  return handle;
 }
