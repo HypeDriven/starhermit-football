@@ -251,10 +251,15 @@ export function createHud(): Hud {
     const y = H * 0.22;
     const alpha = ease;
     const spacing = 0.2 * size;
-    // green glow (text-shadow 0 0 30px), then the dark drop shadow and white
-    for (let i = -2; i <= 2; i++) {
-      draw.text(bannerText, W / 2 + i * 2 * s, y, { size, letterSpacing: spacing, weight: "900", color: [39 / 255, 174 / 255, 96 / 255, 0.25 * alpha], align: "center" });
-    }
+    // green glow (text-shadow 0 0 30px): five copies 2 px apart, drawn two
+    // to a call where the shadow is the next copy (the host lays the text
+    // out once a call; equal translucent copies blend the same in any
+    // order), then the dark drop shadow and white
+    const glow: [number, number, number, number] = [39 / 255, 174 / 255, 96 / 255, 0.25 * alpha];
+    const next = { color: glow, x: 2 * s, y: 0 };
+    draw.text(bannerText, W / 2 - 4 * s, y, { size, letterSpacing: spacing, weight: "900", color: glow, align: "center", shadow: next });
+    draw.text(bannerText, W / 2, y, { size, letterSpacing: spacing, weight: "900", color: glow, align: "center", shadow: next });
+    draw.text(bannerText, W / 2 + 4 * s, y, { size, letterSpacing: spacing, weight: "900", color: glow, align: "center" });
     draw.text(bannerText, W / 2, y, {
       size, letterSpacing: spacing, weight: "900", align: "center", color: [1, 1, 1, alpha],
       shadow: { color: [0, 0, 0, 0.8 * alpha], x: 0, y: 2 * s },
