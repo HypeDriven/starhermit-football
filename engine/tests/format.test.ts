@@ -1,12 +1,31 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fallbackName, formatClock, formatReplayDate, formatReplayDateEnglish, halvedSides, oneLine, playersInLobby, resultTitle, sidesLine, statsLines } from "../src/logic/format.ts";
+import { clockSeconds, fallbackName, formatClock, formatReplayDate, formatReplayDateEnglish, halvedSides, oneLine, playersInLobby, resultTitle, sidesLine, statsLines } from "../src/logic/format.ts";
 
 test("the match clock shows each half's own time", () => {
   assert.equal(formatClock(0, 1, 180), "1st 00:00");
   assert.equal(formatClock(135.7, 1, 180), "1st 02:15");
   assert.equal(formatClock(200, 2, 180), "2nd 00:20");
   assert.equal(formatClock(999, 2, 180), "2nd 03:00", "caps at full time");
+});
+
+test("the clock's text changes only with its whole second (the HUD keeps it until then)", () => {
+  let last = -1;
+  let text = "";
+  for (let time = 0; time < 400; time += 1 / 60) {
+    for (const half of [1, 2]) {
+      const sec = clockSeconds(time, half, 180);
+      const now = formatClock(time, half, 180);
+      if (half === 1) {
+        if (sec === last) assert.equal(now, text, `${time}`);
+        last = sec;
+        text = now;
+      }
+      const mm = String(Math.floor(sec / 60)).padStart(2, "0");
+      const ss = String(sec % 60).padStart(2, "0");
+      assert.equal(now, `${half === 1 ? "1st" : "2nd"} ${mm}:${ss}`);
+    }
+  }
 });
 
 test("replay dates read like the browser's short form", () => {
