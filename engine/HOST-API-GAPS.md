@@ -86,9 +86,13 @@ the reference title's numbers can be checked against it.
    `Euler.set` costs about 1.75 µs (its quaternion's update reads the
    Euler through four getters and recomputes six sines and cosines), so a
    footballer's 14 joints cost about 30 µs a frame. Wanted: the scene as
-   a native table with dirty rows, and a rig evaluator. Meanwhile each
-   joint is the mesh of its body part (18 nodes a footballer instead of
-   the browser's 33) and a joint whose angles did not change is not set.
+   a native table with dirty rows, and a rig evaluator. Each joint is the
+   mesh of its body part (18 nodes a footballer instead of the browser's
+   33). The joints' part is answered by `starhermit:world` 3 (aaf3979):
+   the poses are kernels (`world/rigMath.ts`, `world/rig.ts`) and node
+   bindings drive the joints, so the script's pose work went from 0.29 to
+   0.02 ms a frame (5-a-side) and the scene's sync compares only the
+   joints' unbound channels; the walk over every visible node remains.
 
 7. **`starhermit:scene` — every material in use is compared every
    frame.** `materialHandle` compares 31 parameters of each distinct

@@ -714,10 +714,13 @@ browser code:
   and bounce (the browser's formula, an eighth of the crowd a frame as the browser moves it) and
   the haze's drift are `starhermit:world` kernels the runtime runs natively, and a tracked
   instance binding draws the crowd from its table, composing only the rows that moved; the script
-  sets only their uniforms. Each frame does only what changed:
-  a footballer's joints are the meshes of their body parts (18 scene nodes, where the browser's
-  joint groups make 33) and turn only when their angles change, camera flashes resend their
-  colours only while one is lit, and the HUD keeps its strings and text widths until they change.
+  sets only their uniforms. The footballers' poses are `logic/pose.ts`'s blend and pose as kernels
+  too (`world/rigMath.ts`, which the Node tests compare with `logic/pose.ts` number for number):
+  each view writes its place and its entity's animation state to a row, the runtime poses every
+  footballer, referee and medic and drives their joints through node bindings, and a footballer's
+  joints are the meshes of their body parts (18 scene nodes, where the browser's joint groups make
+  33). Camera flashes resend their colours only while one is lit, and the HUD keeps its strings and
+  text widths until they change.
   The per-pixel grass and the ~20k
   instances are built a slice at a time whenever the running call's fuel runs low (a "Loading…"
   screen covers the first menu and each match). The player's reduced-motion preference stills the

@@ -1,10 +1,12 @@
 // Procedural footballer factory (the browser's js/world/player.js): a
 // ~1.8 m jointed character built from primitives. The group's origin is at
 // the feet; the character faces +x when group.rotation.y = 0. Joints are
-// pivots driven by logic/pose.ts each frame; each joint draws its own body
-// part (the browser hangs the part's mesh under a joint Group) and a skin
-// hand is one mesh with its lower arm, so the scene, which syncs every node
-// every frame, has 18 nodes a footballer instead of 33.
+// pivots posed each frame by logic/pose.ts's math, which the runtime runs
+// natively (world/rig.ts: a starhermit:world kernel and node bindings); each
+// joint draws its own body part (the browser hangs the part's mesh under a
+// joint Group) and a skin hand is one mesh with its lower arm, so the scene,
+// which syncs every node every frame, has 18 nodes a footballer instead of
+// 33.
 import {
   BoxGeometry,
   CanvasTexture,
@@ -18,11 +20,11 @@ import {
 } from "starhermit:scene";
 import type { BufferGeometry, Material, Object3D } from "starhermit:scene";
 import { contrastFor, lerpSrgbHex } from "../logic/color.ts";
-import { blendPose, computePose, createPose, createPoseBlend, createPoseParams } from "../logic/pose.ts";
-import type { Pose, PoseEntity } from "../logic/pose.ts";
+import type { PoseEntity } from "../logic/pose.ts";
 import { createNameTag } from "./nametags.ts";
 import type { NameTag } from "./nametags.ts";
 import { makeCanvas } from "./resources.ts";
+import { createRig } from "./rig.ts";
 
 // ---------------------------------------------------------------------------
 // Shared geometry (one set for all players, made on first use)
@@ -198,59 +200,6 @@ export interface PlayerView {
   dispose(): void;
 }
 
-interface Joints {
-  root: Object3D;
-  pelvis: Object3D;
-  torso: Object3D;
-  head: Object3D;
-  lUpperArm: Object3D;
-  lLowerArm: Object3D;
-  rUpperArm: Object3D;
-  rLowerArm: Object3D;
-  lThigh: Object3D;
-  lShin: Object3D;
-  rThigh: Object3D;
-  rShin: Object3D;
-  lFoot: Object3D;
-  rFoot: Object3D;
-}
-
-/** The angles each joint was last set to, three a joint in applyPose's
- * order (NaN until the first pose). */
-const JOINT_ANGLES = 14 * 3;
-
-/** Sets a joint's Euler angles (in its own order) unless they are the ones
- * it has: each set recomputes the quaternion (six trig calls) and makes the
- * scene send the node again. */
-function turn(o: Object3D, last: Float64Array, at: number, x: number, y: number, z: number): void {
-  if (last[at] === x && last[at + 1] === y && last[at + 2] === z) return;
-  last[at] = x;
-  last[at + 1] = y;
-  last[at + 2] = z;
-  o.rotation.set(x, y, z);
-}
-
-/** Writes a pose onto the rig (the root's order is YXZ). */
-function applyPose(J: Joints, P: Pose, last: Float64Array): void {
-  J.root.position.set(P.px, P.py, P.pz);
-  turn(J.root, last, 0, P.rx, P.ry, P.rz);
-  J.pelvis.position.set(0, P.pelY, P.pelZ);
-  turn(J.pelvis, last, 3, P.pelRX, P.pelRY, P.pelRZ);
-  turn(J.torso, last, 6, P.tRX, P.tRY, P.tRZ);
-  J.torso.scale.set(1, P.tSY, 1);
-  turn(J.head, last, 9, P.hRX, P.hRY, P.hRZ);
-  turn(J.lUpperArm, last, 12, P.lUAX, 0, P.lUAZ);
-  turn(J.rUpperArm, last, 15, P.rUAX, 0, P.rUAZ);
-  turn(J.lLowerArm, last, 18, 0, 0, P.lLAZ);
-  turn(J.rLowerArm, last, 21, 0, 0, P.rLAZ);
-  turn(J.lThigh, last, 24, 0, 0, P.lThZ);
-  turn(J.rThigh, last, 27, 0, 0, P.rThZ);
-  turn(J.lShin, last, 30, 0, 0, P.lShZ);
-  turn(J.rShin, last, 33, 0, 0, P.rShZ);
-  turn(J.lFoot, last, 36, 0, 0, P.lFtZ);
-  turn(J.rFoot, last, 39, 0, 0, P.rFtZ);
-}
-
 export function createPlayerMesh(opts: PlayerViewOptions): PlayerView {
   const G = GEO();
   const kit = opts.kit;
@@ -316,35 +265,21 @@ export function createPlayerMesh(opts: PlayerViewOptions): PlayerView {
   tag.sprite.position.y = 2.2;
   group.add(tag.sprite);
 
-  const joints: Joints = {
-    root, pelvis, torso, head,
-    lUpperArm: la.upper, lLowerArm: la.lower,
-    rUpperArm: ra.upper, rLowerArm: ra.lower,
-    lThigh: ll.thigh, lShin: ll.shin, rThigh: rl.thigh, rShin: rl.shin,
-    lFoot: ll.foot, rFoot: rl.foot,
-  };
-
-  // Reused every update — no per-frame allocation.
-  const params = createPoseParams();
-  const blend = createPoseBlend();
-  const pose = createPose();
-  const angles = new Float64Array(JOINT_ANGLES).fill(NaN);
-  let yaw = 0;
-  let placedYaw = NaN;
+  // The group, root and joints move with the rig's rows from here on.
+  const rig = createRig({
+    group, root, pelvis, torso, head,
+    lUpperArm: la.upper, rUpperArm: ra.upper, lLowerArm: la.lower, rLowerArm: ra.lower,
+    lThigh: ll.thigh, rThigh: rl.thigh, lShin: ll.shin, rShin: rl.shin, lFoot: ll.foot, rFoot: rl.foot,
+  });
 
   return {
     group,
     place(x: number, y: number, z: number, facing: number): void {
-      group.position.set(x, y, z);
-      yaw = -facing; // the model faces +x at rotation 0; the sim's yaw is CCW around +y
-      if (yaw !== placedYaw) {
-        placedYaw = yaw;
-        group.rotation.set(0, yaw, 0);
-      }
+      // the model faces +x at rotation 0; the sim's yaw is CCW around +y
+      rig.place(x, y, z, -facing);
     },
     update(dt: number, ent: PoseEntity): void {
-      blendPose(blend, ent, dt, yaw, params);
-      applyPose(joints, computePose(params, pose), angles);
+      rig.update(dt, ent);
     },
     setNameVisible(visible: boolean): void {
       tag.sprite.visible = visible;
@@ -359,6 +294,7 @@ export function createPlayerMesh(opts: PlayerViewOptions): PlayerView {
       tag = next;
     },
     dispose(): void {
+      rig.dispose();
       group.removeFromParent();
       // The tag texture/material are per player; geometry and kit materials
       // are shared caches and stay alive.
