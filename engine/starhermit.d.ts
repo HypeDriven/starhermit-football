@@ -1,10 +1,12 @@
 // Copied unchanged below this note from starhermit-engine
-// crates/starhermit-runtime/api/starhermit.d.ts at commit 1d0cf8f (2026-10-18,
-// branch next-review): host API v1 with the football port's decisions, R2's
-// rendering, system fonts (through the generic families only) and WebP.
+// crates/starhermit-runtime/api/starhermit.d.ts at commit 09cc88b (2026-10-19,
+// main): host API v1 with the football port's decisions, R2's rendering,
+// system fonts (through the generic families only), WebP, and
+// starhermit:world (API_MINOR 1: tables, kernels, the schedule, events and
+// instance bindings).
 // Refresh it from the runtime when the contract changes; the sha256 of the
 // original file is
-// 8073768aa7f67e444ae4751dd53620825b63da6c1aa4a407a111ffdf6237ec71.
+// 5693d95b48741b833b90f8c5cd80c6053b33a350b0a54fe24076d9454f5c667d.
 
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -239,10 +241,21 @@ declare module "starhermit:engine" {
     readonly fixedSteps: number;
     /** Fixed steps dropped this frame because the game fell behind. */
     readonly droppedSteps: number;
-    /** Drawn objects and sprites last frame, and those left out for invalid
-     * data (a missing mesh, non-finite numbers). */
+    /** Drawn objects and sprites in the latest frame the runtime drew,
+     * and those left out for invalid data (a missing mesh, non-finite
+     * numbers). Frames are pipelined: the game computes a frame while the
+     * runtime draws the one before it, so that is the frame before last. */
     readonly drawnObjects: number;
     readonly skippedObjects: number;
+    /** Milliseconds the game's thread took for the previous frame (its
+     * events, fixed steps, `onUpdate` and `onRender`). */
+    readonly gameMs: number;
+    /** Milliseconds the runtime took to draw the latest frame it drew
+     * (applying its GPU work and drawing it, waits for the GPU included)
+     * and to present it (waiting for the display or the GPU): 0 where
+     * nothing is drawn or presented. */
+    readonly paintMs: number;
+    readonly presentMs: number;
   }
   export function stats(): FrameStats;
 
@@ -2724,6 +2737,232 @@ declare module "starhermit:platform" {
      * RangeError past it). */
     context?: JsonValue;
   }): Promise<{ id: string; status: string }>;
+}
+
+// ===========================================================================
+declare module "starhermit:world" {
+  // Game logic the runtime runs natively (spec/native-logic.html). Entity
+  // data lives in tables of typed columns in the game's heap; kernels are
+  // ordinary functions of one row that the runtime compiles and runs over
+  // whole tables without entering script; the schedule runs them each
+  // frame; event queues report back; instance bindings draw a table as an
+  // InstancedMesh. Since API_MINOR 1.
+  import type { InstancedMesh } from "starhermit:scene";
+
+  /** A column's type. Scalars: f32, f64, i32, u32, u16, u8 and bool (0 or
+   * 1 in a byte). Vectors (f32 components x, y, z, w): vec2, vec3, vec4,
+   * quat. `ref:<table>`: a row of that table by index (an i32; reading
+   * through one that is not a live row gives 0). */
+  export type ColumnType =
+    | "f32"
+    | "f64"
+    | "i32"
+    | "u32"
+    | "u16"
+    | "u8"
+    | "bool"
+    | "vec2"
+    | "vec3"
+    | "vec4"
+    | "quat"
+    | `ref:${string}`;
+  export type FieldType = "f32" | "f64" | "i32" | "u32" | "u16" | "u8" | "bool";
+
+  /** Rows with typed columns in one buffer of the game's heap (an 8-byte
+   * header, then each column for all rows, a vector's components
+   * interleaved per row as in three.js attributes). Rows 0..count are
+   * live. Names are identifiers of at most 64 characters; `index` is the
+   * row view's own. Limits: 1,048,576 rows, 64 columns, 1 GiB, and what
+   * the heap has left (a RangeError before anything is allocated); 256
+   * tables a game. Tables, kernels and queues last for the game's
+   * lifetime. */
+  export class Table {
+    private constructor();
+    readonly name: string;
+    readonly capacity: number;
+    readonly count: number;
+    /** The column as a typed array over the table's memory (Float32Array
+     * for f32 and vector columns, Float64Array, Int32Array for i32 and
+     * references, Uint32Array, Uint16Array, Uint8Array for u8 and bool),
+     * `capacity × components` long: writing it writes the rows, and it
+     * copies nothing. TypeError for an unknown column. */
+    column(name: string): Float32Array | Float64Array | Int32Array | Uint32Array | Uint16Array | Uint8Array;
+    /** Adds `n` zeroed rows at the end and returns the first one's index
+     * (RangeError past the capacity). */
+    spawn(n?: number): number;
+    /** Removes live rows `index..index + n`: the last rows move into the
+     * gap (order is not kept; references to moved rows are the game's to
+     * update). RangeError for rows that are not live. */
+    free(index: number, n?: number): void;
+    clear(): void;
+    /** A view of live row `index`: its columns as fields (`row.speed`,
+     * `row.base.y`, booleans for bool columns, a read-only row of the other
+     * table for a reference) and `row.index`. RangeError past the live
+     * rows. */
+    row(index: number): any;
+  }
+  /** A table: the schema's keys, in order, are its columns. */
+  export function table(name: string, capacity: number, schema: Record<string, ColumnType>): Table;
+
+  /** A kernel's row (the runtime checks the kernel against the schema). */
+  export type Row = any;
+  /** A kernel's frame values: `time` (game seconds; in the fixed stage the
+   * fixed clock, the sum of the steps so far with this one), `dt` (this
+   * step's or frame's seconds), `alpha` (the render interpolation in the
+   * late stage, else 0) and `step` (fixed steps so far, this one included
+   * in the fixed stage). */
+  export interface FrameValues {
+    readonly time: number;
+    readonly dt: number;
+    readonly alpha: number;
+    readonly step: number;
+  }
+  export type Reduction = "sum" | "min" | "max" | "argmin" | "argmax";
+  export interface KernelOptions {
+    /** Values rows give the kernel's outputs (`o.total(x)`): a sum from 0,
+     * a minimum or maximum (as Math.min and Math.max), or the first row
+     * with the smallest or largest value (-1 for none). The scheduled
+     * entry's `outputs` has them after each run. At most 64. */
+    outputs?: Record<string, Reduction>;
+    /** "script": a function outside the subset runs as script (with one
+     * warning) instead of throwing. */
+    fallback?: "script";
+  }
+  /** A compiled kernel over a table. */
+  export class Kernel {
+    private constructor();
+    readonly table: Table;
+    /** Compiled; false when it runs as script (`fallback`). */
+    readonly native: boolean;
+    /** Instructions a row at most (loops counted at their bounds). */
+    readonly cost: number;
+    /** The uniforms it reads and the columns it writes. */
+    readonly uniforms: readonly string[];
+    readonly writes: readonly string[];
+  }
+  /** Compiles `fn(row, uniforms, frame, outputs)` to run natively over the
+   * table's live rows. A run computes exactly what calling it once per
+   * row, in row order, with row views would (f64 arithmetic, stores
+   * converted as typed arrays convert them, the interpreter's own Math; any
+   * NaN stands for NaN). The subset: number and boolean `let` and `const`
+   * locals (a `const` may also name a row or a vector); arithmetic,
+   * bitwise, comparison, logical (`&&`, `||`, `??`) and conditional
+   * operators; `if`/`else`; `for` loops whose test is the same for every
+   * row (constants, uniforms, frame values and a counter declared in the
+   * loop), at most 1,024 iterations, with `break` and `continue`; `return`;
+   * `Math`'s functions and constants (not `random`), `Number.isFinite`,
+   * `isNaN`, `isInteger` and `Number`'s constants; the row's fields and
+   * vector components, `row.index`, and other rows through `ref:` columns
+   * (`r.target.x`: 0 when the index is not a live row of that table,
+   * counted); uniforms (`u.amp`); frame values (`f.time`); outputs
+   * (`o.total(x)`); `queue.emit({ … })` into a queue made with `events`;
+   * helpers declared with `kernel.fn` (inlined, never recursive); and
+   * constants declared with `const` and a constant value. Queues, helpers
+   * and constants are the kernel's file's own or imported by name from the
+   * game's files (`import { SPEED } from "./rules.ts"`, re-exports
+   * followed; not namespace or default imports). A kernel writes only its
+   * own row and
+   * cannot read, on another row, a column it writes; it emits and gives
+   * outputs outside loops. Anything else throws a SyntaxError naming the
+   * file, line and column (with `fallback: "script"`, it runs as script).
+   * At most 1,024 kernels. */
+  export function kernel(
+    table: Table,
+    fn: (row: Row, uniforms: any, frame: FrameValues, outputs: any) => void,
+    options?: KernelOptions,
+  ): Kernel;
+  export namespace kernel {
+    /** Declares a helper kernels may call (`const ease = kernel.fn((x:
+     * number) => x * x)`); returns `helper` itself, so it runs as script
+     * too. */
+    function fn<F extends (...args: any[]) => any>(helper: F): F;
+  }
+
+  /** A kernel on the schedule. */
+  export class Scheduled {
+    private constructor();
+    readonly kernel: Kernel;
+    /** The uniforms the kernel reads, each a number; set them any time
+     * (the next run reads them). Other names, and values that are not
+     * numbers, are a TypeError. */
+    readonly uniforms: Record<string, number>;
+    /** The outputs of the last run. */
+    readonly outputs: Record<string, number>;
+    /** Reads through references that found no live row, since
+     * scheduled. */
+    readonly missedGathers: number;
+    cancel(): void;
+  }
+  /** Each runs `kernel` natively every frame without entering script:
+   * `fixed` after each `onFixedUpdate`, `update` after `onUpdate`, `late`
+   * after `onRender` and the scene's update (then the instance bindings).
+   * A stage runs its entries in the order they were scheduled; one
+   * scheduled or cancelled while the stage runs waits for the next. A run
+   * is charged to its call's fuel (ten row instructions an instruction)
+   * and may use at most a whole call's fuel; past that, or with a loop past
+   * 1,024 iterations, it throws a RangeError (uncaught, it ends the game).
+   * `uniforms` gives exactly the uniforms the kernel reads. At most 1,024
+   * entries. */
+  export const schedule: {
+    fixed(kernel: Kernel, uniforms?: Record<string, number>): Scheduled;
+    update(kernel: Kernel, uniforms?: Record<string, number>): Scheduled;
+    late(kernel: Kernel, uniforms?: Record<string, number>): Scheduled;
+  };
+
+  /** A bounded queue of typed events that kernels and script emit. */
+  export class Events {
+    private constructor();
+    readonly name: string;
+    readonly capacity: number;
+    /** Adds an event (each field converted as its type stores it; a
+     * missing field is NaN as a number). A full queue drops it and counts
+     * it. */
+    emit(event: Record<string, number | boolean>): void;
+    /** The events since the last drain, oldest first (bool fields as
+     * booleans). */
+    drain(): Record<string, number | boolean>[];
+    /** Events dropped because the queue was full, since it was made. */
+    readonly dropped: number;
+  }
+  /** A queue of events with these fields (1 to 16, in order) holding at
+   * most `capacity` events (1,024 by default, at most 65,536). At most 64
+   * queues. */
+  export function events(name: string, schema: Record<string, FieldType>, capacity?: number): Events;
+
+  /** Where a bound mesh's instances come from: column names (`"col"` for a
+   * whole vector or a scalar, `"col.x"` for a component) or lists of them.
+   * `position` (3 values) is required; `rotation` (a quat or vec4) or
+   * `yaw` (radians about +y); `scale` (a number, one value or 3); `color`
+   * (3 values, linear RGB, multiplying the material's). */
+  export interface InstanceMapping {
+    position: string | readonly string[];
+    rotation?: string | readonly string[];
+    yaw?: string;
+    scale?: number | string | readonly string[];
+    color?: string | readonly string[];
+  }
+  export class Binding {
+    private constructor();
+    remove(): void;
+  }
+  export const bind: {
+    /** Draws the table's live rows as the mesh's instances (at most the
+     * mesh's count): the runtime composes each instance's matrix (as
+     * three.js `Matrix4.compose`) and color from the columns natively each
+     * frame, after the late stage. While bound, the mesh's own instance
+     * matrices and count are not used. A row that is not finite draws
+     * nothing. A mesh is bound once; at most 256 bindings. */
+    instances(mesh: InstancedMesh, table: Table, mapping: InstanceMapping): Binding;
+  };
+
+  /** Since the game started: kernel runs, row instructions, gathers that
+   * found no live row, events dropped. */
+  export function stats(): {
+    readonly runs: number;
+    readonly rowInstructions: number;
+    readonly missedGathers: number;
+    readonly droppedEvents: number;
+  };
 }
 
 // ===========================================================================

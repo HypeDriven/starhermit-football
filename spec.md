@@ -690,7 +690,7 @@ browser code:
 - **One simulation, one set of strings, one quality model.** `server.js` loads into the game's
   realm with `starhermit:script`'s `loadClassic` (as the browser's classic script) and `sim.ts`
   only types `globalThis.FootballSim`; practice and the menu backdrop step it in `onFixedUpdate` at
-  60 Hz. `js/i18n/strings.js` and `sh-language.js` load the same way, so every string with an
+  60 Hz, the browser's practice step (online play is the platform's 30 Hz). `js/i18n/strings.js` and `sh-language.js` load the same way, so every string with an
   English key in the browser's tables is translated natively too, and the language resolves as in
   section 10 (choice in the `ui.language` game setting → the account's language → the player's
   interface language, the device's for a guest → en-US), following preference changes live;
@@ -710,8 +710,15 @@ browser code:
 - **World and HUD.** Stadium, footballers, procedural animation (`logic/pose.ts` is
   `animator.js`'s math), name tags, officials, ball and coin are rebuilt on `starhermit:scene` with
   `starhermit:canvas` textures; light intensities are the browser's divided by π (the host's light
-  convention); merged static meshes go through the host's geometry transforms; crowd motion writes
-  the instance matrices in place and sends one range a frame. The per-pixel grass and the ~20k
+  convention); merged static meshes go through the host's geometry transforms. The crowd's sway
+  and bounce and the haze's drift are `starhermit:world` kernels the runtime runs natively every
+  frame over every spectator and haze point (the browser moves an eighth of the crowd a frame), and
+  an instance binding draws the crowd from its table; the script sets only their uniforms (a boo
+  swaps in the kernel with the shake). Each frame does only what changed:
+  a footballer's joints are the meshes of their body parts (18 scene nodes, where the browser's
+  joint groups make 33) and turn only when their angles change, camera flashes resend their
+  colours only while one is lit, and the HUD keeps its strings and text widths until they change.
+  The per-pixel grass and the ~20k
   instances are built a slice at a time whenever the running call's fuel runs low (a "Loading…"
   screen covers the first menu and each match). The player's reduced-motion preference stills the
   floodlight flicker, camera flashes and haze, as `prefers-reduced-motion` does in the browser. The HUD (score bar with crests, clock, ball arrow
@@ -721,8 +728,9 @@ browser code:
   field use the engine's UI (`starhermit:ui`), so they also work with the keyboard and a gamepad.
 - **Audio.** `audio.js`'s graph on `starhermit:audio`: the authored clips from
   `sfx/manifest.json` decoded into graph buffers with the synthesiser as fallback per event, the
-  synthesised crowd bed and stadium delays, UI clicks on the player's interface volume. The game's
-  mute (in-match SOUND, SETTINGS) is its `muted` setting.
+  synthesised crowd bed and stadium delays, UI clicks on the player's interface volume. The bed's
+  level curve is scheduled again when the level moves by 0.002 (the browser reschedules it every
+  frame). The game's mute (in-match SOUND, SETTINGS) is its `muted` setting.
 - **Online.** `starhermit:platform`, which holds the player's credentials — no launch token,
   renewal or URLs. The flows are the browser's: rooms (create, quick join of any open room, open,
   start, seat, invite, accept, leave, mine) polled every 2 s, REJOIN MATCH / RETURN TO LOBBY, RANKED

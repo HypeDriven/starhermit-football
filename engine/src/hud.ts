@@ -8,8 +8,8 @@ import { frame } from "starhermit:engine";
 import type { ColorLike } from "starhermit:engine";
 import * as draw from "starhermit:draw";
 import { OffscreenCanvas } from "starhermit:canvas";
-import { T } from "./i18n.ts";
-import { formatClock } from "./logic/format.ts";
+import { T, language } from "./i18n.ts";
+import { clockSeconds, formatClock } from "./logic/format.ts";
 import type { Arrow } from "./logic/camera.ts";
 import { crest } from "./world/crest.ts";
 
@@ -62,11 +62,47 @@ function inside(b: HudButton, x: number, y: number): boolean {
   return b.w > 0 && x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
 }
 
+/** `T(key)` remembered until the key or the game language changes (the HUD
+ * draws the same strings every frame). */
+function translation(): (key: string) => string {
+  let key = "";
+  let lang = "";
+  let text = "";
+  return (k) => {
+    const l = language();
+    if (k !== key || l !== lang) {
+      key = k;
+      lang = l;
+      text = T(k);
+    }
+    return text;
+  };
+}
+
+/** measureText's width in one style (`spacing` em of letter spacing, if
+ * any), remembered until the text or the size changes: it is a host call
+ * and the HUD's text rarely changes. */
+function measurer(weight: string, spacing?: number): (text: string, size: number) => number {
+  let text: string | null = null;
+  let size = NaN;
+  let width = 0;
+  return (t, s) => {
+    if (t !== text || s !== size) {
+      text = t;
+      size = s;
+      width = draw.measureText(t, spacing === undefined ? { size: s, weight } : { size: s, weight, letterSpacing: spacing * s }).width;
+    }
+    return width;
+  };
+}
+
 export function createHud(): Hud {
   let visible = false;
   let homeName = "HOME";
   let awayName = "AWAY";
   let score = "0 – 0";
+  let scoreHome = 0;
+  let scoreAway = 0;
   let clockTime = 0;
   let clockHalf = 1;
   let clockLength = 180;
@@ -78,12 +114,46 @@ export function createHud(): Hud {
   let bannerUntil = 0;
   let arrow: Arrow | null = null;
   let arrowDist = "";
+  let arrowMetres = NaN;
   let mouseHint = false;
   let micVisible = false;
   let micMuted = false;
   let menuVisible = false;
   const mic: HudButton = { x: 0, y: 0, w: 0, h: 0 };
   const menu: HudButton = { x: 0, y: 0, w: 0, h: 0 };
+  // Strings and widths kept between frames (see translation and measurer).
+  const homeT = translation();
+  const awayT = translation();
+  const hintT = translation();
+  const micT = translation();
+  const homeWidth = measurer("800", 0.05);
+  const awayWidth = measurer("800", 0.05);
+  const scoreWidth = measurer("800", 0.05);
+  const clockWidth = measurer("800");
+  const hintWidth = measurer("700", 0.06);
+  const micWidth = measurer("700");
+  let clockText = "00:00";
+  let clockShown = NaN;
+  let clockShownHalf = NaN;
+  let clockLang = "";
+  // The arrow's two triangles, refilled each frame.
+  const glyph: [number, number][] = [[0, 0], [0, 0], [0, 0]];
+  const glyphShadow: [number, number][] = [[0, 0], [0, 0], [0, 0]];
+
+  /** The match clock's text, formatted again only when its second, the
+   * half or the language changes. */
+  function clock(): string {
+    if (!clockSet) return "00:00";
+    const shown = clockSeconds(clockTime, clockHalf, clockLength);
+    const lang = language();
+    if (shown !== clockShown || clockHalf !== clockShownHalf || lang !== clockLang) {
+      clockShown = shown;
+      clockShownHalf = clockHalf;
+      clockLang = lang;
+      clockText = formatClock(clockTime, clockHalf, clockLength, T);
+    }
+    return clockText;
+  }
 
   // The power fill's green → yellow → red gradient, drawn once.
   const gradient = new OffscreenCanvas(240, 12);
@@ -104,15 +174,14 @@ export function createHud(): Hud {
     const clockSize = 14.4 * s;
     const gap = 0.6 * 16 * s;
     const crestSize = 1.5 * 16 * s;
-    const home = T(homeName);
-    const away = T(awayName);
-    const clock = clockSet ? formatClock(clockTime, clockHalf, clockLength, T) : "00:00";
+    const home = homeT(homeName);
+    const away = awayT(awayName);
+    const time = clock();
     // the bar's bold text with its 0.05em letter spacing
-    const spaced = (text: string, size: number): number => draw.measureText(text, { size, weight: "800", letterSpacing: 0.05 * size }).width;
-    const wHome = spaced(home, small);
-    const wAway = spaced(away, small);
-    const wScore = spaced(score, big);
-    const wClock = draw.measureText(clock, { size: clockSize, weight: "800" }).width;
+    const wHome = homeWidth(home, small);
+    const wAway = awayWidth(away, small);
+    const wScore = scoreWidth(score, big);
+    const wClock = clockWidth(time, clockSize);
     const padX = 1.1 * 16 * s;
     const padY = 0.4 * 16 * s;
     const inner = crestSize + gap + wHome + gap + wScore + gap + wAway + gap + crestSize + gap * 2 + wClock;
@@ -135,7 +204,7 @@ export function createHud(): Hud {
     draw.image(crest(1).canvas, cx, mid - crestSize / 2, crestSize, crestSize);
     cx += crestSize + gap * 2;
     // unspaced: the engine's football probe reads the clock as one text
-    draw.text(clock, cx, mid - clockSize / 2, { size: clockSize, color: ACCENT2, weight: "800" });
+    draw.text(time, cx, mid - clockSize / 2, { size: clockSize, color: ACCENT2, weight: "800" });
   }
 
   function drawArrow(s: number): void {
@@ -147,13 +216,17 @@ export function createHud(): Hud {
     const py = dx;
     const cx = arrow.px;
     const cy = arrow.py - 6 * s;
-    const tri = (k: number): [number, number][] => [
-      [cx + dx * 12 * s * k, cy + dy * 12 * s * k],
-      [cx - dx * 8 * s * k + px * 10 * s * k, cy - dy * 8 * s * k + py * 10 * s * k],
-      [cx - dx * 8 * s * k - px * 10 * s * k, cy - dy * 8 * s * k - py * 10 * s * k],
-    ];
-    draw.polygon(tri(1.35), [0, 0, 0, 0.45]); // the glyph's dark text shadow
-    draw.polygon(tri(1), "#ffffff");
+    const tri = (out: [number, number][], k: number): [number, number][] => {
+      out[0]![0] = cx + dx * 12 * s * k;
+      out[0]![1] = cy + dy * 12 * s * k;
+      out[1]![0] = cx - dx * 8 * s * k + px * 10 * s * k;
+      out[1]![1] = cy - dy * 8 * s * k + py * 10 * s * k;
+      out[2]![0] = cx - dx * 8 * s * k - px * 10 * s * k;
+      out[2]![1] = cy - dy * 8 * s * k - py * 10 * s * k;
+      return out;
+    };
+    draw.polygon(tri(glyphShadow, 1.35), [0, 0, 0, 0.45]); // the glyph's dark text shadow
+    draw.polygon(tri(glyph, 1), "#ffffff");
     const size = 11.2 * s; // #ball-arrow-dist 0.7rem
     draw.text(arrowDist, cx, cy + 14 * s, { size, color: "#ffffff", align: "center", weight: "700", shadow: { color: [0, 0, 0, 0.8], x: 0, y: s } });
   }
@@ -178,10 +251,15 @@ export function createHud(): Hud {
     const y = H * 0.22;
     const alpha = ease;
     const spacing = 0.2 * size;
-    // green glow (text-shadow 0 0 30px), then the dark drop shadow and white
-    for (let i = -2; i <= 2; i++) {
-      draw.text(bannerText, W / 2 + i * 2 * s, y, { size, letterSpacing: spacing, weight: "900", color: [39 / 255, 174 / 255, 96 / 255, 0.25 * alpha], align: "center" });
-    }
+    // green glow (text-shadow 0 0 30px): five copies 2 px apart, drawn two
+    // to a call where the shadow is the next copy (the host lays the text
+    // out once a call; equal translucent copies blend the same in any
+    // order), then the dark drop shadow and white
+    const glow: [number, number, number, number] = [39 / 255, 174 / 255, 96 / 255, 0.25 * alpha];
+    const next = { color: glow, x: 2 * s, y: 0 };
+    draw.text(bannerText, W / 2 - 4 * s, y, { size, letterSpacing: spacing, weight: "900", color: glow, align: "center", shadow: next });
+    draw.text(bannerText, W / 2, y, { size, letterSpacing: spacing, weight: "900", color: glow, align: "center", shadow: next });
+    draw.text(bannerText, W / 2 + 4 * s, y, { size, letterSpacing: spacing, weight: "900", color: glow, align: "center" });
     draw.text(bannerText, W / 2, y, {
       size, letterSpacing: spacing, weight: "900", align: "center", color: [1, 1, 1, alpha],
       shadow: { color: [0, 0, 0, 0.8 * alpha], x: 0, y: 2 * s },
@@ -190,10 +268,10 @@ export function createHud(): Hud {
 
   function drawMouseHint(W: number, H: number, s: number, bottomInset: number): void {
     if (!mouseHint) return;
-    const text = T("CLICK THE PITCH FOR MOUSE CAMERA · LEFT SHOOT · RIGHT PASS · MIDDLE TACKLE");
+    const text = hintT("CLICK THE PITCH FOR MOUSE CAMERA · LEFT SHOOT · RIGHT PASS · MIDDLE TACKLE");
     const size = 11.2 * s; // #mouse-hint 0.7rem
     const spacing = 0.06 * size;
-    const tw = draw.measureText(text, { size, weight: "700", letterSpacing: spacing }).width;
+    const tw = hintWidth(text, size);
     const padX = 0.8 * 16 * s;
     const padY = 0.45 * 16 * s;
     const w = tw + padX * 2;
@@ -226,9 +304,9 @@ export function createHud(): Hud {
       mic.w = 0;
       return;
     }
-    const label = micMuted ? T("MIC OFF · M") : T("MIC ON · M");
+    const label = micT(micMuted ? "MIC OFF · M" : "MIC ON · M");
     const size = 11.52 * s; // #btn-mic 0.72rem
-    const tw = draw.measureText(label, { size, weight: "700" }).width;
+    const tw = micWidth(label, size);
     const w = tw + 0.7 * 16 * s * 2;
     const h = size + 0.3 * 16 * s * 2;
     // left of the ☰ button when it shows
@@ -261,6 +339,9 @@ export function createHud(): Hud {
       awayName = a;
     },
     setScore(h: number, a: number): void {
+      if (h === scoreHome && a === scoreAway) return;
+      scoreHome = h;
+      scoreAway = a;
       score = `${h} – ${a}`; // the bar's flex gap around the separator
     },
     setClock(time: number, half: number, halfLength: number): void {
@@ -279,7 +360,11 @@ export function createHud(): Hud {
     },
     setArrow(a: Arrow | null, distM: number): void {
       arrow = a;
-      arrowDist = `${Math.round(distM)}m`;
+      const metres = Math.round(distM);
+      if (metres !== arrowMetres) {
+        arrowMetres = metres;
+        arrowDist = `${metres}m`;
+      }
     },
     setMouseHint(show: boolean): void {
       mouseHint = show;

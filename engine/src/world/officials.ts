@@ -67,6 +67,7 @@ export function createCeremonyViews(scene: Scene): CeremonyViews {
   // Reused entity objects — no per-frame allocation.
   const refEnt = entity();
   const carEnts = [entity(), entity()];
+  let stretcherYaw = NaN; // set only when it turns (a set recomputes the quaternion)
 
   const drive = (view: PlayerView, ent: PoseEntity, e: CerEntity): void => {
     view.place(e[0], 0, e[1], e[2]);
@@ -85,7 +86,10 @@ export function createCeremonyViews(scene: Scene): CeremonyViews {
         carriers[i]!.update(dt, carEnts[i]!);
       }
       stretcher.position.set(cer.st[0], cer.st[3], cer.st[1]);
-      stretcher.rotation.set(0, -cer.st[2], 0);
+      if (-cer.st[2] !== stretcherYaw) {
+        stretcherYaw = -cer.st[2];
+        stretcher.rotation.set(0, stretcherYaw, 0);
+      }
     },
     dispose(): void {
       scene.remove(root);

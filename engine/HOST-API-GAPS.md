@@ -1,7 +1,7 @@
 # Host API gaps found by the football port
 
 What the native client (`engine/src`) still needs from host API v1
-(`engine/starhermit.d.ts`, copied from the runtime at 1d0cf8f, which answered
+(`engine/starhermit.d.ts`, copied from the runtime at 09cc88b, which answered
 the port's earlier lists: module specifiers and their queries, fuel,
 rotation, audio lifetimes, the game socket's envelopes, rooms, instance
 attributes, geometry, projection, draw, UI areas and tones, input sources
@@ -11,7 +11,8 @@ mapping and HDR light, normal maps, physical and Lambert materials,
 environments, four shadow casters with focus, points, anisotropy; system
 fonts for the generic families, which are now the only names the system's
 fonts have, so the port's font values name only generic families; WebP
-images; measureText with weight and letter spacing). Each
+images; measureText with weight and letter spacing; `starhermit:world`'s
+tables, kernels and instance bindings). Each
 entry names the module and member, the semantics wanted, why football needs
 it, and what the port does meanwhile. Nothing here is football-specific.
 
@@ -64,3 +65,73 @@ now takes 3.7–3.9 ms a frame at the median, 4.3–4.9 ms at p95).
    runs in the host. Meanwhile the port's `mergeGeoms`
    (`world/stadium.ts`) expands indices in one pass and skips the bounding
    sphere, which the runtime never reads (3.5 ms).
+
+## Per-frame script cost
+
+Found by profiling the port's own callbacks on the Linux football probe
+(runtime e409a71, release, 960 × 540, High tier, the 5-a-side practice
+match at 60 frames a second) after the port took what it could off the
+game thread itself (crowd, flashes, rig nodes, HUD strings; see the
+commits on `engine-port-perf`). In play the game thread takes about
+3.1 ms a frame at the median; the game's callbacks take about 1.6 ms of it
+and the scene sync and the host the rest. The native-logic plan
+(spec/native-logic.html in the engine) answers each of these; listed so
+the reference title's numbers can be checked against it.
+
+6. **`starhermit:scene` — the sync visits every visible node every
+   frame, and an Euler set is expensive.** `syncScene` checks each
+   visible node after `onRender` whether or not it changed: about 2.7 µs a
+   node (the footballers' 330 nodes, frozen, still cost 0.9 ms against
+   hidden). An
+   `Euler.set` costs about 1.75 µs (its quaternion's update reads the
+   Euler through four getters and recomputes six sines and cosines), so a
+   footballer's 14 joints cost about 30 µs a frame. Wanted: the scene as
+   a native table with dirty rows, and a rig evaluator. Meanwhile each
+   joint is the mesh of its body part (18 nodes a footballer instead of
+   the browser's 33) and a joint whose angles did not change is not set.
+
+7. **`starhermit:scene` — every material in use is compared every
+   frame.** `materialHandle` compares 31 parameters of each distinct
+   material a visible node uses, once a sync: about 4–9 µs a material
+   (72 in a 5-a-side match, so 0.3–0.6 ms; 34 fewer saved 0.13–0.3 ms).
+   Wanted: materials marked dirty by their setters. Meanwhile nothing:
+   each skin tone, back number and name tag is its own material, as in
+   the browser.
+
+8. **`starhermit:draw` — text is laid out on every call.** `draw.text`
+   shapes its string on each call, and spaced text becomes one overlay
+   item a character: about 60–75 µs for the banner's 51 px line, so a
+   banner (green glow copies, then the text with its drop shadow) cost
+   about 0.45 ms a frame while it showed, and the mouse hint about 60 µs
+   every frame. Wanted: layouts cached by string, font, size and spacing
+   (or retained HUD text). Meanwhile the HUD keeps its `measureText`
+   widths and strings until they change, and the banner draws its glow
+   two copies a call (the second as the call's shadow, one layout).
+
+9. **`starhermit:world` — per-entity animation ran interpreted: answered
+   by `starhermit:world` 1 (09cc88b).** The crowd's sway and bounce (about
+   0.65 ms a frame for an eighth of the ~8,400 spectators) and the haze's
+   drift (0.1 ms) are now kernels over tables, the crowd drawn by
+   `bind.instances` and the haze's points drawing its position column:
+   every spectator moves every frame, the script's share is a few uniforms
+   (about 0.003 ms), and the kernels take about 0.29 ms. The game thread
+   takes about what it took (see 10). The camera flashes stay script (their
+   spawning is random; 0.003 ms); the flags, LED scroll and floodlight
+   flicker wait for node and material bindings, and the footballers' poses
+   for node bindings or the rig evaluator.
+
+10. **`starhermit:world` — what the crowd still costs natively.** On the
+   Linux probe (09cc88b, 8,400 spectators): `Math.sin` and `Math.cos` cost
+   about 30 ns a call in a kernel (the interpreter's own functions, for
+   identical results), so the browser's formula, five sines a spectator,
+   took 0.80 ms, three 0.58 ms and one 0.29 ms; the port sums the slow
+   sway's sines from the clock's (uniforms) and each spectator's phase
+   sines (columns). `bind.instances` composes every live row every frame,
+   changed or not (about 0.4 ms here), and a `yaw` mapping adds a sine and
+   a cosine a row (0.6 ms more), so the port binds a quaternion column.
+   Branches compute both sides, so the boo's shake is a second kernel the
+   script swaps in. Wanted: faster `Math` in kernels with the same
+   results (vectorized, or the yaw's precomputed), bindings that compose
+   only rows a kernel or the script changed, and a kernel stride (a
+   rotating 1/n of the rows a run) so a game can keep the browser's
+   eighth of the crowd a frame for an eighth of the cost.

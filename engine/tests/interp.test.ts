@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  MAX_EXTRAPOLATION, MAX_INTERP_DELAY, MIN_INTERP_DELAY, ceremonyAt, createJitterState, interpBall, interpPlayer,
-  noteArrival, parseBallRow, parsePlayerRow, parseSnap, pickPair, renderTime, snapTime, trimSnaps,
+  MAX_EXTRAPOLATION, MAX_INTERP_DELAY, MIN_INTERP_DELAY, blankCeremony, ceremonyAt, createJitterState, interpBall, interpPlayer,
+  lerpCer, noteArrival, parseBallRow, parsePlayerRow, parseSnap, pickPair, renderTime, snapTime, trimSnaps,
 } from "../src/logic/interp.ts";
 import type { CeremonySnap, InterpEntity, InterpPair, ParsedSnap } from "../src/logic/interp.ts";
 import { loadServer, sessionCtx } from "./server.ts";
@@ -35,6 +35,31 @@ test("the script's own snapshot parses", () => {
   assert.equal(snap.cer, null);
   assert.equal(snapTime(created.broadcast[0]!.data["ts"], 5), 1_700_000_000);
   assert.equal(parseSnap({ type: "ev" }), null);
+});
+
+test("a recycled snapshot parses to the same values as a fresh one", () => {
+  const { game } = loadServer();
+  const created = game.createSession(sessionCtx(1_700_000_000_000));
+  const data = created.broadcast[0]!.data;
+  const fresh = parseSnap(data)!;
+  // a bigger, older snapshot to fill: its extra rows and acks go
+  const old = parseSnap({ ...data, ack: [1, 2, 3, 4], pl: [...(data["pl"] as unknown[]), ...(data["pl"] as unknown[])], cer: { k: "x" } })!;
+  const rows = old.pl.slice();
+  const reused = parseSnap(data, old)!;
+  assert.equal(reused, old);
+  assert.equal(reused.pl[0], rows[0], "rows are refilled in place");
+  assert.deepEqual(reused, fresh);
+  assert.equal(parseSnap({ type: "ev" }, old), null);
+});
+
+test("trimmed snapshots go to the spare list", () => {
+  const snaps = [snapAt(0, 0), snapAt(0.5, 0), snapAt(1, 0), snapAt(3, 0)];
+  const first = snaps[0]!;
+  const spare: ParsedSnap[] = [];
+  trimSnaps(snaps, 3, spare);
+  assert.deepEqual(snaps.map((s) => s.at), [1, 3]);
+  assert.equal(spare.length, 2);
+  assert.equal(spare[0], first);
 });
 
 function snapAt(at: number, x: number): ParsedSnap {
@@ -116,4 +141,9 @@ test("a ceremony interpolates only between snapshots of the same one", () => {
   const other = { ...snapAt(0.1, 0), cer: cer(2, 2, 4) };
   assert.equal(ceremonyAt(a, other, 0.5)!.ref[0], 2);
   assert.equal(ceremonyAt(a, snapAt(0.1, 0), 0.5), null);
+  // blended into a kept ceremony: the same values, no new object
+  const out = blankCeremony();
+  assert.equal(ceremonyAt(a, b, 0.5, out), out);
+  assert.deepEqual(out, lerpCer(a.cer, b.cer, 0.5));
+  assert.equal(ceremonyAt(a, other, 0.5, out), other.cer);
 });

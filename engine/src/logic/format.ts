@@ -9,6 +9,12 @@ export type Translate = (key: string, vars?: Record<string, string | number>) =>
 export const english: Translate = (key, vars) =>
   vars ? key.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m)) : key;
 
+/** The half's own clock in whole seconds (what formatClock shows). */
+export function clockSeconds(time: number, half: number, halfLength: number): number {
+  const tt = Math.min(time, halfLength * 2);
+  return Math.floor(Math.max(0, half === 1 ? tt : tt - halfLength));
+}
+
 /** "1st 02:15" — the half's own clock, as the browser's hud.js shows it. */
 export function formatClock(time: number, half: number, halfLength: number, t: Translate = english): string {
   const tt = Math.min(time, halfLength * 2);

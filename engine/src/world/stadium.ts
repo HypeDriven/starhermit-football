@@ -11,7 +11,9 @@
 // particles, reflections and bloom.
 //
 // The build and the texture rebuilds slice their work across frames when the
-// running call's fuel runs low (tasks.ts).
+// running call's fuel runs low (tasks.ts). The crowd's sway and the haze's
+// drift are starhermit:world kernels the runtime runs natively each frame;
+// an instance binding draws the crowd from its table.
 import {
   AdditiveBlending,
   AmbientLight,
@@ -49,6 +51,8 @@ import {
 } from "starhermit:scene";
 import type { CanvasTexture, Fog as FogType, FogExp2, Material, Scene, Texture } from "starhermit:scene";
 import { budgets, usage } from "starhermit:engine";
+import { bind, kernel, schedule, table } from "starhermit:world";
+import type { Kernel, Scheduled, Table } from "starhermit:world";
 import type { Vec3Like } from "../logic/math.ts";
 import type { ContentQuality } from "../logic/quality.ts";
 import { onQuality } from "../quality.ts";
@@ -90,6 +94,69 @@ const TOWER_H = 30;
 const BLOOM = { threshold: 1.3, intensity: 0.55 };
 /** The canvas pixel bound (8,388,608 per canvas). */
 const MAX_CANVAS_PIXELS = 8388608;
+
+/** Crowd rows: more than the most seats any pitch has (11,180, four a side). */
+const CROWD_ROWS = 12288;
+
+interface CrowdWorld {
+  /** One spectator a row: the seat (bx, by, bz), the sway's phase, rate
+   * and bounce (ph, fr, av), the sines and cosines of the phase terms the
+   * sway and the shake add to the clock's (s17, c17 of ph × 1.7; s0, c0 of
+   * ph; s41, c41 of ph × 4.1), facing and scale (q, s, sy), and the
+   * position they give (x, y, z), which the binding draws. */
+  crowd: Table;
+  /** The sway and bounce, and the same with a boo's shake. */
+  sway: Kernel;
+  swayBoo: Kernel;
+  /** One haze point a row: its position (the points' attribute is this
+   * column), its resting height and the sine and cosine of its phase. */
+  haze: Table;
+  drift: Kernel;
+}
+let world: CrowdWorld | null = null;
+/** The crowd's and the haze's tables and kernels, made with the first
+ * stadium: they last for the game's lifetime and one stadium shows at a
+ * time, so each stadium fills them again. */
+function crowdWorld(): CrowdWorld {
+  if (world) return world;
+  const crowd = table("crowd", CROWD_ROWS, {
+    bx: "f32", by: "f32", bz: "f32", ph: "f32", fr: "f32", av: "f32",
+    s17: "f32", c17: "f32", s0: "f32", c0: "f32", s41: "f32", c41: "f32",
+    q: "quat", s: "f32", sy: "f32", x: "f32", y: "f32", z: "f32",
+  });
+  // The browser's sway and bounce (js/world/stadium.js), for every spectator
+  // every frame (the browser moves an eighth of them a frame): `t` is the
+  // stadium's clock; the slow sway's sines of `t × 1.1 + ph × 1.7` and
+  // `t × 0.9 + ph` are summed from the clock's (uniforms) and the phase's
+  // (columns), which leaves one sine a spectator.
+  const sway = kernel(crowd, (r, u: { t: number; amp: number; spd: number; sway: number; sx: number; cx: number; sz: number; cz: number }) => {
+    const j = Math.sin(u.t * u.spd * r.fr + r.ph);
+    r.y = j > 0 ? r.by + j * j * u.amp * r.av : r.by;
+    r.x = r.bx + (u.sx * r.c17 + u.cx * r.s17) * u.sway;
+    r.z = r.bz + (u.cz * r.c0 - u.sz * r.s0) * u.sway;
+  });
+  // A boo damps the joyful bounce and a fast jittery shake takes over.
+  const swayBoo = kernel(crowd, (r, u: {
+    t: number; amp: number; spd: number; sway: number; shake: number;
+    sx: number; cx: number; sz: number; cz: number; sx9: number; cx9: number;
+  }) => {
+    const j = Math.sin(u.t * u.spd * r.fr + r.ph);
+    const bj = Math.sin(u.t * 12.7 * r.fr + r.ph * 2.9);
+    r.y = r.by + (j > 0 ? j * j : 0) * u.amp * r.av + bj * u.shake * r.av;
+    r.x = r.bx + (u.sx * r.c17 + u.cx * r.s17) * u.sway + (u.sx9 * r.c41 + u.cx9 * r.s41) * u.shake * 0.4;
+    r.z = r.bz + (u.cz * r.c0 - u.sz * r.s0) * u.sway;
+  });
+  const haze = table("haze", MAX_HAZE, { pos: "vec3", y0: "f32", s: "f32", c: "f32" });
+  haze.spawn(MAX_HAZE);
+  // Haze drifts slowly up and down through the beams: the sine of
+  // `t × 0.25 + phase` from the clock's (`st`, `ct`) and the phase's; `amp`
+  // is 0 until it first moves, so a still haze rests where it was made.
+  const drift = kernel(haze, (r, u: { st: number; ct: number; amp: number }) => {
+    r.pos.y = r.y0 + (u.st * r.c + u.ct * r.s) * u.amp;
+  });
+  world = { crowd, sway, swayBoo, haze, drift };
+  return world;
+}
 
 export interface Stadium {
   /** `camera` is the scene camera's position (the tunnel fades when it
@@ -761,6 +828,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     crowdIdx[i] = crowdIdx[j]!;
     crowdIdx[j] = tmp;
   }
+  if (crowdIdx.length > CROWD_ROWS) crowdIdx.length = CROWD_ROWS;
   const cN = crowdIdx.length;
   const sparseN = Math.ceil(cN * 0.5);
   const baseX = new Float32Array(cN);
@@ -769,11 +837,50 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   const phase = new Float32Array(cN);
   const freqV = new Float32Array(cN);
   const ampV = new Float32Array(cN);
+  const yawV = new Float32Array(cN);
+  const sV = new Float32Array(cN);
+  const syV = new Float32Array(cN);
+  // The table's rows: all of them during the build, then the shown ones
+  // (showCrowd); the binding composes the instance matrices from them.
+  const w = crowdWorld();
+  const rows = w.crowd;
+  const col = (name: string): Float32Array => rows.column(name) as Float32Array;
+  const cols = {
+    bx: col("bx"), by: col("by"), bz: col("bz"), ph: col("ph"), fr: col("fr"), av: col("av"),
+    s17: col("s17"), c17: col("c17"), s0: col("s0"), c0: col("c0"), s41: col("s41"), c41: col("c41"),
+    q: col("q"), s: col("s"), sy: col("sy"), x: col("x"), y: col("y"), z: col("z"),
+  };
+  /** Copies spectators from..to into their rows, at rest on their seats. */
+  const fillRows = (from: number, to: number): void => {
+    for (let i = from; i < to; i++) {
+      cols.bx[i] = cols.x[i] = baseX[i]!;
+      cols.by[i] = cols.y[i] = baseY[i]!;
+      cols.bz[i] = cols.z[i] = baseZ[i]!;
+      const ph = phase[i]!;
+      cols.ph[i] = ph;
+      cols.fr[i] = freqV[i]!;
+      cols.av[i] = ampV[i]!;
+      cols.s17[i] = Math.sin(ph * 1.7);
+      cols.c17[i] = Math.cos(ph * 1.7);
+      cols.s0[i] = Math.sin(ph);
+      cols.c0[i] = Math.cos(ph);
+      cols.s41[i] = Math.sin(ph * 4.1);
+      cols.c41[i] = Math.cos(ph * 4.1);
+      // the facing about +y as a quaternion (the binding's rotation)
+      cols.q[i * 4] = 0;
+      cols.q[i * 4 + 1] = Math.sin(yawV[i]! / 2);
+      cols.q[i * 4 + 2] = 0;
+      cols.q[i * 4 + 3] = Math.cos(yawV[i]! / 2);
+      cols.s[i] = sV[i]!;
+      cols.sy[i] = syV[i]!;
+    }
+  };
+  rows.clear();
+  rows.spawn(cN);
   let crowdBody = `${q.body[0]},${q.body[1]}`;
   let crowdGeo: BufferGeometry = new CapsuleGeometry(0.17, 0.5, q.body[0], q.body[1]);
   const crowdMat = bag.add(new MeshStandardMaterial({ roughness: 0.9 }));
   const crowdMesh = new InstancedMesh(crowdGeo, crowdMat, Math.max(1, cN));
-  const carr = crowdMesh.instanceMatrix.array as Float32Array;
   {
     const JACKETS = [0x22242c, 0x2e3138, 0x39404e, 0x1d2833, 0x2c3a2f, 0x41352b, 0x4b4b55, 0x2a2320];
     const SPLASH = [0xc23b3b, 0x2f5fd0, 0xe6e2d8, 0xd8a02c, 0x3f9e4d];
@@ -790,22 +897,17 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
       phase[i] = Math.random() * Math.PI * 2;
       freqV[i] = 0.85 + Math.random() * 0.3;
       ampV[i] = 0.7 + Math.random() * 0.6;
-      // yaw × scale, as three.js's compose of Euler(0, yaw, 0) and (s, s·k, s)
-      const yaw = Math.random() * Math.PI * 2;
+      // facing and scale (s, s·k, s), which the binding composes as three.js
+      // does with the position
+      yawV[i] = Math.random() * Math.PI * 2;
       const s = 0.88 + Math.random() * 0.22;
-      const sy = s * (0.92 + Math.random() * 0.16);
-      const a = Math.cos(yaw) * s;
-      const b = Math.sin(yaw) * s;
-      const o = i * 16;
-      carr[o] = a; carr[o + 1] = 0; carr[o + 2] = -b; carr[o + 3] = 0;
-      carr[o + 4] = 0; carr[o + 5] = sy; carr[o + 6] = 0; carr[o + 7] = 0;
-      carr[o + 8] = b; carr[o + 9] = 0; carr[o + 10] = a; carr[o + 11] = 0;
-      carr[o + 12] = x; carr[o + 13] = y; carr[o + 14] = z; carr[o + 15] = 1;
+      sV[i] = s;
+      syV[i] = s * (0.92 + Math.random() * 0.16);
+      fillRows(i, i + 1);
       if (Math.random() < 0.16) col.setHex(SPLASH[(Math.random() * SPLASH.length) | 0]!);
       else col.setHex(JACKETS[(Math.random() * JACKETS.length) | 0]!);
       ccol[i * 3] = col.r; ccol[i * 3 + 1] = col.g; ccol[i * 3 + 2] = col.b;
     }, alive);
-    crowdMesh.instanceMatrix.needsUpdate = true;
     crowdMesh.instanceColor!.needsUpdate = true;
   }
   root.add(crowdMesh);
@@ -1027,6 +1129,9 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   const flashPos = new Float32Array(MAX_FLASHES * 3);
   const flashCol = new Float32Array(MAX_FLASHES * 3);
   const flashLife = new Float32Array(MAX_FLASHES);
+  // The lit flashes' indices: a flash fades in 0.14 s, so a few burn at once.
+  const flashLit = new Uint16Array(MAX_FLASHES);
+  let litN = 0;
   for (let i = 0; i < MAX_FLASHES; i++) {
     const k = (Math.random() * Math.max(1, cN)) | 0;
     flashPos[i * 3] = baseX[k] ?? 0;
@@ -1044,9 +1149,12 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   flashes.renderOrder = 7;
   root.add(flashes);
 
-  const hazePos = new Float32Array(MAX_HAZE * 3);
-  const hazeBaseY = new Float32Array(MAX_HAZE);
-  const hazePh = new Float32Array(MAX_HAZE);
+  // the haze table's columns (its kernel writes the heights; the points
+  // draw the position column itself)
+  const hazePos = w.haze.column("pos") as Float32Array;
+  const hazeBaseY = w.haze.column("y0") as Float32Array;
+  const hazeSin = w.haze.column("s") as Float32Array;
+  const hazeCos = w.haze.column("c") as Float32Array;
   for (let i = 0; i < MAX_HAZE; i++) {
     const [cx, cz] = corners[i % 4]!;
     const hx = cx * (L / 2 + 22);
@@ -1061,7 +1169,9 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     hazeBaseY[i] = hy - hy * f + Math.sin(a) * r * 0.6;
     hazePos[i * 3 + 1] = hazeBaseY[i]!;
     hazePos[i * 3 + 2] = hz + (tz - hz) * f + Math.sin(a) * r;
-    hazePh[i] = Math.random() * Math.PI * 2;
+    const ph = Math.random() * Math.PI * 2;
+    hazeSin[i] = Math.sin(ph);
+    hazeCos[i] = Math.cos(ph);
   }
   const hazeGeo = bag.add(new BufferGeometry());
   const hazePosAttr = new BufferAttribute(hazePos, 3);
@@ -1124,6 +1234,14 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
       linesMat.map = tex;
     }
   }
+  /** The shown spectators are the table's live rows (the binding draws
+   * those): rows past them go, and rows that come back are filled again
+   * (spawn zeroes them). */
+  function showCrowd(n: number): void {
+    const live = rows.count;
+    if (n < live) rows.free(n, live - n);
+    else if (n > live) fillRows(rows.spawn(n - live), n);
+  }
   let requested = "";
   function applyQuality(want: ContentQuality): void {
     const key = `${want.grass}|${want.lines}|${want.detail}`;
@@ -1160,12 +1278,23 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
       old.dispose();
     }
     crowdMesh.count = Math.max(1, Math.min(cN, Math.round((want.crowdFull ? cN : sparseN) * want.crowdShare)));
+    showCrowd(crowdMesh.count);
     particlesOn = want.particles;
     flashN = Math.min(MAX_FLASHES, want.flashes);
     hazeN = Math.min(MAX_HAZE, want.haze);
     flashGeo.setDrawRange(0, flashN);
     hazeGeo.setDrawRange(0, hazeN);
     for (let i = flashN; i < MAX_FLASHES; i++) flashLife[i] = 0;
+    // flashes past the new budget go out (dark, should the budget grow again)
+    for (let n = 0; n < litN; ) {
+      const i = flashLit[n]!;
+      if (i < flashN) {
+        n++;
+        continue;
+      }
+      flashCol[i * 3] = flashCol[i * 3 + 1] = flashCol[i * 3 + 2] = 0;
+      flashLit[n] = flashLit[--litN]!;
+    }
     flashes.visible = haze.visible = particlesOn && night;
     renderer.bloom = want.bloom ? { ...BLOOM } : null;
   }
@@ -1183,6 +1312,13 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   scene.add(root);
   applyQuality(q);
   const unsubscribeQuality = onQuality(applyQuality);
+  // The crowd and the haze move natively each frame after onUpdate; update
+  // below only sets their uniforms.
+  const calm = (): Scheduled => schedule.update(w.sway, { t: 0, amp: 0, spd: 0, sway: 0, sx: 0, cx: 0, sz: 0, cz: 0 });
+  let swayRun = calm();
+  let booing = false;
+  const driftRun = schedule.update(w.drift, { st: 0, ct: 0, amp: 0 });
+  const crowdBinding = bind.instances(crowdMesh, rows, { position: ["x", "y", "z"], rotation: "q", scale: ["s", "sy", "s"] });
 
   // ── animation state + public handle ──
   let t = 0;
@@ -1190,7 +1326,6 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   let exc = 0;
   let pulseV = 0;
   let booV = 0;
-  let cursor = 0;
 
   function update(dt: number, camera: Vec3Like): void {
     const step = Math.min(dt || 0, 0.1);
@@ -1198,6 +1333,9 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     exc += (excTarget - exc) * Math.min(1, step * 2.5);
     pulseV *= Math.exp(-2.0 * step);
     booV *= Math.exp(-0.9 * step); // anger lingers longer than joy
+    // a boo faded below 1e-4 (a shake of micrometres) is over, and the
+    // crowd's kernel without the shake takes over again
+    if (booV < 1e-4) booV = 0;
     const energy = Math.min(1, exc + pulseV);
 
     // The follow camera backs up over the tunnel when the player faces
@@ -1215,33 +1353,28 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
       }
     }
 
-    // crowd sway/bounce: a rotating eighth of the shown crowd, translation
-    // lanes written in place and sent as one range; a boo damps the joyful
-    // bounce and a fast jittery shake takes over
-    const amp = 0.02 + 0.3 * energy * (1 - booV * 0.65);
-    const spd = 2.4 + 5.5 * energy;
-    const sway = 0.02 * (0.3 + energy);
-    const shake = 0.09 * booV;
-    const shown = crowdMesh.count;
-    const chunk = Math.max(1, Math.ceil(shown / 8));
-    const start = cursor < shown ? cursor : 0;
-    const end = Math.min(start + chunk, shown);
-    for (let i = start; i < end; i++) {
-      const o = i * 16;
-      const ph = phase[i]!;
-      const f = freqV[i]!;
-      const av = ampV[i]!;
-      const j = Math.sin(t * spd * f + ph);
-      const bj = Math.sin(t * 12.7 * f + ph * 2.9);
-      carr[o + 13] = baseY[i]! + (j > 0 ? j * j : 0) * amp * av + bj * shake * av;
-      carr[o + 12] = baseX[i]! + Math.sin(t * 1.1 + ph * 1.7) * sway + Math.sin(t * 9.3 + ph * 4.1) * shake * 0.4;
-      carr[o + 14] = baseZ[i]! + Math.cos(t * 0.9 + ph) * sway;
+    // crowd sway/bounce (the sway kernels, every spectator): a boo damps
+    // the joyful bounce and a fast jittery shake takes over
+    if ((booV > 0) !== booing) {
+      booing = booV > 0;
+      swayRun.cancel();
+      swayRun = booing
+        ? schedule.update(w.swayBoo, { t: 0, amp: 0, spd: 0, sway: 0, shake: 0, sx: 0, cx: 0, sz: 0, cz: 0, sx9: 0, cx9: 0 })
+        : calm();
     }
-    cursor = end >= shown ? 0 : end;
-    if (end > start) {
-      crowdMesh.instanceMatrix.clearUpdateRanges();
-      crowdMesh.instanceMatrix.addUpdateRange(start * 16, (end - start) * 16);
-      crowdMesh.instanceMatrix.needsUpdate = true;
+    const u = swayRun.uniforms;
+    u.t = t;
+    u.amp = 0.02 + 0.3 * energy * (1 - booV * 0.65);
+    u.spd = 2.4 + 5.5 * energy;
+    u.sway = 0.02 * (0.3 + energy);
+    u.sx = Math.sin(t * 1.1);
+    u.cx = Math.cos(t * 1.1);
+    u.sz = Math.sin(t * 0.9);
+    u.cz = Math.cos(t * 0.9);
+    if (booing) {
+      u.shake = 0.09 * booV;
+      u.sx9 = Math.sin(t * 9.3);
+      u.cx9 = Math.cos(t * 9.3);
     }
 
     // LED board scroll
@@ -1254,23 +1387,37 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
       if (!still) {
         let spawn = step * (2 + 40 * pulseV + 6 * exc);
         while (spawn > 0 && flashN > 0) {
-          if (spawn >= 1 || Math.random() < spawn) flashLife[(Math.random() * flashN) | 0] = 0.14;
+          if (spawn >= 1 || Math.random() < spawn) {
+            const k = (Math.random() * flashN) | 0;
+            if (!(flashLife[k]! > 0)) flashLit[litN++] = k;
+            flashLife[k] = 0.14;
+          }
           spawn -= 1;
         }
       }
-      // HDR white (up to 7) so bloom takes the flashes
-      for (let i = 0; i < flashN; i++) {
-        const life = (flashLife[i] = Math.max(0, flashLife[i]! - step));
-        const v = still ? 0 : (life / 0.14) * 7;
-        flashCol[i * 3] = v;
-        flashCol[i * 3 + 1] = v;
-        flashCol[i * 3 + 2] = v * 1.08;
+      // HDR white (up to 7) so bloom takes the flashes; only lit ones
+      // change (the dark ones are already 0), and only then is the colour
+      // sent again
+      if (litN > 0) {
+        for (let n = 0; n < litN; ) {
+          const i = flashLit[n]!;
+          const life = (flashLife[i] = Math.max(0, flashLife[i]! - step));
+          const v = still ? 0 : (life / 0.14) * 7;
+          flashCol[i * 3] = v;
+          flashCol[i * 3 + 1] = v;
+          flashCol[i * 3 + 2] = v * 1.08;
+          if (flashLife[i]! > 0) n++;
+          else flashLit[n] = flashLit[--litN]!;
+        }
+        flashColAttr.needsUpdate = true;
       }
-      flashColAttr.needsUpdate = true;
     }
-    // haze drifts slowly up and down through the beams
+    // haze drifts slowly up and down through the beams (the drift kernel;
+    // with its clock and amplitude left alone, it holds still)
     if (haze.visible && !still) {
-      for (let i = 0; i < hazeN; i++) hazePos[i * 3 + 1] = hazeBaseY[i]! + Math.sin(t * 0.25 + hazePh[i]!) * 0.8;
+      driftRun.uniforms.st = Math.sin(t * 0.25);
+      driftRun.uniforms.ct = Math.cos(t * 0.25);
+      driftRun.uniforms.amp = 0.8;
       hazePosAttr.needsUpdate = true;
     }
 
@@ -1281,10 +1428,10 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
       spot.intensity = SPOT_INTENSITY * fl;
     }
 
-    // corner flag wave
+    // corner flag wave (one set: each component's setter recomputes the
+    // quaternion)
     for (let i = 0; i < 4; i++) {
-      flagMeshes[i]!.rotation.y = flagBaseRot[i]! + Math.sin(t * 2.1 + i * 1.37) * 0.2;
-      flagMeshes[i]!.rotation.z = Math.sin(t * 1.6 + i * 2.1) * 0.08;
+      flagMeshes[i]!.rotation.set(0, flagBaseRot[i]! + Math.sin(t * 2.1 + i * 1.37) * 0.2, Math.sin(t * 1.6 + i * 2.1) * 0.08);
     }
   }
 
@@ -1306,6 +1453,9 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   function dispose(): void {
     disposed = true;
     unsubscribeQuality();
+    swayRun.cancel();
+    driftRun.cancel();
+    crowdBinding.remove();
     scene.remove(root);
     if (scene.background === background) scene.background = prevBackground;
     if (scene.fog === fog) scene.fog = prevFog;

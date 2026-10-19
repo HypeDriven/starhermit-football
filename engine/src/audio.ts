@@ -104,6 +104,7 @@ export function createAudio(): Audio {
   let uiBus: GainNode | null = null; // menu clicks -> interface bus
   let crowdBus: GainNode | null = null; // crowd sounds, feeds master + reverb send
   let crowdBedGain: GainNode | null = null; // excitement-controlled bed level
+  let bedTarget = NaN; // the level last scheduled on it
   let noiseBuffer: AudioBuffer | null = null;
   let excitement = 0.35;
   let muted = readMuted();
@@ -163,6 +164,7 @@ export function createAudio(): Audio {
     bed.gain.value = 0;
     bed.connect(bus);
     crowdBedGain = bed;
+    bedTarget = NaN;
     const voices = [
       { freq: 320, q: 0.7, gain: 0.5, pan: -0.7 },
       { freq: 520, q: 0.9, gain: 0.62, pan: -0.25 },
@@ -258,8 +260,12 @@ export function createAudio(): Audio {
 
   function applyExcitement(t: number): void {
     if (!crowdBedGain) return;
-    // Excitement 0..1 mapped to a usable bed level.
+    // Excitement 0..1 mapped to a usable bed level. The match sets it every
+    // frame as the excitement eases; the curve is scheduled again only when
+    // the level moves by 0.002 (a fraction of a decibel), not every frame.
     const target = Math.pow(clamp01(excitement), 1.4) * 0.5;
+    if (Math.abs(target - bedTarget) < 0.002) return;
+    bedTarget = target;
     crowdBedGain.gain.cancelScheduledValues(t);
     crowdBedGain.gain.setTargetAtTime(target, t, 0.4);
   }
