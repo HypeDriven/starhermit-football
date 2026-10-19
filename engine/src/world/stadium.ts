@@ -1027,6 +1027,9 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   const flashPos = new Float32Array(MAX_FLASHES * 3);
   const flashCol = new Float32Array(MAX_FLASHES * 3);
   const flashLife = new Float32Array(MAX_FLASHES);
+  // The lit flashes' indices: a flash fades in 0.14 s, so a few burn at once.
+  const flashLit = new Uint16Array(MAX_FLASHES);
+  let litN = 0;
   for (let i = 0; i < MAX_FLASHES; i++) {
     const k = (Math.random() * Math.max(1, cN)) | 0;
     flashPos[i * 3] = baseX[k] ?? 0;
@@ -1166,6 +1169,16 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     flashGeo.setDrawRange(0, flashN);
     hazeGeo.setDrawRange(0, hazeN);
     for (let i = flashN; i < MAX_FLASHES; i++) flashLife[i] = 0;
+    // flashes past the new budget go out (dark, should the budget grow again)
+    for (let n = 0; n < litN; ) {
+      const i = flashLit[n]!;
+      if (i < flashN) {
+        n++;
+        continue;
+      }
+      flashCol[i * 3] = flashCol[i * 3 + 1] = flashCol[i * 3 + 2] = 0;
+      flashLit[n] = flashLit[--litN]!;
+    }
     flashes.visible = haze.visible = particlesOn && night;
     renderer.bloom = want.bloom ? { ...BLOOM } : null;
   }
@@ -1198,6 +1211,9 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     exc += (excTarget - exc) * Math.min(1, step * 2.5);
     pulseV *= Math.exp(-2.0 * step);
     booV *= Math.exp(-0.9 * step); // anger lingers longer than joy
+    // a boo faded below 1e-4 (a shake of micrometres) is over, so the
+    // crowd's shake-free path below takes over again
+    if (booV < 1e-4) booV = 0;
     const energy = Math.min(1, exc + pulseV);
 
     // The follow camera backs up over the tunnel when the player faces
@@ -1226,16 +1242,32 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     const chunk = Math.max(1, Math.ceil(shown / 8));
     const start = cursor < shown ? cursor : 0;
     const end = Math.min(start + chunk, shown);
-    for (let i = start; i < end; i++) {
-      const o = i * 16;
-      const ph = phase[i]!;
-      const f = freqV[i]!;
-      const av = ampV[i]!;
-      const j = Math.sin(t * spd * f + ph);
-      const bj = Math.sin(t * 12.7 * f + ph * 2.9);
-      carr[o + 13] = baseY[i]! + (j > 0 ? j * j : 0) * amp * av + bj * shake * av;
-      carr[o + 12] = baseX[i]! + Math.sin(t * 1.1 + ph * 1.7) * sway + Math.sin(t * 9.3 + ph * 4.1) * shake * 0.4;
-      carr[o + 14] = baseZ[i]! + Math.cos(t * 0.9 + ph) * sway;
+    if (shake === 0) {
+      // No boo: the shake terms are zero, so their two sines are skipped
+      // (and the amplitude is read only while the bounce is up); the
+      // results are the same numbers.
+      const ts = t * spd;
+      const tx = t * 1.1;
+      const tz = t * 0.9;
+      for (let i = start, o = start * 16; i < end; i++, o += 16) {
+        const ph = phase[i]!;
+        const j = Math.sin(ts * freqV[i]! + ph);
+        carr[o + 13] = j > 0 ? baseY[i]! + j * j * amp * ampV[i]! : baseY[i]!;
+        carr[o + 12] = baseX[i]! + Math.sin(tx + ph * 1.7) * sway;
+        carr[o + 14] = baseZ[i]! + Math.cos(tz + ph) * sway;
+      }
+    } else {
+      for (let i = start; i < end; i++) {
+        const o = i * 16;
+        const ph = phase[i]!;
+        const f = freqV[i]!;
+        const av = ampV[i]!;
+        const j = Math.sin(t * spd * f + ph);
+        const bj = Math.sin(t * 12.7 * f + ph * 2.9);
+        carr[o + 13] = baseY[i]! + (j > 0 ? j * j : 0) * amp * av + bj * shake * av;
+        carr[o + 12] = baseX[i]! + Math.sin(t * 1.1 + ph * 1.7) * sway + Math.sin(t * 9.3 + ph * 4.1) * shake * 0.4;
+        carr[o + 14] = baseZ[i]! + Math.cos(t * 0.9 + ph) * sway;
+      }
     }
     cursor = end >= shown ? 0 : end;
     if (end > start) {
@@ -1254,23 +1286,35 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
       if (!still) {
         let spawn = step * (2 + 40 * pulseV + 6 * exc);
         while (spawn > 0 && flashN > 0) {
-          if (spawn >= 1 || Math.random() < spawn) flashLife[(Math.random() * flashN) | 0] = 0.14;
+          if (spawn >= 1 || Math.random() < spawn) {
+            const k = (Math.random() * flashN) | 0;
+            if (!(flashLife[k]! > 0)) flashLit[litN++] = k;
+            flashLife[k] = 0.14;
+          }
           spawn -= 1;
         }
       }
-      // HDR white (up to 7) so bloom takes the flashes
-      for (let i = 0; i < flashN; i++) {
-        const life = (flashLife[i] = Math.max(0, flashLife[i]! - step));
-        const v = still ? 0 : (life / 0.14) * 7;
-        flashCol[i * 3] = v;
-        flashCol[i * 3 + 1] = v;
-        flashCol[i * 3 + 2] = v * 1.08;
+      // HDR white (up to 7) so bloom takes the flashes; only lit ones
+      // change (the dark ones are already 0), and only then is the colour
+      // sent again
+      if (litN > 0) {
+        for (let n = 0; n < litN; ) {
+          const i = flashLit[n]!;
+          const life = (flashLife[i] = Math.max(0, flashLife[i]! - step));
+          const v = still ? 0 : (life / 0.14) * 7;
+          flashCol[i * 3] = v;
+          flashCol[i * 3 + 1] = v;
+          flashCol[i * 3 + 2] = v * 1.08;
+          if (flashLife[i]! > 0) n++;
+          else flashLit[n] = flashLit[--litN]!;
+        }
+        flashColAttr.needsUpdate = true;
       }
-      flashColAttr.needsUpdate = true;
     }
     // haze drifts slowly up and down through the beams
     if (haze.visible && !still) {
-      for (let i = 0; i < hazeN; i++) hazePos[i * 3 + 1] = hazeBaseY[i]! + Math.sin(t * 0.25 + hazePh[i]!) * 0.8;
+      const th = t * 0.25;
+      for (let i = 0, o = 1; i < hazeN; i++, o += 3) hazePos[o] = hazeBaseY[i]! + Math.sin(th + hazePh[i]!) * 0.8;
       hazePosAttr.needsUpdate = true;
     }
 
@@ -1281,10 +1325,10 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
       spot.intensity = SPOT_INTENSITY * fl;
     }
 
-    // corner flag wave
+    // corner flag wave (one set: each component's setter recomputes the
+    // quaternion)
     for (let i = 0; i < 4; i++) {
-      flagMeshes[i]!.rotation.y = flagBaseRot[i]! + Math.sin(t * 2.1 + i * 1.37) * 0.2;
-      flagMeshes[i]!.rotation.z = Math.sin(t * 1.6 + i * 2.1) * 0.08;
+      flagMeshes[i]!.rotation.set(0, flagBaseRot[i]! + Math.sin(t * 2.1 + i * 1.37) * 0.2, Math.sin(t * 1.6 + i * 2.1) * 0.08);
     }
   }
 
