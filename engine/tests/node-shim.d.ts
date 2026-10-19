@@ -22,4 +22,8 @@ declare module "node:vm" {
   export function createContext(sandbox?: object): object;
   export function runInContext(code: string, context: object, options?: { filename?: string }): unknown;
 }
+declare module "node:module" {
+  /** Registers module customization hooks (the rig test maps starhermit:world). */
+  export function register(specifier: string): void;
+}
 declare const process: { env: Record<string, string | undefined> };

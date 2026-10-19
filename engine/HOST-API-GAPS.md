@@ -1,7 +1,7 @@
 # Host API gaps found by the football port
 
 What the native client (`engine/src`) still needs from host API v1
-(`engine/starhermit.d.ts`, copied from the runtime at 09cc88b, which answered
+(`engine/starhermit.d.ts`, copied from the runtime at aaf3979, which answered
 the port's earlier lists: module specifiers and their queries, fuel,
 rotation, audio lifetimes, the game socket's envelopes, rooms, instance
 attributes, geometry, projection, draw, UI areas and tones, input sources
@@ -86,9 +86,13 @@ the reference title's numbers can be checked against it.
    `Euler.set` costs about 1.75 µs (its quaternion's update reads the
    Euler through four getters and recomputes six sines and cosines), so a
    footballer's 14 joints cost about 30 µs a frame. Wanted: the scene as
-   a native table with dirty rows, and a rig evaluator. Meanwhile each
-   joint is the mesh of its body part (18 nodes a footballer instead of
-   the browser's 33) and a joint whose angles did not change is not set.
+   a native table with dirty rows, and a rig evaluator. Each joint is the
+   mesh of its body part (18 nodes a footballer instead of the browser's
+   33). The joints' part is answered by `starhermit:world` 3 (aaf3979):
+   the poses are kernels (`world/rigMath.ts`, `world/rig.ts`) and node
+   bindings drive the joints, so the script's pose work went from 0.29 to
+   0.02 ms a frame (5-a-side) and the scene's sync compares only the
+   joints' unbound channels; the walk over every visible node remains.
 
 7. **`starhermit:scene` — every material in use is compared every
    frame.** `materialHandle` compares 31 parameters of each distinct
@@ -120,18 +124,15 @@ the reference title's numbers can be checked against it.
    flicker wait for node and material bindings, and the footballers' poses
    for node bindings or the rig evaluator.
 
-10. **`starhermit:world` — what the crowd still costs natively.** On the
-   Linux probe (09cc88b, 8,400 spectators): `Math.sin` and `Math.cos` cost
-   about 30 ns a call in a kernel (the interpreter's own functions, for
-   identical results), so the browser's formula, five sines a spectator,
-   took 0.80 ms, three 0.58 ms and one 0.29 ms; the port sums the slow
-   sway's sines from the clock's (uniforms) and each spectator's phase
-   sines (columns). `bind.instances` composes every live row every frame,
-   changed or not (about 0.4 ms here), and a `yaw` mapping adds a sine and
-   a cosine a row (0.6 ms more), so the port binds a quaternion column.
-   Branches compute both sides, so the boo's shake is a second kernel the
-   script swaps in. Wanted: faster `Math` in kernels with the same
-   results (vectorized, or the yaw's precomputed), bindings that compose
-   only rows a kernel or the script changed, and a kernel stride (a
-   rotating 1/n of the rows a run) so a game can keep the browser's
-   eighth of the crowd a frame for an eighth of the cost.
+10. **`starhermit:world` — what the crowd cost natively: answered by
+   `starhermit:world` 3 (aaf3979).** On 09cc88b `Math.sin` in a kernel cost
+   about 30 ns, a binding composed every row every frame (0.4 ms for 8,400
+   spectators; a `yaw` mapping 0.6 ms more) and a kernel ran on every row,
+   so the port moved every spectator every frame with summed sines and a
+   second kernel for a boo's shake. The sliced schedule (`slices: 8`) and
+   the tracked binding (`track: true`) now run and compose an eighth of the
+   crowd a frame, as the browser moves it, with the browser's formula
+   unchanged (shake included): the update stage went from 0.33 to 0.15 ms
+   and the game thread's median in play from 2.22 to 2.03 ms on the Linux
+   probe. The binding still takes a quaternion column (the facing is
+   fixed).

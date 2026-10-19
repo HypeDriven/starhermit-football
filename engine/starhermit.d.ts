@@ -1,12 +1,12 @@
 // Copied unchanged below this note from starhermit-engine
-// crates/starhermit-runtime/api/starhermit.d.ts at commit 09cc88b (2026-10-19,
+// crates/starhermit-runtime/api/starhermit.d.ts at commit aaf3979 (2026-10-19,
 // main): host API v1 with the football port's decisions, R2's rendering,
 // system fonts (through the generic families only), WebP, and
-// starhermit:world (API_MINOR 1: tables, kernels, the schedule, events and
-// instance bindings).
+// starhermit:world (API_MINOR 3: tables with history and row ids, kernels,
+// strided and sliced schedules, events, instance and node bindings).
 // Refresh it from the runtime when the contract changes; the sha256 of the
 // original file is
-// 5693d95b48741b833b90f8c5cd80c6053b33a350b0a54fe24076d9454f5c667d.
+// 25788c3dcc8615436117631ebc340d638a2754444531af75fcf6bdb2544dbb67.
 
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -2746,13 +2746,16 @@ declare module "starhermit:world" {
   // ordinary functions of one row that the runtime compiles and runs over
   // whole tables without entering script; the schedule runs them each
   // frame; event queues report back; instance bindings draw a table as an
-  // InstancedMesh. Since API_MINOR 1.
-  import type { InstancedMesh } from "starhermit:scene";
+  // InstancedMesh. Since API_MINOR 1; node bindings, table history, row
+  // ids, strided and sliced schedules and tracked bindings since
+  // API_MINOR 3.
+  import type { InstancedMesh, Object3D } from "starhermit:scene";
 
   /** A column's type. Scalars: f32, f64, i32, u32, u16, u8 and bool (0 or
    * 1 in a byte). Vectors (f32 components x, y, z, w): vec2, vec3, vec4,
-   * quat. `ref:<table>`: a row of that table by index (an i32; reading
-   * through one that is not a live row gives 0). */
+   * quat. `ref:<table>`: a row of that table (an i32: its id when the
+   * table has `ids`, else its index; reading through one that names no
+   * live row gives 0). */
   export type ColumnType =
     | "f32"
     | "f64"
@@ -2790,19 +2793,57 @@ declare module "starhermit:world" {
     /** Adds `n` zeroed rows at the end and returns the first one's index
      * (RangeError past the capacity). */
     spawn(n?: number): number;
+    /** Live row `index`'s id (with `ids`; -1 for a row that is not
+     * live or a table without ids). */
+    id(index: number): number;
+    /** The live row an id names, or -1 (freed, or not one of this
+     * table's). */
+    find(id: number): number;
+    /** A history column's previous fixed step, as a typed array like
+     * `column` (TypeError for a column without one). */
+    previous(name: string): Float32Array | Float64Array | Int32Array | Uint32Array | Uint16Array | Uint8Array;
+    /** Rows `index..index + n` (all live rows by default) take their
+     * current values as their previous step, so nothing blends from where
+     * they were (a teleport, or rows just filled). */
+    settle(index?: number, n?: number): void;
+    /** Marks rows `index..index + n` (one row by default; every row
+     * without arguments) changed, for `track` instance bindings: writes
+     * through column views are not seen otherwise (kernel runs, spawn and
+     * free are). */
+    touch(index?: number, n?: number): void;
     /** Removes live rows `index..index + n`: the last rows move into the
-     * gap (order is not kept; references to moved rows are the game's to
-     * update). RangeError for rows that are not live. */
+     * gap (order is not kept: row indexes held elsewhere are the game's to
+     * update, ids follow their rows). RangeError for rows that are not
+     * live. */
     free(index: number, n?: number): void;
     clear(): void;
     /** A view of live row `index`: its columns as fields (`row.speed`,
      * `row.base.y`, booleans for bool columns, a read-only row of the other
-     * table for a reference) and `row.index`. RangeError past the live
+     * table for a reference), `row.index`, and with a history the
+     * read-only `row.prev` (`row.prev.pos.x`). RangeError past the live
      * rows. */
     row(index: number): any;
   }
+  export type Blend = "lerp" | "slerp" | "angle";
+  export interface TableOptions {
+    /** Columns that keep their previous fixed step (a hidden copy, in the
+     * table's memory): as each fixed step begins, before
+     * `onFixedUpdate`, every live row's current value becomes its
+     * previous one. Kernels read it as `r.prev.col`; bindings draw such a
+     * column between its two steps at the frame's interpolation: `lerp`
+     * component-wise (numbers and vectors), `slerp` the short way round
+     * (quat and vec4), `angle` radians the short way round (f32 and
+     * f64). */
+    history?: Record<string, Blend>;
+    /** Rows have ids (`table.id(row)`): an id follows its row when `free`
+     * moves it and names nothing once the row is freed (its slot takes
+     * the next generation). A `ref:` column into such a table holds ids,
+     * so a reference survives frees elsewhere and a stale one reads 0 (and
+     * is counted as missed). Without ids, references are row indexes. */
+    ids?: boolean;
+  }
   /** A table: the schema's keys, in order, are its columns. */
-  export function table(name: string, capacity: number, schema: Record<string, ColumnType>): Table;
+  export function table(name: string, capacity: number, schema: Record<string, ColumnType>, options?: TableOptions): Table;
 
   /** A kernel's row (the runtime checks the kernel against the schema). */
   export type Row = any;
@@ -2852,7 +2893,8 @@ declare module "starhermit:world" {
    * loop), at most 1,024 iterations, with `break` and `continue`; `return`;
    * `Math`'s functions and constants (not `random`), `Number.isFinite`,
    * `isNaN`, `isInteger` and `Number`'s constants; the row's fields and
-   * vector components, `row.index`, and other rows through `ref:` columns
+   * vector components, `row.index`, a history's `row.prev`, and other
+   * rows through `ref:` columns
    * (`r.target.x`: 0 when the index is not a live row of that table,
    * counted); uniforms (`u.amp`); frame values (`f.time`); outputs
    * (`o.total(x)`); `queue.emit({ … })` into a queue made with `events`;
@@ -2904,10 +2946,24 @@ declare module "starhermit:world" {
    * `uniforms` gives exactly the uniforms the kernel reads. At most 1,024
    * entries. */
   export const schedule: {
-    fixed(kernel: Kernel, uniforms?: Record<string, number>): Scheduled;
-    update(kernel: Kernel, uniforms?: Record<string, number>): Scheduled;
-    late(kernel: Kernel, uniforms?: Record<string, number>): Scheduled;
+    fixed(kernel: Kernel, uniforms?: Record<string, number>, options?: ScheduleOptions): Scheduled;
+    update(kernel: Kernel, uniforms?: Record<string, number>, options?: ScheduleOptions): Scheduled;
+    late(kernel: Kernel, uniforms?: Record<string, number>, options?: ScheduleOptions): Scheduled;
   };
+  /** A rotating subset of the rows a run, for 1/n of the cost: each row
+   * runs every n-th time. `f.dt` stays the frame's (scale it by n for a
+   * per-row rate); rows that move (spawn, free) may skip or repeat a turn.
+   * One of the two (1 to 1,024; 1 by default). */
+  export interface ScheduleOptions {
+    /** Every `stride`-th live row, from one row further each run (spread
+     * evenly through the table). */
+    stride?: number;
+    /** One of `slices` contiguous slices of the live rows (each
+     * ceil(count / slices) rows), the next slice each run: with a `track`
+     * binding, one range of instances a frame (the browser's "an eighth of
+     * the crowd a frame"). */
+    slices?: number;
+  }
 
   /** A bounded queue of typed events that kernels and script emit. */
   export class Events {
@@ -2940,9 +2996,19 @@ declare module "starhermit:world" {
     yaw?: string;
     scale?: number | string | readonly string[];
     color?: string | readonly string[];
+    /** Composes only rows that changed since the last frame: rows a
+     * scheduled kernel that writes columns ran on (all of them, or its
+     * stride's or slice's), rows
+     * spawned or moved by free, and rows marked with `Table.touch`. Other
+     * script writes through column views are not seen, so a game that
+     * makes them touches the rows. A mapping with a history column
+     * composes every row every frame regardless (it blends). */
+    track?: boolean;
   }
   export class Binding {
     private constructor();
+    /** Ends the binding: the script owns the channels again, from the
+     * rows' last values. */
     remove(): void;
   }
   export const bind: {
@@ -2951,9 +3017,36 @@ declare module "starhermit:world" {
      * three.js `Matrix4.compose`) and color from the columns natively each
      * frame, after the late stage. While bound, the mesh's own instance
      * matrices and count are not used. A row that is not finite draws
-     * nothing. A mesh is bound once; at most 256 bindings. */
+     * nothing. Columns with a history are drawn between their last two
+     * fixed steps at the frame's interpolation (as are bound nodes'). A
+     * mesh is bound once; at most 256 bindings. */
     instances(mesh: InstancedMesh, table: Table, mapping: InstanceMapping): Binding;
+    /** Drives the nodes' local transforms from rows: node k from row
+     * `first + k` (rows that are not live leave their nodes alone). The
+     * runtime writes the bound channels natively each frame after the late
+     * stage and the scene's update, so the binding wins; the channels it
+     * does not bind stay the script's. While bound, reading a bound
+     * channel in script (`position`, `rotation`, `quaternion`, `scale`,
+     * `matrix`, and so `matrixWorld`, `getWorldPosition`, `lookAt` and
+     * the rest) gives the row's current values, as three.js would after
+     * the table was written; writing one has no effect past the next
+     * frame. `visible` is not reflected in `object.visible`. A node is
+     * bound once at a time; at most 65,536 nodes a binding, 256 bindings. */
+    nodes(nodes: readonly Object3D[], table: Table, mapping: NodeMapping, first?: number): Binding;
   };
+  /** Where bound nodes' channels come from (column names or lists of them,
+   * as in `InstanceMapping`): `position` (3 values); `quaternion` (4, x y
+   * z w, normalized) or `rotation` (3 Euler angles in radians, in `order`,
+   * "XYZ" by default, as three.js `Euler`); `scale` (a number, one value or
+   * 3); `visible` (one value, shown when truthy). At least one. */
+  export interface NodeMapping {
+    position?: string | readonly string[];
+    quaternion?: string | readonly string[];
+    rotation?: string | readonly string[];
+    order?: "XYZ" | "YXZ" | "ZXY" | "ZYX" | "YZX" | "XZY";
+    scale?: number | string | readonly string[];
+    visible?: string;
+  }
 
   /** Since the game started: kernel runs, row instructions, gathers that
    * found no live row, events dropped. */
@@ -2967,7 +3060,8 @@ declare module "starhermit:world" {
 
 // ===========================================================================
 declare module "starhermit:script" {
-  import type { JsonValue } from "starhermit:engine";
+  import type { JsonValue, Unsubscribe } from "starhermit:engine";
+  import type { RoomSocketState } from "starhermit:platform";
 
   /** Evaluates a classic (non-module) package script in the game's own
    * realm, synchronously, so its globals (a shared simulation published on
@@ -3016,10 +3110,12 @@ declare module "starhermit:script" {
    * `ctx.now` as the clock) and its own fuel (the manifest's `fuel_ms` per
    * call; running out throws a RangeError). A context is at most 256 KiB
    * of JSON and a result (or the declarations) at most 64 KB (RangeError).
-   * Its work is the game's: the instructions it ran count against the
-   * game's call, its memory comes out of the game's heap, and stopping the
-   * game stops it. The script's own exceptions are rethrown with its file
-   * and line. */
+   * Both are passed on as JSON text, so the script sees the context's
+   * objects, and the caller the result's, with their keys in the order
+   * they were written. Its work is the game's: the instructions it ran
+   * count against the game's call, its memory comes out of the game's heap
+   * (less its workers' heaps), and stopping the game stops it. The
+   * script's own exceptions are rethrown with its file and line. */
   export interface PlatformScript {
     /** The script's static declarations, read once. */
     readonly tickRateHz: number | null;
@@ -3036,4 +3132,206 @@ declare module "starhermit:script" {
    * functions, or a RangeError for a `tickRateHz` that is not above 0 and
    * at most 1000. At most 16 sandboxes. */
   export function sandbox(path: string): PlatformScript;
+
+  // -- Workers and authorities ---------------------------------------------------
+  //
+  // A worker is a package script in a realm of its own on a thread of its
+  // own, so its work leaves the game's thread (since API_MINOR 2). It gets the platform
+  // sandbox's rules and nothing of the host: no imports of built-in
+  // modules, no `Date`, no `Math.random`, no timers, and `Intl` dates read
+  // the epoch (an authority's: the invocation's `ctx.now`). It and the game
+  // exchange JSON only: a message is copied as JSON text (at most 1 MiB,
+  // nesting at most 128 deep; functions and `undefined` are left out as
+  // `JSON.stringify` leaves them, and a host object arrives as `{}`), and
+  // what a worker sends reaches the game's listeners as each frame begins,
+  // before `onFixedUpdate`, in the order it was sent.
+  //
+  // Limits. A game runs at most 4 workers and authorities at once (one
+  // that was terminated counts until its thread has ended). Each has its
+  // own heap (`heapMiB`, 32 MiB by default) reserved out of the game's:
+  // while its thread lives, the game's realm may use that much less, so
+  // workers never add to `engine.limits.heap_mib`; a reservation larger
+  // than the game's heap has left throws a RangeError. Its call depth is
+  // the manifest's `call_frames`, and every entry (the script's top level,
+  // each message, an authority's each invocation) gets the manifest's
+  // `fuel_ms`. At most 256 messages (4 MiB) wait for a worker and 1,024
+  // (8 MiB) for the game; past that a send is refused and counted in
+  // `stats.overflows`. A worker whose one entry has run three seconds is
+  // reported with an `error` and the state `"not-responding"` (the game
+  // may terminate it); the game's own frames never wait for it. Its
+  // console lines go to the game's log, prefixed with its path. Stopping
+  // the game stops its workers where they stand, and a restart waits for
+  // their threads. Keep a reference to a worker you use: one the game no
+  // longer holds is terminated when it is collected.
+
+  export type WorkerState = "starting" | "running" | "not-responding" | "closed" | "failed";
+  /** Why a worker ended for good: `"closed"` (terminated, or the game is
+   * stopping), `"failed"` (its script did not load, or an entry ran out of
+   * heap or call depth), `"ended"` (an authority's session returned a
+   * `result`). */
+  export type WorkerStop = "closed" | "failed" | "ended";
+  export interface WorkerStats {
+    /** Entries the worker ran: its top level and messages, or an
+     * authority's invocations. */
+    readonly entries: number;
+    /** An authority's `onTick` invocations. */
+    readonly ticks: number;
+    /** Entries that threw, failed or were refused (`ok: false`). */
+    readonly failures: number;
+    /** Messages refused or dropped because a queue was full. */
+    readonly overflows: number;
+    /** Time the worker's thread has spent running script. */
+    readonly busySeconds: number;
+    /** Messages waiting for the worker. */
+    readonly queued: number;
+  }
+  export interface WorkerEvents {
+    /** The script's top level ran. */
+    open: () => void;
+    /** A value the worker passed to `postMessage`. */
+    message: (data: JsonValue) => void;
+    /** An exception from the worker's top level or `onmessage` (with its
+     * file and line; the worker goes on unless it was the top level), a
+     * budget that ended it, or the not-responding report. */
+    error: (message: string) => void;
+    stopped: (reason: WorkerStop) => void;
+  }
+  /** A worker's script: a classic script (or a module importing package
+   * modules) that sets `globalThis.onmessage` (also `self.onmessage`) to
+   * hear `{ data }` for each message the game posts, and calls
+   * `postMessage(value)` (a RangeError past 1 MiB or when the game's queue
+   * is full, a TypeError for what is not JSON). A message's promise jobs
+   * run before the next message. An exception from `onmessage` is reported
+   * and the worker goes on; running out of heap or call depth ends it. A
+   * long entry is not cut short: its fuel is renewed, and past three
+   * seconds the game hears it is not responding. */
+  export class Worker {
+    #private;
+    private constructor();
+    readonly state: WorkerState;
+    readonly stats: WorkerStats;
+    on<E extends keyof WorkerEvents>(event: E, listener: WorkerEvents[E]): Unsubscribe;
+    /** Queues a message for `onmessage` (a TypeError for what is not JSON,
+     * a RangeError past 1 MiB, nesting past 128, or when 256 messages or
+     * 4 MiB already wait). Ignored once the worker has stopped. */
+    post(message: JsonValue): void;
+    /** Ends the worker where it stands; no more events arrive. */
+    terminate(): void;
+  }
+  export interface WorkerOptions {
+    /** `"classic"` (the default) or `"module"`: a module and the package
+     * modules it imports (built-in modules are refused) evaluate with the
+     * game's module fuel (2 s). */
+    type?: "classic" | "module";
+    /** The worker's heap, out of the game's (1–4096, default 32). */
+    heapMiB?: number;
+  }
+  /** Starts a worker for a package script (at most 2 MB). Throws a
+   * TypeError for a bad path or a file that is not a script,
+   * `NotFoundError`, or a RangeError past 4 workers or when the game's heap
+   * cannot spare `heapMiB`. A script that does not parse fails the worker
+   * (an `error`, then `stopped` with `"failed"`). */
+  export function worker(path: string, options?: WorkerOptions): Worker;
+
+  /** An authority's events: those of a game socket (`starhermit:platform`'s
+   * `GameSocket`) for its player, plus `ended`. */
+  export interface AuthorityEvents {
+    /** The session began (`createSession` returned); `game` events
+     * follow. */
+    open: () => void;
+    /** A broadcast to `"all"` or naming the authority's player, as the
+     * game socket delivers it. */
+    game: (data: JsonValue) => void;
+    /** A refused command's `error` (`ok: false`), or an invocation that
+     * failed (an exception with its file and line, its fuel, heap or call
+     * depth, a result too big): it was not applied, and the session goes
+     * on. */
+    error: (message: string) => void;
+    /** The script returned a `result`: the session is over. `outcome` is
+     * that last result's fields (`ok`, `result`, `eloUpdates`,
+     * `achievements`, `scores`…) and the player states. Nothing is
+     * submitted: a local session awards nothing. */
+    ended: (outcome: { [key: string]: JsonValue }) => void;
+    stopped: (reason: WorkerStop) => void;
+  }
+  export interface AuthorityOptions {
+    /** The session's context as the platform would give it (`sessionId`,
+     * `players`, and `room` and `presence` for a room-bound session), at
+     * most 256 KiB of JSON: passed on every invocation as written.
+     * `sessionState` and `playerStates` (at most 2 MiB each) are what
+     * `createSession` sees, and `now` and `random` its clock and random
+     * number (the host's by default). */
+    context: SessionContext;
+    /** The player whose commands and inputs these are (`ctx.message.from`,
+     * `ctx.inputs[i].from`) and whose broadcasts the game hears; by default
+     * `context.players[0].id`. */
+    player?: string;
+    /** Ticks a second on the worker's clock (0–240). By default the
+     * script's `tickRateHz` as the platform clamps it: 0.25 when it
+     * declares none (or not a number), at most 30, at least 0.01, and 0 or
+     * below for none. 0: it ticks only on `tick()`. */
+    rate?: number;
+    /** The worker's heap, out of the game's (1–4096, default 32). */
+    heapMiB?: number;
+  }
+  /** A platform server script run locally as the platform runs it, on a
+   * worker: the session's authority for offline play and practice, with
+   * the same contract (and so the same presentation path) as online play
+   * through `connectGame`. Every invocation evaluates the script in a fresh
+   * realm with the platform's rules, and its context is JSON text (each
+   * object's keys in the order written): `createSession` once, then
+   * `onPlayerMessage` for each command as it arrives and `onTick` at the
+   * rate, each tick with the realtime inputs since the last one in
+   * `ctx.inputs` (one pending input per sender, latest wins, except that a
+   * pending `pass`, `shoot` or `tackle` is not taken back by a later frame
+   * without it; omitted when there are none). `now` is the host's clock
+   * and `random` a fresh number for each invocation. A result's
+   * `sessionState` replaces the session state (at most 2 MiB), its
+   * `playerStates` replace those players' documents, its broadcasts (each
+   * at most 1 MiB) to `"all"` or naming the player reach the game, and a
+   * `result` ends the session. A refusal (`ok: false`) or a failed
+   * invocation changes nothing; ticks that fall behind are skipped, as the
+   * platform skips over-budget ticks. Each invocation gets the manifest's
+   * `fuel_ms` for evaluating the script and running the call: running out
+   * fails it, as the platform fails an invocation over its time. */
+  export class Authority {
+    #private;
+    private constructor();
+    readonly state: RoomSocketState;
+    /** The script's declarations (null until `open`): its own
+     * `tickRateHz`, and the rate this authority ticks at. */
+    readonly tickRateHz: number | null;
+    readonly rate: number | null;
+    readonly replays: boolean;
+    readonly achievements: JsonValue;
+    readonly stats: WorkerStats;
+    on<E extends keyof AuthorityEvents>(event: E, listener: AuthorityEvents[E]): Unsubscribe;
+    /** `onPlayerMessage` with `ctx.message.data` = `data` (at most 16 KB of
+     * JSON, as the platform's frames). About 20 a second, as the platform
+     * allows; false when paced, when the queue is full, or once it has
+     * stopped. */
+    sendCommand(data: JsonValue): boolean;
+    /** The fields as one realtime input frame with `type: "input"` and
+     * `realtime: true` (as `GameSocket.sendInput`), the player's pending
+     * input for the next tick. 60 a second (bursts to 120); false when
+     * paced, when the queue is full, or once it has stopped. */
+    sendInput(data: { [key: string]: JsonValue }): boolean;
+    /** One `onTick` now, after what was sent before it, whatever the rate
+     * (`rate: 0` ticks only this way); `now` and `random` replace the
+     * host's for it, for deterministic replays and tests. False when the
+     * queue is full or once it has stopped. */
+    tick(ctx?: { now?: number; random?: number }): boolean;
+    /** Ends the session's worker; no more events arrive. */
+    close(): void;
+  }
+  /** Starts an authority for a server script (at most 2 MB) defining
+   * `globalThis.game` with `createSession`, `onPlayerMessage` and `onTick`
+   * (the same file the platform runs as `server=`). Throws a TypeError for
+   * a bad path, a context that is not an object or not JSON, or no player;
+   * `NotFoundError`; a RangeError for a context or state too big, a `rate`
+   * outside 0–240, past 4 workers, or when the game's heap cannot spare
+   * `heapMiB`. A script that does not parse, defines no `game` with those
+   * functions, or fails or refuses `createSession` fails the authority (an
+   * `error`, then `stopped` with `"failed"`). */
+  export function authority(path: string, options: AuthorityOptions): Authority;
 }
