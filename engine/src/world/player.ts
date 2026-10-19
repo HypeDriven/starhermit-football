@@ -1,7 +1,10 @@
 // Procedural footballer factory (the browser's js/world/player.js): a
 // ~1.8 m jointed character built from primitives. The group's origin is at
 // the feet; the character faces +x when group.rotation.y = 0. Joints are
-// Group pivots driven by logic/pose.ts each frame.
+// pivots driven by logic/pose.ts each frame; each joint draws its own body
+// part (the browser hangs the part's mesh under a joint Group) and a skin
+// hand is one mesh with its lower arm, so the scene, which syncs every node
+// every frame, has 18 nodes a footballer instead of 33.
 import {
   BoxGeometry,
   CanvasTexture,
@@ -11,6 +14,7 @@ import {
   MeshStandardMaterial,
   PlaneGeometry,
   SphereGeometry,
+  mergeGeometries,
 } from "starhermit:scene";
 import type { BufferGeometry, Material, Object3D } from "starhermit:scene";
 import { contrastFor, lerpSrgbHex } from "../logic/color.ts";
@@ -30,6 +34,8 @@ interface Geo {
   hair: BufferGeometry;
   upperArm: BufferGeometry;
   lowerArm: BufferGeometry;
+  /** The lower arm with its hand, for arms all in skin. */
+  lowerArmHand: BufferGeometry;
   hand: BufferGeometry;
   thigh: BufferGeometry;
   shin: BufferGeometry;
@@ -39,17 +45,22 @@ interface Geo {
 let geo: Geo | null = null;
 function GEO(): Geo {
   if (!geo) {
+    // The joints' parts are moved by their offsets from the pivots (the
+    // browser's mesh positions under each joint).
+    const lowerArm = new CapsuleGeometry(0.042, 0.20, 4, 10).translate(0, -0.12, 0);
+    const hand = new SphereGeometry(0.05, 10, 8);
     geo = {
-      pelvis: new CapsuleGeometry(0.17, 0.14, 4, 12),
-      torso: new CapsuleGeometry(0.185, 0.30, 4, 12),
-      head: new SphereGeometry(0.125, 18, 14),
+      pelvis: new CapsuleGeometry(0.17, 0.14, 4, 12).translate(0, 0.03, 0),
+      torso: new CapsuleGeometry(0.185, 0.30, 4, 12).translate(0, 0.27, 0),
+      head: new SphereGeometry(0.125, 18, 14).translate(0, 0.14, 0),
       hair: new SphereGeometry(0.132, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
-      upperArm: new CapsuleGeometry(0.05, 0.22, 4, 10),
-      lowerArm: new CapsuleGeometry(0.042, 0.20, 4, 10),
-      hand: new SphereGeometry(0.05, 10, 8),
-      thigh: new CapsuleGeometry(0.082, 0.26, 4, 10),
-      shin: new CapsuleGeometry(0.058, 0.28, 4, 10),
-      boot: new BoxGeometry(0.27, 0.1, 0.11),
+      upperArm: new CapsuleGeometry(0.05, 0.22, 4, 10).translate(0, -0.13, 0),
+      lowerArm,
+      lowerArmHand: mergeGeometries([lowerArm, hand.clone().translate(0, -0.26, 0)])!,
+      hand,
+      thigh: new CapsuleGeometry(0.082, 0.26, 4, 10).translate(0, -0.2, 0),
+      shin: new CapsuleGeometry(0.058, 0.28, 4, 10).translate(0, -0.19, 0),
+      boot: new BoxGeometry(0.27, 0.1, 0.11).translate(0.05, -0.11, 0),
       number: new PlaneGeometry(0.3, 0.3),
     };
   }
@@ -148,6 +159,7 @@ const SKIN_A = "#f2c79b";
 const SKIN_B = "#4a2c17";
 const BOOT_COLOR = "#1b1b1f";
 
+/** A part at (x, y, z) under `parent`; for a joint, (x, y, z) is the pivot. */
 function mesh(g: BufferGeometry, mat: Material, x: number, y: number, z: number, parent: Object3D): Mesh {
   const m = new Mesh(g, mat);
   m.position.set(x, y, z);
@@ -187,41 +199,56 @@ export interface PlayerView {
 }
 
 interface Joints {
-  root: Group;
-  pelvis: Group;
-  torso: Group;
-  head: Group;
-  lUpperArm: Group;
-  lLowerArm: Group;
-  rUpperArm: Group;
-  rLowerArm: Group;
-  lThigh: Group;
-  lShin: Group;
-  rThigh: Group;
-  rShin: Group;
-  lFoot: Group;
-  rFoot: Group;
+  root: Object3D;
+  pelvis: Object3D;
+  torso: Object3D;
+  head: Object3D;
+  lUpperArm: Object3D;
+  lLowerArm: Object3D;
+  rUpperArm: Object3D;
+  rLowerArm: Object3D;
+  lThigh: Object3D;
+  lShin: Object3D;
+  rThigh: Object3D;
+  rShin: Object3D;
+  lFoot: Object3D;
+  rFoot: Object3D;
 }
 
-/** Writes a pose onto the rig. */
-function applyPose(J: Joints, P: Pose): void {
+/** The angles each joint was last set to, three a joint in applyPose's
+ * order (NaN until the first pose). */
+const JOINT_ANGLES = 14 * 3;
+
+/** Sets a joint's Euler angles (in its own order) unless they are the ones
+ * it has: each set recomputes the quaternion (six trig calls) and makes the
+ * scene send the node again. */
+function turn(o: Object3D, last: Float64Array, at: number, x: number, y: number, z: number): void {
+  if (last[at] === x && last[at + 1] === y && last[at + 2] === z) return;
+  last[at] = x;
+  last[at + 1] = y;
+  last[at + 2] = z;
+  o.rotation.set(x, y, z);
+}
+
+/** Writes a pose onto the rig (the root's order is YXZ). */
+function applyPose(J: Joints, P: Pose, last: Float64Array): void {
   J.root.position.set(P.px, P.py, P.pz);
-  J.root.rotation.set(P.rx, P.ry, P.rz, "YXZ");
+  turn(J.root, last, 0, P.rx, P.ry, P.rz);
   J.pelvis.position.set(0, P.pelY, P.pelZ);
-  J.pelvis.rotation.set(P.pelRX, P.pelRY, P.pelRZ);
-  J.torso.rotation.set(P.tRX, P.tRY, P.tRZ);
+  turn(J.pelvis, last, 3, P.pelRX, P.pelRY, P.pelRZ);
+  turn(J.torso, last, 6, P.tRX, P.tRY, P.tRZ);
   J.torso.scale.set(1, P.tSY, 1);
-  J.head.rotation.set(P.hRX, P.hRY, P.hRZ);
-  J.lUpperArm.rotation.set(P.lUAX, 0, P.lUAZ);
-  J.rUpperArm.rotation.set(P.rUAX, 0, P.rUAZ);
-  J.lLowerArm.rotation.set(0, 0, P.lLAZ);
-  J.rLowerArm.rotation.set(0, 0, P.rLAZ);
-  J.lThigh.rotation.set(0, 0, P.lThZ);
-  J.rThigh.rotation.set(0, 0, P.rThZ);
-  J.lShin.rotation.set(0, 0, P.lShZ);
-  J.rShin.rotation.set(0, 0, P.rShZ);
-  J.lFoot.rotation.set(0, 0, P.lFtZ);
-  J.rFoot.rotation.set(0, 0, P.rFtZ);
+  turn(J.head, last, 9, P.hRX, P.hRY, P.hRZ);
+  turn(J.lUpperArm, last, 12, P.lUAX, 0, P.lUAZ);
+  turn(J.rUpperArm, last, 15, P.rUAX, 0, P.rUAZ);
+  turn(J.lLowerArm, last, 18, 0, 0, P.lLAZ);
+  turn(J.rLowerArm, last, 21, 0, 0, P.rLAZ);
+  turn(J.lThigh, last, 24, 0, 0, P.lThZ);
+  turn(J.rThigh, last, 27, 0, 0, P.rThZ);
+  turn(J.lShin, last, 30, 0, 0, P.lShZ);
+  turn(J.rShin, last, 33, 0, 0, P.rShZ);
+  turn(J.lFoot, last, 36, 0, 0, P.lFtZ);
+  turn(J.rFoot, last, 39, 0, 0, P.rFtZ);
 }
 
 export function createPlayerMesh(opts: PlayerViewOptions): PlayerView {
@@ -248,16 +275,10 @@ export function createPlayerMesh(opts: PlayerViewOptions): PlayerView {
   group.add(root);
 
   // Pelvis (hips) at 0.98 m — PELVIS_Y in logic/pose.ts.
-  const pelvis = new Group();
-  pelvis.position.y = 0.98;
-  root.add(pelvis);
-  mesh(G.pelvis, shortsMat, 0, 0.03, 0, pelvis);
+  const pelvis = mesh(G.pelvis, shortsMat, 0, 0.98, 0, root);
 
   // Torso with shirt texture + back number.
-  const torso = new Group();
-  torso.position.y = 0.1;
-  pelvis.add(torso);
-  mesh(G.torso, shirtMat, 0, 0.27, 0, torso);
+  const torso = mesh(G.torso, shirtMat, 0, 0.1, 0, pelvis);
   if (number != null) {
     const numMesh = mesh(G.number, numberMaterial(number, kit.shirt), -0.2, 0.3, 0, torso);
     numMesh.rotation.set(0, -Math.PI / 2, 0); // face backward (−x)
@@ -265,22 +286,15 @@ export function createPlayerMesh(opts: PlayerViewOptions): PlayerView {
   }
 
   // Head + hair cap.
-  const head = new Group();
-  head.position.y = 0.52;
-  torso.add(head);
-  mesh(G.head, skinMat, 0, 0.14, 0, head);
+  const head = mesh(G.head, skinMat, 0, 0.52, 0, torso);
   mesh(G.hair, hairMat, -0.012, 0.155, 0, head);
 
-  // Arms: shoulder pivots, sleeve upper arm, skin lower arm + hand.
-  const buildArm = (side: number): { upper: Group; lower: Group } => {
-    const upper = new Group();
-    upper.position.set(0, 0.44, side * 0.26);
-    torso.add(upper);
-    mesh(G.upperArm, sleeveMat, 0, -0.13, 0, upper);
-    const lower = new Group();
-    lower.position.set(0, -0.3, 0);
-    upper.add(lower);
-    mesh(G.lowerArm, armMat, 0, -0.12, 0, lower);
+  // Arms: shoulder pivots, sleeve upper arm, skin lower arm + hand (one
+  // mesh unless the sleeves are long).
+  const buildArm = (side: number): { upper: Mesh; lower: Mesh } => {
+    const upper = mesh(G.upperArm, sleeveMat, 0, 0.44, side * 0.26, torso);
+    if (armMat === skinMat) return { upper, lower: mesh(G.lowerArmHand, skinMat, 0, -0.3, 0, upper) };
+    const lower = mesh(G.lowerArm, armMat, 0, -0.3, 0, upper);
     mesh(G.hand, skinMat, 0, -0.26, 0, lower);
     return { upper, lower };
   };
@@ -288,19 +302,10 @@ export function createPlayerMesh(opts: PlayerViewOptions): PlayerView {
   const ra = buildArm(-1);
 
   // Legs: hip pivots, shorts thigh, sock shin, boot.
-  const buildLeg = (side: number): { thigh: Group; shin: Group; foot: Group } => {
-    const thigh = new Group();
-    thigh.position.set(0, 0, side * 0.11);
-    pelvis.add(thigh);
-    mesh(G.thigh, shortsMat, 0, -0.2, 0, thigh);
-    const shin = new Group();
-    shin.position.set(0, -0.4, 0);
-    thigh.add(shin);
-    mesh(G.shin, socksMat, 0, -0.19, 0, shin);
-    const foot = new Group();
-    foot.position.set(0, -0.4, 0);
-    shin.add(foot);
-    mesh(G.boot, bootMat, 0.05, -0.11, 0, foot);
+  const buildLeg = (side: number): { thigh: Mesh; shin: Mesh; foot: Mesh } => {
+    const thigh = mesh(G.thigh, shortsMat, 0, 0, side * 0.11, pelvis);
+    const shin = mesh(G.shin, socksMat, 0, -0.4, 0, thigh);
+    const foot = mesh(G.boot, bootMat, 0, -0.4, 0, shin);
     return { thigh, shin, foot };
   };
   const ll = buildLeg(1);
@@ -323,18 +328,23 @@ export function createPlayerMesh(opts: PlayerViewOptions): PlayerView {
   const params = createPoseParams();
   const blend = createPoseBlend();
   const pose = createPose();
+  const angles = new Float64Array(JOINT_ANGLES).fill(NaN);
   let yaw = 0;
+  let placedYaw = NaN;
 
   return {
     group,
     place(x: number, y: number, z: number, facing: number): void {
       group.position.set(x, y, z);
       yaw = -facing; // the model faces +x at rotation 0; the sim's yaw is CCW around +y
-      group.rotation.set(0, yaw, 0);
+      if (yaw !== placedYaw) {
+        placedYaw = yaw;
+        group.rotation.set(0, yaw, 0);
+      }
     },
     update(dt: number, ent: PoseEntity): void {
       blendPose(blend, ent, dt, yaw, params);
-      applyPose(joints, computePose(params, pose));
+      applyPose(joints, computePose(params, pose), angles);
     },
     setNameVisible(visible: boolean): void {
       tag.sprite.visible = visible;
