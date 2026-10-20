@@ -6,13 +6,12 @@
 name=Football
 description=Dribble, pass, tackle, and shoot in fast-paced 3D football matches with human and AI teammates.
 
-# The platform assigns this game a uid and uses it as the game's slug — the same
-# value as its <uid>.starhermit.com address. Nothing here can set it: a name a
-# developer could choose would be something two games could fight over. The game
-# client reads its own slug from the launch token's game_scope claim, so nothing
-# is hard-coded to it.
-
-# Repo-relative HTML entry point the client loads.
+# The platform assigns this game a uid and uses it as the game's slug. Nothing
+# here can set it: a name a developer could choose would be something two games
+# could fight over. The game is a StarHermit script game (engine.* below):
+# index.html is the loader page `starhermit package --web` writes, which plays
+# it in browsers on the pinned release's web runtime from wiki.starhermit.com;
+# the StarHermit Windows client plays the same files natively.
 launch=index.html
 
 # The Starhermit account that owns this game (the submitter's user id).
@@ -20,16 +19,16 @@ owner=2712e04e-461b-4d23-81ae-e40b429128a8
 
 # The authoritative match simulation. The platform runs this script server-side
 # in its Jint sandbox, ticking it at the script-declared rate (game.tickRateHz
-# = 30) — see spec.md section 3. Realtime
-# Rooms (/api/v1/realtime, /ws/v1/realtime) are used for lobby/roster only.
+# = 30) — see spec.md section 12. The runtime loads the same file for offline
+# practice, prediction and the menu's backdrop. Realtime Rooms
+# (/api/v1/realtime, /ws/v1/realtime) are used for lobby/roster only.
 server=server.js
 
-# Default desktop-browser controls (spec.md sections 5.6 and 8.8). Players can
-# rebind these per game from the platform client's game-details page; on launch
-# in a non-mobile browser the game fetches the player's effective bindings via
-# GET /api/v1/games/<slug>/controls and remaps its keyboard handling to them.
-# Tank-style steering: up/down run forward/back, left/right rotate the player.
-# The shoot key is contextual: a quick tap passes, holding charges a shot.
+# Default keyboard controls (spec.md section 6). The runtime binds the actions
+# from these lines; players rebind keys and pads in its Options menu (the game's
+# CONTROLS screen opens it). Tank-style steering: up/down run forward/back,
+# left/right rotate the player. The shoot key is contextual: a quick tap passes,
+# holding charges a shot.
 # Format: control.<action>=<KeyboardEvent.code>[+<code>...] | <label>
 control.up=KeyW+ArrowUp | Run forward
 control.down=KeyS+ArrowDown | Backpedal
@@ -38,4 +37,25 @@ control.right=KeyD+ArrowRight | Turn right
 control.shoot=Space+KeyJ | Shoot (hold) / tap to pass
 control.pass=KeyL | Pass
 control.tackle=KeyK | Slide tackle / pressure
+# The library cover art.
 cover=cover.jpg
+
+# The game (spec.md section 16): the StarHermit runtime runs this repository as
+# a script game — `starhermit <this directory>`. The platform ignores engine.*
+# keys; the runtime reads them with name=, server= and the control.* lines.
+# engine.api is the host-API major version, engine.entry the TypeScript entry
+# module; the capabilities are the platform (rooms, sockets, leaderboards,
+# replays, chat), voice, clipboard (invite links) and storage (the game's
+# settings: language, mute, voice). engine.gamepad.* give the actions their
+# default pad controls; players rebind keys and pads in the runtime's Options.
+engine.api=1
+engine.entry=engine/src/main.ts
+engine.version=1.1.0
+engine.capabilities=platform,voice,clipboard,storage
+engine.gamepad.up=LeftStickUp+DpadUp
+engine.gamepad.down=LeftStickDown+DpadDown
+engine.gamepad.left=LeftStickLeft+DpadLeft
+engine.gamepad.right=LeftStickRight+DpadRight
+engine.gamepad.shoot=West+RightTrigger
+engine.gamepad.pass=South
+engine.gamepad.tackle=East
