@@ -1,18 +1,18 @@
-// The procedural night-match stadium (the browser's js/world/stadium.js):
-// striped pitch with line markings, goals with nets, a two-tier seated bowl
+// The procedural night-match stadium: striped pitch with line markings, goals with nets, a two-tier seated bowl
 // with an instanced animated crowd, floodlight towers with light cones, lamp
 // glows and shadow-casting spotlights, scrolling LED boards, tunnel,
 // dugouts, corner flags, camera flashes and haze (points), and the floodlit
 // environment map for reflections. Everything is generated in code. The
 // parts with a cost follow the runtime's quality tier through the game's own
-// presets (logic/quality.ts over js/gfx.js): shadow-map size and the second
+// presets (logic/quality.ts): shadow-map size and the second
 // caster, the grass and line texture sizes, the detailed pitch (with its
 // mow-stripe normal map), crowd density and LOD, Lambert materials on Low,
-// particles, reflections and bloom.
+// particles, reflections and the post effects (ambient occlusion, bloom,
+// the grade and anti-aliasing).
 //
 // The build and the texture rebuilds slice their work across frames when the
 // running call's fuel runs low (tasks.ts). The crowd's sway (an eighth of
-// the crowd a frame, as the browser) and the haze's drift are
+// the crowd a frame) and the haze's drift are
 // starhermit:world kernels the runtime runs natively; an instance binding
 // draws the crowd from its table.
 import {
@@ -60,7 +60,7 @@ import { onQuality } from "../quality.ts";
 import { reducedMotion } from "../prefs.ts";
 import type { Pitch } from "../sim.ts";
 import { breathe, lowOnFuel, nextFrame, sliced } from "../tasks.ts";
-import { MAX_FLASHES, MAX_HAZE } from "../../../js/gfx.js";
+import { MAX_FLASHES, MAX_HAZE } from "../logic/quality.ts";
 import { reportLoading } from "../progress.ts";
 import { stadiumEnvironment } from "./environment.ts";
 import { ResourceBag, canvasTexture, makeCanvas } from "./resources.ts";
@@ -90,9 +90,25 @@ const HEMI_DAY = 1.05 / Math.PI;
 const AMB_NIGHT = 0.35 / Math.PI;
 const AMB_DAY = 0.6 / Math.PI;
 const TOWER_H = 30;
-/** three.js's UnrealBloomPass(strength 0.55, radius 0.45, threshold 1.3):
- * only over-bright light (lamp faces, flashes, hot highlights) blooms. */
-const BLOOM = { threshold: 1.3, intensity: 0.55 };
+// The post effects, in three.js r176's order: GTAO (Default output) at the
+// budget's aoRes, bloom (strength 0.55, radius 0.45, threshold 1.3) at its
+// bloomRes (only over-bright light, lamp faces, flashes and hot highlights,
+// blooms), the grade, the output, then SMAA or FXAA (MSAA on Low and Ultra).
+const BLOOM = { strength: 0.55, radius: 0.45, threshold: 1.3 };
+function gtao(high: boolean, resolution: number) {
+  return {
+    blendIntensity: high ? 0.85 : 0.7, radius: 1.2, distanceExponent: 1.6, thickness: 1.5, scale: 1.0,
+    samples: high ? 16 : 8, distanceFallOff: 1.0, resolution,
+    // updatePdMaterial changes samples and rings only on High (r176 keeps the
+    // disk exponent at 1 until then; Ultra's call leaves them as they were)
+    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: high ? 6 : 4, rings: 2, samples: high ? 16 : 8, radiusExponent: high ? 1 : 2 },
+  };
+}
+// GradeShader: gentle S-curve, more saturation, cool shadows / warm highlights, vignette 0.26.
+const GRADE = {
+  contrast: 0.22, saturation: 1.12, shadows: [0.95, 0.99, 1.06] as const, highlights: [1.04, 1.01, 0.95] as const, split: [0.15, 0.8] as const,
+  amount: 1, vignette: { amount: 0.26, inner: 0.38, outer: 0.9, scale: [1.1, 1.0] as const },
+};
 /** The canvas pixel bound (8,388,608 per canvas). */
 const MAX_CANVAS_PIXELS = 8388608;
 
@@ -120,8 +136,8 @@ function crowdWorld(): CrowdWorld {
     bx: "f32", by: "f32", bz: "f32", ph: "f32", fr: "f32", av: "f32",
     q: "quat", s: "f32", sy: "f32", x: "f32", y: "f32", z: "f32",
   });
-  // The browser's sway and bounce (js/world/stadium.js), run on an eighth
-  // of the crowd a frame as the browser does (a sliced schedule): `t` is
+  // The sway and bounce, run on an eighth of the crowd a frame (a sliced
+  // schedule): `t` is
   // the stadium's clock; a boo damps the joyful bounce and a fast jittery
   // shake takes over.
   const sway = kernel(crowd, (r, u: { t: number; amp: number; spd: number; sway: number; shake: number }) => {
@@ -161,7 +177,7 @@ export interface Stadium {
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 /** Merges primitive geometries into one non-indexed geometry with position,
- * normal and uv (the browser's mergeGeoms), releasing the parts. One pass
+ * normal and uv, releasing the parts. One pass
  * expands each part's index straight into the merged arrays: the runtime's
  * toNonIndexed and computeBoundingSphere took 17 ms for the stands' 108
  * boxes, and the runtime never reads a geometry's bounding sphere. */
@@ -343,7 +359,7 @@ async function makeGrassTexture(L: number, W: number, detailed: boolean, w: numb
   return alive() ? canvasTexture(c) : null;
 }
 
-/** The detailed pitch's normal map (the browser's makeGrassNormal): the mow
+/** The detailed pitch's normal map: the mow
  * bands tilt alternately along the length (the stripes' sheen under the
  * floodlights) over per-pixel blade relief. Same size as the grass texture;
  * rows are made a band at a time when the call's fuel runs low. */
@@ -351,7 +367,7 @@ async function makeGrassNormal(L: number, W: number, w: number, alive: () => boo
   const h = Math.max(2, Math.round((w * W) / L));
   const d = new Uint8Array(w * h * 4);
   const bw = w / 16;
-  // random heights, wrapping at the edges as the browser's
+  // random heights, wrapping at the edges
   const first = new Float32Array(w);
   for (let x = 0; x < w; x++) first[x] = Math.random();
   let row = first;
@@ -508,7 +524,7 @@ function makeLedTexture(): CanvasTexture {
     ctx.fillStyle = fg;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = "italic 900 72px sans-serif"; // the browser's Arial, Helvetica (generic families only)
+    ctx.font = "italic 900 72px sans-serif"; // generic families only
     ctx.fillText(word, x + segW / 2, 56);
     ctx.globalAlpha = 0.65;
     ctx.font = "700 22px sans-serif";
@@ -555,8 +571,8 @@ function makeSignTexture(): CanvasTexture {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = "900 52px sans-serif";
-  // the browser's "★ STARHERMIT FC ★", with the stars drawn as paths (the
-  // host's built-in font has no ★)
+  // "★ STARHERMIT FC ★", with the stars drawn as paths (the system's fonts
+  // may have no ★)
   const text = "STARHERMIT FC";
   // fit the line (the system's sans-serif may be wider than Arial)
   const k = Math.min(1, 480 / (ctx.measureText(text).width + 2 * ctx.measureText(" ").width + 80));
@@ -583,11 +599,8 @@ function makeSignTexture(): CanvasTexture {
 
 // ── main builder ────────────────────────────────────────────────────────────
 
-/** Builds the stadium into `scene` over several frames at quality `q`;
- * `alive` turning false (the owner was disposed) abandons the build. */
 /** The last stadium a mode let go (dispose), kept for the next one with
- * the same pitch: the browser builds a stadium within a frame, the port in
- * about 80 frames of 8 ms slices, which the result card (the menu's
+ * the same pitch: a build takes about 80 frames of 8 ms slices, which the result card (the menu's
  * backdrop), a 5-a-side match's loading and the replay viewer would spend
  * rebuilding the same stadium. At most one is kept; another pitch frees it
  * before building. */
@@ -595,6 +608,9 @@ let parked: { key: string; scene: Scene; root: Group; show(q: ContentQuality): S
 /** The stadium whose spectators and haze the world tables hold. */
 let tablesFilledBy: Group | null = null;
 
+/** Builds the stadium into `scene` over several frames at quality `q` (or
+ * shows the kept one); `alive` turning false (the owner was disposed)
+ * abandons the build. */
 export async function buildStadium(scene: Scene, pitch: Pitch | null, q: ContentQuality, alive: () => boolean): Promise<Stadium | null> {
   const p: Pitch = { ...DEFAULT_PITCH, ...(pitch ?? {}) };
   const key = `${p.L}|${p.W}|${p.goalW}|${p.goalH}|${p.boxD}|${p.boxW}`;
@@ -636,6 +652,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   const skyMat = new MeshBasicMaterial({ map: skyTexNight, side: BackSide, fog: false, depthWrite: false });
   const sky = mesh(new SphereGeometry(380, 24, 14), skyMat);
   sky.renderOrder = -10;
+  sky.noAO = true;
   root.add(sky);
   const fog = new Fog(0x070d18, 130, 420);
 
@@ -734,6 +751,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   const netMesh = mesh(mergeGeoms(netGeoms), new MeshStandardMaterial({
     map: bag.add(makeNetTexture()), color: 0xdfe6ea, alphaTest: 0.3, side: DoubleSide, roughness: 0.9,
   }));
+  netMesh.noAO = true;
   root.add(netMesh);
   reportLoading(0.08);
   await breathe();
@@ -962,6 +980,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     color: 0xaac8ff, transparent: true, opacity: 0.028, blending: AdditiveBlending, depthWrite: false, side: DoubleSide, fog: false,
   }));
   coneMesh.renderOrder = 8;
+  coneMesh.noAO = true;
   root.add(coneMesh);
   reportLoading(0.32);
   await breathe();
@@ -1295,7 +1314,10 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
       flashLit[n] = flashLit[--litN]!;
     }
     flashes.visible = haze.visible = particlesOn && night;
-    renderer.bloom = want.bloom ? { ...BLOOM } : null;
+    renderer.bloom = want.bloom ? { ...BLOOM, resolution: want.bloomRes } : null;
+    renderer.ao = want.ao !== "off" ? gtao(want.ao === "high", want.aoRes) : null;
+    renderer.grade = want.grade ? GRADE : null;
+    renderer.antialias = want.antialias;
   }
   // the pitch textures exist before the stadium shows
   requested = `${q.grass}|${q.lines}|${q.detail}`;
@@ -1469,6 +1491,9 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     if (scene.fog === fog) scene.fog = prevFog;
     if (envShown && scene.environment === envShown) scene.environment = prevEnvironment;
     renderer.bloom = null;
+    renderer.ao = null;
+    renderer.grade = null;
+    renderer.antialias = "off";
     // a texture rebuild cut short runs again when the stadium shows
     requested = "";
   }

@@ -1,6 +1,5 @@
-// The controls screen. The browser's js/controls.js rebinds the manifest's
-// actions against the platform's /controls endpoints; natively the bindings
-// are the runtime's own (kept with the player's engine settings, rebound in
+// The controls screen. The bindings of the manifest's actions are the
+// runtime's own (kept with the player's engine settings, rebound in
 // its Options menu), so this screen lists every binding of each action —
 // keys, mouse buttons and gamepad controls — and asks the runtime to open
 // its rebinding for a row. It refreshes when the player rebinds.
@@ -11,7 +10,7 @@ import * as ui from "starhermit:ui";
 import type { Audio } from "../audio.ts";
 import { T } from "../i18n.ts";
 
-/** The browser's labels for the seven actions (strings.js keys). */
+/** The seven actions' labels (logic/strings.ts keys). */
 const LABELS: Record<string, string> = {
   up: "Move forward",
   down: "Move back",

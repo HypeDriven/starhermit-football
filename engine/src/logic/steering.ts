@@ -1,5 +1,4 @@
-// The input state machine of the browser's js/game/input.js, without the
-// devices: tank-style desktop steering (turn/forward axes, smoothed),
+// The input state machine, without the devices: tank-style desktop steering (turn/forward axes, smoothed),
 // the camera-relative touch joystick (mx/mz), the contextual shoot control
 // (tap = pass, hold = charged shot) and one-shot action edges. input.ts
 // feeds it from starhermit:input.

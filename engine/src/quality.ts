@@ -1,11 +1,10 @@
 // The game's graphics content: the runtime's quality tier (its Options
-// menu, frame().quality) as the game's preset (logic/quality.ts over
-// js/gfx.js), plus the player's per-category overrides for what is the
+// menu, frame().quality) as the game's preset (logic/quality.ts), plus the player's per-category overrides for what is the
 // game's own content — pitch detail, crowd density, flashes and haze — kept
-// in the `graphics` game setting the browser also uses ({ detail, crowd,
-// particles, … }); its renderer categories (shadows, AO, bloom, grade,
-// anti-aliasing, reflections, scale) are the runtime's. Listeners hear every
-// change (the browser's graphics.js onGraphics).
+// in the `graphics` game setting ({ detail, crowd,
+// particles, … }); the preset's shadows, ambient occlusion, bloom, grade,
+// anti-aliasing and reflections follow the tier, and the render scale is the
+// runtime's. Listeners hear every change.
 import { frame } from "starhermit:engine";
 import { settings } from "starhermit:storage";
 import type { JsonValue } from "starhermit:engine";
@@ -67,7 +66,7 @@ export function override(cat: Override): string | null {
 }
 
 /** Saves an override (null: from preset), keeping the setting's other
- * fields (the browser's preset, scale and renderer categories). */
+ * fields (such as the settings an earlier version of the game kept). */
 export function setOverride(cat: Override, value: string | null): void {
   const g = graphicsSetting();
   if (value && OVERRIDE_TIERS[cat].includes(value)) g[cat] = value;

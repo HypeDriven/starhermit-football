@@ -1,6 +1,6 @@
 // The two club crests, assets/crest-blue.webp and crest-red.webp (a royal
 // blue shield with a silver heron, a crimson shield with a gold wolf), as
-// the browser's .crest shows them: round, cover-fitted on #0a0e14 with a
+// the score bar shows them: round, cover-fitted on #0a0e14 with a
 // 1px #2c3e50 rim. One canvas each (overlay) with a texture of it (UI); a
 // shield in the club's colors stands in while the image decodes or if it
 // cannot be.

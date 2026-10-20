@@ -1,5 +1,5 @@
 // The match ball (a canvas-drawn pentagon pattern on a sphere) and the
-// kickoff coin, as match.js, menuScene.js and replayview.js build them.
+// kickoff coin, for matches, the menu's backdrop and replays.
 import { CylinderGeometry, Mesh, MeshPhysicalMaterial, MeshStandardMaterial, SphereGeometry } from "starhermit:scene";
 import { ResourceBag, canvasTexture, makeCanvas } from "./resources.ts";
 
@@ -47,7 +47,7 @@ export function makeCoin(): Prop {
   return { mesh, dispose: () => { mesh.removeFromParent(); bag.dispose(); } };
 }
 
-/** The ball rolls with its ground velocity (the browser's rotation rule). */
+/** The ball rolls with its ground velocity. */
 export function rollBall(mesh: Mesh, x: number, y: number, z: number, vx: number, vz: number, dt: number, spin: { x: number; z: number }): void {
   mesh.position.set(x, y, z);
   spin.x += vx * dt * 2;

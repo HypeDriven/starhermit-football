@@ -1,4 +1,4 @@
-// Match transport (the browser's js/net.js) on starhermit:platform's
+// Match transport on starhermit:platform's
 // sockets. The game socket (ws/v1/games) carries the server-authoritative
 // match: a `{type:'sync'}` command on every (re)open for a full snapshot
 // (the SDK sends it as the platform's `cmd` frame), realtime input frames up

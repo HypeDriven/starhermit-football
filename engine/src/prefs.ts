@@ -1,6 +1,5 @@
 // The player's runtime preferences the game follows (engine.preferences):
-// reduced motion stills the stadium's ambient effects, as the browser does
-// under prefers-reduced-motion.
+// reduced motion stills the stadium's ambient effects.
 import { onPreferencesChange, preferences } from "starhermit:engine";
 
 let reduced: boolean | null = null;

@@ -1,5 +1,5 @@
 // The lobby's view of a realtime room: seats per team and slot, who is
-// host, and the room's team size (the browser's js/lobby.js render rules).
+// host, and the room's team size.
 
 export interface SeatParticipant {
   readonly id: string;
@@ -41,7 +41,7 @@ export function amHost(room: RoomLike | null, myUserId: string | null): boolean 
 
 /** The room's seats per team. The host API's Room carries no team size, so
  * read the platform's `config.seatsPerTeam` / `seatsPerTeam` when the JSON
- * has them (what the browser reads), else the highest seated slot, else
+ * has them, else the highest seated slot, else
  * the size this client asked for. */
 export function seatsPerTeam(room: unknown, fallback: number): number {
   const r = room as { config?: { seatsPerTeam?: unknown }; seatsPerTeam?: unknown; participants?: readonly SeatParticipant[] } | null;

@@ -1,7 +1,6 @@
 // =============================================================================
 // starhermit-football/server.js — the single authoritative match-server script
-// for StarHermit Football, AND the shared simulation core for the browser
-// client.
+// for StarHermit Football, AND the shared simulation core for the game client.
 //
 // The StarHermit platform uploads this file as the game's server script and
 // executes it inside a sandboxed JS engine (Jint): a FRESH engine per
@@ -12,9 +11,9 @@
 // data ({seed, counter}) and rehydrated into a function on every invocation —
 // rngNext(seed, counter) reproduces the mulberry32 stream exactly.
 //
-// The browser loads this SAME file as a classic <script> before the ES module
-// graph; js/game/sim.js and js/game/ai.js are thin wrappers that re-export
-// `globalThis.FootballSim`, so client and server run one code path.
+// The game client loads this SAME file into its realm as a classic script
+// (the StarHermit runtime's loadClassic; engine/src/sim.ts types
+// `globalThis.FootballSim`), so client and server run one code path.
 //
 // ── Host contract ───────────────────────────────────────────────────────────
 // `globalThis.game` entry points; every one returns `sessionState` on success:
@@ -169,7 +168,7 @@
 'use strict';
 
 // ---------------------------------------------------------------------------
-// Part 1 — simulation core (ported from js/game/sim.js; keep behavior in sync)
+// Part 1 — simulation core
 // Units: meters, seconds. Pitch centered on origin: x in [-L/2, L/2] (goals at
 // each end), z in [-W/2, W/2]. Team 0 attacks +x in half 1; sides swap at half
 // time.
@@ -848,7 +847,7 @@ function openness(state, p) {
 }
 
 // ---------------------------------------------------------------------------
-// Part 2 — AI brains (ported from js/game/ai.js; keep behavior in sync).
+// Part 2 — AI brains.
 // Utility scoring re-evaluated at ~6 Hz per player; steering runs every tick
 // through the same input shape human clients send, so AI footballers obey
 // exactly the same physics as humans. The decision cache lives in
@@ -1865,9 +1864,9 @@ globalThis.game = {
 };
 
 // ---------------------------------------------------------------------------
-// Client-side reuse. The browser loads this same file as a classic <script>;
-// js/game/sim.js and js/game/ai.js re-export everything below so the client
-// shares exactly one code path with the server.
+// Client-side reuse. The game client loads this same file as a classic script
+// and reads everything below, so it shares exactly one code path with the
+// server.
 // ---------------------------------------------------------------------------
 globalThis.FootballSim = {
   WALK_SPEED: WALK_SPEED,

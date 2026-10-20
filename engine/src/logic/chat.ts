@@ -1,4 +1,4 @@
-// In-match chat bookkeeping (the browser's js/chat.js): messages merged by
+// In-match chat bookkeeping: messages merged by
 // id across fetches, the newest tail kept, status lines after them, and a
 // client-side send cap below the platform's 10 a minute.
 

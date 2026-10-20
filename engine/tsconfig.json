@@ -21,11 +21,7 @@
     "noFallthroughCasesInSwitch": true,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
-    "allowImportingTsExtensions": true,
-    // The game's own pure browser modules the native client shares
-    // (js/gfx.js: the per-preset content budgets) are imported as JS.
-    "allowJs": true,
-    "checkJs": false
+    "allowImportingTsExtensions": true
   },
   "files": ["starhermit.d.ts"],
   "include": ["src/**/*.ts"]

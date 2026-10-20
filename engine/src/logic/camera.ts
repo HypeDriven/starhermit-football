@@ -1,5 +1,5 @@
-// The third-person follow camera and the off-screen ball arrow (the
-// browser's js/game/camera.js) as plain math: the rig keeps the camera's
+// The third-person follow camera and the off-screen ball arrow as plain
+// math: the rig keeps the camera's
 // position and look-at point, and the host side copies them onto the
 // scene's PerspectiveCamera (position + lookAt) each frame.
 import { angDelta, clamp, lerp3 } from "./math.ts";
@@ -122,7 +122,7 @@ export interface Arrow {
 }
 
 /** The arrow's clamp: its half size and the bottom band touch controls
- * cover, in window pixels, and the UI scale (CSS zoom in the browser). */
+ * cover, in window pixels, and the UI scale. */
 export interface ArrowBox {
   halfWidth: number;
   halfHeight: number;
@@ -130,12 +130,9 @@ export interface ArrowBox {
   scale: number;
 }
 
-/** The edge-clamped ball arrow for a projected ball (browser rules:
- * visible when the ball is behind or outside 92 % / 88 % of the view; the
+/** The edge-clamped ball arrow for a projected ball: visible when the ball is behind or outside 92 % / 88 % of the view; the
  * whole arrow and its label stay inside the window and above the touch
- * controls). It points toward the ball, as spec.md §5.5 says; the browser's
- * CSS rotation subtracts 90° where it should add it, so its glyph points
- * away from the ball. */
+ * controls. It points toward the ball (spec.md §5.5). */
 export function ballArrow(ndc: Ndc, width: number, height: number, box: ArrowBox, out: Arrow): Arrow {
   const offscreen = ndc.z > 1 || Math.abs(ndc.x) > 0.92 || Math.abs(ndc.y) > 0.88;
   out.visible = offscreen;

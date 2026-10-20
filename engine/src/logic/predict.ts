@@ -1,5 +1,5 @@
-// Render-only local prediction of the controlled footballer online (the
-// browser's match.js stepLocalPrediction and the reconcile in onSnapshot).
+// Render-only local prediction of the controlled footballer online (and
+// its reconciliation with each snapshot).
 // The server stays authoritative: every value here is corrected toward the
 // newest snapshot and large errors snap.
 import type { PlayerRow } from "./interp.ts";

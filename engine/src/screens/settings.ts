@@ -1,6 +1,5 @@
-// SETTINGS (the main menu's and the in-match menu's; the browser's
-// js/settings.js plus the shared game-options.js panel). Natively the
-// runtime's Options menu (F1) owns graphics quality, resolution, frame-rate
+// SETTINGS (the main menu's and the in-match menu's). The runtime's Options
+// menu (F1) owns graphics quality, resolution, frame-rate
 // limits and the sound volumes and voice limit, so this panel keeps what is
 // the game's own: the game language (sh-language.js's selector and strings),
 // the game's sound mute, a line naming the quality preset the runtime runs
@@ -15,7 +14,7 @@ import type { Override } from "../quality.ts";
 import { contentQuality } from "../logic/quality.ts";
 
 const TIER_NAMES: Record<string, string> = { low: "Low", balanced: "Balanced", high: "High", ultra: "Ultra" };
-/** The browser's game-content categories (settings.js's English). */
+/** The game-content categories' labels. */
 const CATEGORY_LABELS: Record<Override, string> = { detail: "Pitch & stand detail", crowd: "Crowd", particles: "Camera flashes & haze" };
 const TIER_LABELS: Record<string, string> = { plain: "Plain", detailed: "Detailed", sparse: "Sparse", full: "Full", off: "Off", on: "On" };
 
@@ -42,7 +41,7 @@ export class SettingsPanel {
     this.sending = true;
     this.reportStatus = "Sending…";
     const f = frame();
-    // the browser's small non-personal context.json
+    // a small non-personal context
     const context = {
       language: languageChoice(),
       viewport: `${f.width}x${f.height}`,

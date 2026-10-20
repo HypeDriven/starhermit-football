@@ -1,5 +1,4 @@
-// Team kits and hair colors (the browser's TEAM_KITS / HAIRS constants in
-// match.js, menuScene.js and replayview.js).
+// Team kits and hair colors.
 import type { Role } from "../sim.ts";
 import type { Kit } from "./player.ts";
 

@@ -1,12 +1,13 @@
 // Copied unchanged below this note from starhermit-engine
-// crates/starhermit-runtime/api/starhermit.d.ts at commit aaf3979 (2026-10-19,
+// crates/starhermit-runtime/api/starhermit.d.ts at commit da27a93 (2026-10-20,
 // main): host API v1 with the football port's decisions, R2's rendering,
-// system fonts (through the generic families only), WebP, and
-// starhermit:world (API_MINOR 3: tables with history and row ids, kernels,
-// strided and sliced schedules, events, instance and node bindings).
+// system fonts (through the generic families only), WebP, starhermit:world
+// (tables with history and row ids, kernels, strided and sliced schedules,
+// events, instance and node bindings) and the post effects at three.js r176
+// parity (API_MINOR 4: renderer.ao, bloom, grade and antialias, noAO).
 // Refresh it from the runtime when the contract changes; the sha256 of the
 // original file is
-// 25788c3dcc8615436117631ebc340d638a2754444531af75fcf6bdb2544dbb67.
+// f5a04398dead02e3c4f0d6b226030c0567a8ad45c70247f5fdc5c2f49448ba81.
 
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -644,12 +645,13 @@ declare module "starhermit:scene" {
   // mostly change imports. The math classes are plain script objects; the
   // runtime reads the scene graph once a frame after `onRender`. A game
   // holds at most 131,072 objects, 65,536 mesh instances (a Mesh counts 1,
-  // an InstancedMesh its capacity) and 16,384 sprites, in the scene or not,
-  // and 4,096 materials: creating past one throws a RangeError. Lights past
-  // 16 besides ambient light are left out of the frame (`engine.stats()`
-  // counts them with the skipped objects). GPU memory counts against
-  // `engine.limits.gpu_mib` within the engine's mesh and texture budgets
-  // (`engine.budgets()`).
+  // an InstancedMesh its capacity), 1,024 InstancedMeshes (each is drawn
+  // from a GPU instance buffer of its own) and 16,384 sprites, in the scene
+  // or not, and 4,096 materials: creating past one throws a RangeError.
+  // Lights past 16 besides ambient light are left out of the frame
+  // (`engine.stats()` counts them with the skipped objects). GPU memory
+  // counts against `engine.limits.gpu_mib` within the engine's mesh and
+  // texture budgets (`engine.budgets()`).
 
   // -- Math -------------------------------------------------------------------
   export class Vector2 {
@@ -1206,6 +1208,11 @@ declare module "starhermit:scene" {
     renderOrder: number;
     castShadow: boolean;
     receiveShadow: boolean;
+    /** Leaves the object and its descendants out of `renderer.ao` (default
+     * false; since API_MINOR 4): they cast no ambient occlusion, and where
+     * they are drawn the occlusion of what lies behind them applies (sky
+     * domes, light cones, nets). Sprites and points never take part. */
+    noAO: boolean;
     readonly parent: Object3D | null;
     readonly children: readonly Object3D[];
     /** The game's own data (never read by the runtime). */
@@ -1417,23 +1424,141 @@ declare module "starhermit:scene" {
   }
   export const scene: Scene;
 
-  /** How the scene is drawn. The player's graphics settings (Options ›
-   * Graphics) decide anti-aliasing (MSAA, FXAA), the shadow maps' largest
-   * size, render scale, frame rate and whether bloom draws at all; the game
-   * decides the camera, lights, shadows on or off, fog, tone mapping,
-   * bloom's threshold and intensity and materials. Light is linear and may
-   * exceed 1 (half-float range); `toneMapping` maps it to the display
-   * (none: clamped at 1), sRGB-encoded. */
+  /** Bloom, three.js `UnrealBloomPass(resolution, strength, radius,
+   * threshold)` as it computes it: linear light whose luminance passes
+   * `threshold` is taken at half of `resolution` (the fraction of the frame
+   * the pass renders at, as a pass sized by its own `setSize`), blurred into
+   * five halved levels and added back, weighted by `strength` and `radius`
+   * (tight 0 to wide 1). As three.js adds the sum with additive blending
+   * by its alpha, the light added is 3 × strength² times the weighted
+   * levels. Fields left out take the defaults. */
+  export interface BloomSettings {
+    /** 0–65504, default 1 (`intensity`, accepted too, is its earlier name). */
+    strength?: number;
+    /** 0–1, default 0. */
+    radius?: number;
+    /** 0–65504, default 0: above 1 only over-bright light (emissive
+     * surfaces driven past 1) blooms. */
+    threshold?: number;
+    /** 0.125–1, default 1. */
+    resolution?: number;
+    /** @deprecated The strength's earlier name. */
+    intensity?: number;
+  }
+  /** Ground-truth ambient occlusion, three.js r176's `GTAOPass` with
+   * `OUTPUT.Default` (its `updateGtaoMaterial` and `updatePdMaterial`
+   * settings, `blendIntensity` and the fraction of the frame it renders
+   * at): the scene's meshes (not sprites, points or `noAO` objects) are
+   * drawn again as view-space normals and depth, front faces only; each
+   * pixel's occlusion comes from horizons searched within `radius` over
+   * `samples` steps, denoised, and multiplied into the light as
+   * `mix(1, occlusion, blendIntensity)` before bloom and tone mapping.
+   * Fields left out take three.js's defaults. */
+  export interface AmbientOcclusionSettings {
+    /** 0–1, default 1. */
+    blendIntensity?: number;
+    /** View units, above 0 up to 1000, default 0.25. */
+    radius?: number;
+    /** 0–16, default 1. */
+    distanceExponent?: number;
+    /** View units, 0–1000, default 1. */
+    thickness?: number;
+    /** The occlusion raised to this power, 0–16, default 1. */
+    scale?: number;
+    /** Whole, 1–64, default 16. */
+    samples?: number;
+    /** 0–1, default 1. */
+    distanceFallOff?: number;
+    /** 0.125–1, default 1. */
+    resolution?: number;
+    /** The Poisson denoise (`PoissonDenoiseShader`). three.js r176 keeps
+     * its disk's radius exponent at 1 until `updatePdMaterial` changes the
+     * samples, rings or exponent, and then uses 2 unless told otherwise:
+     * to match a call such as `updatePdMaterial({ samples: 8 })`, pass
+     * `radiusExponent: 2`. */
+    denoise?: {
+      /** Above 0 up to 10000, default 10. */
+      lumaPhi?: number;
+      /** Above 0 up to 10000, default 2. */
+      depthPhi?: number;
+      /** 0–16, default 3. */
+      normalPhi?: number;
+      /** Pixels, 0–64, default 8. */
+      radius?: number;
+      /** 0–16, default 2. */
+      rings?: number;
+      /** Whole, 1–64, default 16. */
+      samples?: number;
+      /** 0–16, default 1. */
+      radiusExponent?: number;
+    };
+  }
+  /** A color grade with a vignette, after bloom and before the output's
+   * tone mapping (as a three.js `ShaderPass` before `OutputPass` sees the
+   * light), on linear light clamped to 0–1: an S-curve (`c²(3 − 2c)`)
+   * blended in by `contrast`, saturation around Rec. 601 luma, the result
+   * times `shadows`' tint turning into `highlights'` by a smoothstep of
+   * that luma from `split[0]` to `split[1]`, clamped, all blended with the
+   * ungraded light by `amount`; then light times `1 − vignette.amount ×
+   * smoothstep(inner, outer, d)`, `d` the length of the offset from the
+   * frame's center in texture coordinates (0–1 across) with each axis
+   * times `vignette.scale`. Fields left out change nothing (the clamp
+   * aside). */
+  export interface GradeSettings {
+    /** 0–1, default 0. */
+    contrast?: number;
+    /** 0–4, default 1. */
+    saturation?: number;
+    /** Linear RGB, each 0–4, default [1, 1, 1]. */
+    shadows?: readonly [number, number, number];
+    highlights?: readonly [number, number, number];
+    /** Rising, each 0–1, default [0, 1]. */
+    split?: readonly [number, number];
+    /** 0–1, default 1. */
+    amount?: number;
+    vignette?: {
+      /** 0–1, default 0. */
+      amount?: number;
+      /** 0–2 with `outer` beyond `inner`; defaults 0.5 and 1. */
+      inner?: number;
+      outer?: number;
+      /** Each 0–4, default [1, 1]; [aspect ratio, 1] makes it round. */
+      scale?: readonly [number, number];
+    };
+  }
+  /** Anti-aliasing: none, three.js's `FXAAShader` or `SMAAPass` (SMAA 1x)
+   * after the output, or 4× multisampling resolved before the other
+   * effects. */
+  export type AntialiasMode = "off" | "fxaa" | "smaa" | "msaa";
+
+  /** How the scene is drawn. The game decides the camera, lights, shadows
+   * on or off, fog, tone mapping, materials and the post effects, in
+   * three.js r176's `EffectComposer` order (since API_MINOR 4): the scene
+   * in linear half-float color (multisampled with `antialias: "msaa"`),
+   * `ao`, `bloom`, `grade`, the output (`toneMapping`, exposure, sRGB) and
+   * FXAA or SMAA; the player's graphics settings decide the render scale,
+   * the shadow maps' largest size and the frame rate, and a game usually
+   * picks its effects by `frame().quality`. Light is linear and may exceed
+   * 1 (half-float range); `toneMapping` maps it to the display (none:
+   * clamped at 1). Effects that are off cost nothing; ones the device
+   * cannot run or that pass the GPU budget are left out with a note in
+   * Options (ambient occlusion first, then bloom, SMAA falling back to
+   * FXAA). Assigning a setting checks it: a TypeError for a value of the
+   * wrong type, a RangeError for one out of range (and the same, at the
+   * end of the frame, for an object changed afterwards). */
   export interface Renderer {
     /** The camera the scene is seen through; nothing 3D draws without one.
      * It need not be in the scene graph. */
     camera: Camera | null;
     readonly shadowMap: { enabled: boolean };
-    /** Bloom from linear light brighter than `threshold` (null: none; the
-     * quality setting may turn it off), three.js `UnrealBloomPass`-like:
-     * above 1 only over-bright light (emissive surfaces driven past 1)
-     * blooms. Negative values act as 0. */
-    bloom: { threshold: number; intensity: number } | null;
+    /** Null (the default) for none. */
+    bloom: BloomSettings | null;
+    /** Null (the default) for none. */
+    ao: AmbientOcclusionSettings | null;
+    /** Null (the default) for none. */
+    grade: GradeSettings | null;
+    /** Default "off". */
+    antialias: AntialiasMode;
     /** three.js `toneMapping` (`NoToneMapping`, `LinearToneMapping`,
      * `ReinhardToneMapping`, `CineonToneMapping`, `ACESFilmicToneMapping`,
      * `AgXToneMapping`, `NeutralToneMapping`) with `toneMappingExposure`
@@ -2982,7 +3107,9 @@ declare module "starhermit:world" {
   }
   /** A queue of events with these fields (1 to 16, in order) holding at
    * most `capacity` events (1,024 by default, at most 65,536). At most 64
-   * queues. */
+   * queues. Room for its events (8 bytes a field) comes out of the game's
+   * heap as the queue is made: a RangeError when the heap has not that
+   * much left. */
   export function events(name: string, schema: Record<string, FieldType>, capacity?: number): Events;
 
   /** Where a bound mesh's instances come from: column names (`"col"` for a
@@ -3266,7 +3393,8 @@ declare module "starhermit:script" {
      * `ctx.inputs[i].from`) and whose broadcasts the game hears; by default
      * `context.players[0].id`. */
     player?: string;
-    /** Ticks a second on the worker's clock (0–240). By default the
+    /** Ticks a second on the worker's clock (0–240; below 0.01, 0.01, the
+     * platform's least). By default the
      * script's `tickRateHz` as the platform clamps it: 0.25 when it
      * declares none (or not a number), at most 30, at least 0.01, and 0 or
      * below for none. 0: it ticks only on `tick()`. */

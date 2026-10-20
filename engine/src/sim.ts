@@ -1,7 +1,6 @@
 // The shared simulation: server.js, loaded as a classic script into the
 // game's realm with starhermit:script's loadClassic — the same file the
-// platform runs authoritatively and the browser loads before its modules —
-// so practice, prediction and AI run one code path with the server. This
+// platform runs authoritatively — so practice, prediction and AI run one code path with the server. This
 // module only types `globalThis.FootballSim`; never fork sim logic here.
 import { loadClassic } from "starhermit:script";
 

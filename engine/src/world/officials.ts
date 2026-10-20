@@ -1,5 +1,4 @@
-// Injury / substitution ceremony extras (the browser's
-// js/world/officials.js): a virtual referee, two stretcher carriers and the
+// Injury / substitution ceremony extras: a virtual referee, two stretcher carriers and the
 // stretcher. Created when a snapshot first carries a ceremony and disposed
 // when it clears. The humanoids follow snapshot entities
 // [x, z, facing, anim, animSpeed, phase] with the players' conventions.

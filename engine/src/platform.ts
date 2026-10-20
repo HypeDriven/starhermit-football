@@ -1,5 +1,4 @@
-// The platform for the native client (the browser's js/api.js): the same
-// calls through starhermit:platform, which holds the player's credentials —
+// The platform for the game: its calls through starhermit:platform, which holds the player's credentials —
 // no token ever reaches the game, so there is no launch-token handling or
 // remint here. Every call can fail with a PlatformError; online features
 // degrade to a clear "online unavailable" message instead of failing the
