@@ -18,14 +18,11 @@ it, and what the port does meanwhile. Nothing here is football-specific.
 
 ## Not in the contract
 
-1. **Post-processing passes** (`renderer`): the browser's High and Ultra
-   presets add GTAO ambient occlusion (`ao`, blend 0.7–0.85) and every preset
-   but Low a colour grade (`grade`: a gentle S-curve, 1.12 saturation, a
-   cool-shadow/warm-highlight split and a 0.26 vignette, before output);
-   its bloom also has a radius (0.45) and renders at the budget's
-   `bloomRes`. Wanted: ambient occlusion and a grade (or a small fixed set
-   of post effects with these parameters) the game can turn on; bloom's
-   radius. Meanwhile neither, and bloom at the host's own radius.
+1. **Post-processing passes: answered by API_MINOR 4 (da27a93).** The
+   browser's GTAO, bloom radius and resolution, colour grade with vignette
+   and anti-aliasing modes are `renderer.ao`, `bloom`, `grade` and
+   `antialias` at three.js r176 parity, with `noAO` for the sky, nets and
+   light cones; each preset turns on what `js/graphics.js` buildPost does.
 2. **`PMREMGenerator.fromScene`** (no render-to-texture): the browser
    renders its environment from a small scene. The port writes the same
    scene as a latitude-longitude image of linear light

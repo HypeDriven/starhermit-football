@@ -42,9 +42,10 @@ import { sim } from "./sim.ts";
 import { createVoice } from "./voice.ts";
 
 // ── renderer ──
-// Resolution, anti-aliasing and frame pacing are the runtime's; the game
-// sets tone mapping as the browser does, and the stadium sets shadows,
-// reflections and bloom per quality tier.
+// Resolution and frame pacing are the runtime's; the game sets tone mapping
+// as the browser does, and the stadium sets shadows, reflections and the
+// post effects (ambient occlusion, bloom, grade, anti-aliasing) per quality
+// tier.
 const camera = new PerspectiveCamera(55, 16 / 9, 0.1, 800);
 camera.position.set(0, 20, -30);
 renderer.camera = camera;

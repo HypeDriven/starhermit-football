@@ -3,9 +3,10 @@
 // js/gfx.js), plus the player's per-category overrides for what is the
 // game's own content — pitch detail, crowd density, flashes and haze — kept
 // in the `graphics` game setting the browser also uses ({ detail, crowd,
-// particles, … }); its renderer categories (shadows, AO, bloom, grade,
-// anti-aliasing, reflections, scale) are the runtime's. Listeners hear every
-// change (the browser's graphics.js onGraphics).
+// particles, … }); the preset's shadows, ambient occlusion, bloom, grade,
+// anti-aliasing and reflections follow the tier, and the render scale is the
+// runtime's. Listeners hear every change (the browser's graphics.js
+// onGraphics).
 import { frame } from "starhermit:engine";
 import { settings } from "starhermit:storage";
 import type { JsonValue } from "starhermit:engine";

@@ -700,11 +700,14 @@ browser code:
   and line texture sizes (the markings are one mirrored corner quarter, so Ultra's 4096 px fit the
   canvas bound), the detailed pitch with its mow-stripe normal map, crowd density and capsule LOD,
   Lambert stands, seats and crowd on Low, camera flashes and haze (points), the floodlit
-  environment map (Reflections, intensity 0.35) and bloom (threshold 1.3, 0.55) — and changes apply
-  live. The scene renders ACES filmic at exposure 1 with the browser's HDR emissives (lamps, LED
+  environment map (Reflections, intensity 0.35) and the post effects of `js/graphics.js` buildPost
+  on the host's renderer: GTAO ambient occlusion on High (blend 0.7) and Ultra (0.85, 16 samples)
+  at the budget's `aoRes`, with the sky, nets and light cones left out (`noAO`); bloom (0.55,
+  radius 0.45, threshold 1.3) at `bloomRes`; the colour grade with its 0.26 vignette; and FXAA on
+  Balanced, SMAA on High, MSAA on Low and Ultra — and changes apply live. The scene renders ACES filmic at exposure 1 with the browser's HDR emissives (lamps, LED
   boards, tunnel sign, flashes), the clearcoat ball and the gold coin. SETTINGS overrides the three
   categories that are the game's own content (pitch detail, crowd, flashes and haze) in the
-  `graphics` game setting the browser also keeps. Render scale, anti-aliasing, adaptive resolution,
+  `graphics` game setting the browser also keeps. Render scale, adaptive resolution,
   frame-rate limits and the sound volumes and concurrent-sound limit are the runtime's own options
   and are not repeated in the game.
 - **World and HUD.** Stadium, footballers, procedural animation (`logic/pose.ts` is
@@ -761,8 +764,7 @@ browser code:
 - **Voice.** The SDK's voice room for the session's conversation (open mic; the runtime asks for the
   microphone and shows its indicator); each speaker's volume and pan follow the two footballers'
   distance and side at 10 Hz (section 9's falloff).
-- **Where it differs.** No ambient occlusion or colour grade, and bloom has the host's radius (the
-  host has no such passes); the floodlit environment is written as a latitude-longitude image of the
+- **Where it differs.** The floodlit environment is written as a latitude-longitude image of the
   browser's environment scene (`world/environment.ts`, the host has no render-to-texture); the
   detailed pitch keeps one grass texture at a time with its normal map (switching rebuilds it); text
   uses the system's fonts for the generic families, as the browser's CSS does, with the HUD's CSS

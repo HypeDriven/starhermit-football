@@ -8,7 +8,8 @@
 // presets (logic/quality.ts over js/gfx.js): shadow-map size and the second
 // caster, the grass and line texture sizes, the detailed pitch (with its
 // mow-stripe normal map), crowd density and LOD, Lambert materials on Low,
-// particles, reflections and bloom.
+// particles, reflections and the post effects (js/graphics.js buildPost:
+// ambient occlusion, bloom, the grade and anti-aliasing).
 //
 // The build and the texture rebuilds slice their work across frames when the
 // running call's fuel runs low (tasks.ts). The crowd's sway (an eighth of
@@ -90,9 +91,25 @@ const HEMI_DAY = 1.05 / Math.PI;
 const AMB_NIGHT = 0.35 / Math.PI;
 const AMB_DAY = 0.6 / Math.PI;
 const TOWER_H = 30;
-/** three.js's UnrealBloomPass(strength 0.55, radius 0.45, threshold 1.3):
- * only over-bright light (lamp faces, flashes, hot highlights) blooms. */
-const BLOOM = { threshold: 1.3, intensity: 0.55 };
+// js/graphics.js buildPost: StadiumGTAOPass (Default output) at the budget's
+// aoRes, UnrealBloomPass(size, 0.55, 0.45, 1.3) at its bloomRes (only
+// over-bright light, lamp faces, flashes and hot highlights, blooms), then
+// GradeShader, OutputPass and SMAA or FXAA (MSAA on Low and Ultra).
+const BLOOM = { strength: 0.55, radius: 0.45, threshold: 1.3 };
+function gtao(high: boolean, resolution: number) {
+  return {
+    blendIntensity: high ? 0.85 : 0.7, radius: 1.2, distanceExponent: 1.6, thickness: 1.5, scale: 1.0,
+    samples: high ? 16 : 8, distanceFallOff: 1.0, resolution,
+    // updatePdMaterial changes samples and rings only on High (r176 keeps the
+    // disk exponent at 1 until then; Ultra's call leaves them as they were)
+    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: high ? 6 : 4, rings: 2, samples: high ? 16 : 8, radiusExponent: high ? 1 : 2 },
+  };
+}
+// GradeShader: gentle S-curve, more saturation, cool shadows / warm highlights, vignette 0.26.
+const GRADE = {
+  contrast: 0.22, saturation: 1.12, shadows: [0.95, 0.99, 1.06] as const, highlights: [1.04, 1.01, 0.95] as const, split: [0.15, 0.8] as const,
+  amount: 1, vignette: { amount: 0.26, inner: 0.38, outer: 0.9, scale: [1.1, 1.0] as const },
+};
 /** The canvas pixel bound (8,388,608 per canvas). */
 const MAX_CANVAS_PIXELS = 8388608;
 
@@ -636,6 +653,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   const skyMat = new MeshBasicMaterial({ map: skyTexNight, side: BackSide, fog: false, depthWrite: false });
   const sky = mesh(new SphereGeometry(380, 24, 14), skyMat);
   sky.renderOrder = -10;
+  sky.noAO = true;
   root.add(sky);
   const fog = new Fog(0x070d18, 130, 420);
 
@@ -734,6 +752,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   const netMesh = mesh(mergeGeoms(netGeoms), new MeshStandardMaterial({
     map: bag.add(makeNetTexture()), color: 0xdfe6ea, alphaTest: 0.3, side: DoubleSide, roughness: 0.9,
   }));
+  netMesh.noAO = true;
   root.add(netMesh);
   reportLoading(0.08);
   await breathe();
@@ -962,6 +981,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     color: 0xaac8ff, transparent: true, opacity: 0.028, blending: AdditiveBlending, depthWrite: false, side: DoubleSide, fog: false,
   }));
   coneMesh.renderOrder = 8;
+  coneMesh.noAO = true;
   root.add(coneMesh);
   reportLoading(0.32);
   await breathe();
@@ -1295,7 +1315,10 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
       flashLit[n] = flashLit[--litN]!;
     }
     flashes.visible = haze.visible = particlesOn && night;
-    renderer.bloom = want.bloom ? { ...BLOOM } : null;
+    renderer.bloom = want.bloom ? { ...BLOOM, resolution: want.bloomRes } : null;
+    renderer.ao = want.ao !== "off" ? gtao(want.ao === "high", want.aoRes) : null;
+    renderer.grade = want.grade ? GRADE : null;
+    renderer.antialias = want.antialias;
   }
   // the pitch textures exist before the stadium shows
   requested = `${q.grass}|${q.lines}|${q.detail}`;
@@ -1469,6 +1492,9 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     if (scene.fog === fog) scene.fog = prevFog;
     if (envShown && scene.environment === envShown) scene.environment = prevEnvironment;
     renderer.bloom = null;
+    renderer.ao = null;
+    renderer.grade = null;
+    renderer.antialias = "off";
     // a texture rebuild cut short runs again when the stadium shows
     requested = "";
   }
