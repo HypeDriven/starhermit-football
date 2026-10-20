@@ -210,7 +210,7 @@ the mirror `rejoin` ceremony. When every human seat is gone the match ends as
 |---|---|---|
 | PRACTICE vs AI | nothing | Local sim at 60 Hz fixed step (`match.js updateAuthoritative`), you in seat 0 of BLUE, AI everywhere else. Unrated, no replay. Works without a launch token. |
 | QUICK PLAY | launch token | `POST /realtime/rooms/quick-join`; on 404 creates and opens a room. 30 s fill window, AI backfill, then the platform starts the scripted session. |
-| CREATE LOBBY | launch token | Creates a closed room; INVITE FRIENDS (friends list), COPY INVITE LINK (`dashboard.starhermit.com/game-invite/<user>/<slug>`), host clicks empty seats to move themself, FIND MATCH opens the room and starts the 30 s countdown. |
+| CREATE LOBBY | launch token | Creates a closed room; INVITE FRIENDS (friends list), COPY INVITE LINK (`dashboard.starhermit.com/game-invite/<user>/<slug>`), host clicks empty seats to move themself (the 2 s room poll rebuilds the seats only when they changed, so a seat click is never lost to a rebuild between press and release), FIND MATCH opens the room and starts the 30 s countdown. |
 | RANKED vs AI | launch token | A room with `aiPlayers = 2 × teamSize − 1` started at once: server-authoritative, rated only if both teams have humans (so in practice unrated), archived as a replay. |
 | REJOIN MATCH / RETURN TO LOBBY | an active room on the server | Shown when `GET /rooms/joined` lists a non-Closed room; rejoin skips the intro and resyncs from snapshots. |
 | LEADERBOARD | launch token | My rating and W/L/D from `GET /games/{slug}`; ranked entries, 20 per page, friends-only filter. |

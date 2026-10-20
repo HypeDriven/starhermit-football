@@ -11,6 +11,7 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
   let room = null;
   let pollTimer = null;
   let countdownTimer = null;
+  let rosterSig = null; // what the seats were last built from (render)
   let entered = false; // guards double enterMatch (poll + tryStart race)
 
   const rosterEl = document.getElementById('lobby-roster');
@@ -219,7 +220,6 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
     const teamSize = room.config?.seatsPerTeam ?? room.seatsPerTeam ?? 5;
     // leavers keep their participant row (leftAt set) — their seat is open again
     const parts = (room.participants || []).filter((p) => !p.leftAt);
-    rosterEl.innerHTML = '';
     const cols = [[], []];
     for (let t = 0; t < 2; t++) {
       for (let s = 0; s < teamSize; s++) {
@@ -238,6 +238,18 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
     // invites make sense until the match starts; render owns this state so a
     // disabled button never leaks into a fresh lobby
     inviteBtn.disabled = status === 'playing' || status === 'closed';
+    const humans = parts.filter((p) => !p.isAi).length;
+    timerEl.textContent = room.status === 'Open' || room.status === 'open'
+      ? timerEl.textContent || N('Finding players…')
+      : (humans === 1 ? T('{n} player in lobby', { n: humans }) : T('{n} players in lobby', { n: humans }));
+    // The room is polled every 2 s: rebuild the seats only when they changed,
+    // so a click on an open seat is not lost to a rebuild between press and
+    // release (a click needs both on the same element).
+    const sig = JSON.stringify([room.id, document.documentElement.lang, teamSize, canMove, me.userId,
+      parts.map((p) => [p.id, p.team, p.slot, p.userId, p.isAi, p.username])]);
+    if (sig === rosterSig) return;
+    rosterSig = sig;
+    rosterEl.innerHTML = '';
     for (let t = 0; t < 2; t++) {
       const head = document.createElement('div');
       head.className = 'team-head';
@@ -302,10 +314,6 @@ export function createLobby({ onMatchReady, onStarting, onLeave, setStatus }) {
         rosterEl.appendChild(el);
       }
     }
-    const humans = parts.filter((p) => !p.isAi).length;
-    timerEl.textContent = room.status === 'Open' || room.status === 'open'
-      ? timerEl.textContent || N('Finding players…')
-      : (humans === 1 ? T('{n} player in lobby', { n: humans }) : T('{n} players in lobby', { n: humans }));
   }
 
   // Click an open seat → move my participant there. The seats endpoint is
