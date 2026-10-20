@@ -10,10 +10,18 @@ arrow, a crowd that cheers, gasps and roars, walkout + coin-flip match
 presentation, and AI teammates/opponents with personalities and random names
 that fill any seat a human doesn't take.
 
-The game is a script game of the StarHermit runtime: TypeScript in `engine/`
+The game is a script game of the StarHermit engine: TypeScript in `engine/`
 on the runtime's host API, with `server.js` as the one match simulation. It
-also had a browser client (three.js); that was removed after commit 80b94ff,
-where it can be recovered from history.
+pins engine release 1.1.0 (`engine.version` in `starhermit.txt`): browsers play
+it from `index.html`, the loader page that loads that release's web runtime from
+wiki.starhermit.com, and the StarHermit Windows client plays the same files
+natively. The game holds no engine code. Its old three.js browser client is on
+the `deprecated` branch (and in history up to commit 80b94ff).
+
+After any change, run `starhermit package --web .` with the 1.1.0 runtime (or
+`cargo starhermit package --web` from the engine checkout) to rewrite
+`index.html` and the file index `starhermit-files.json`, then commit them with
+the change.
 
 ## Playing
 
