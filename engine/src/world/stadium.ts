@@ -61,7 +61,7 @@ import { onQuality } from "../quality.ts";
 import { reducedMotion } from "../prefs.ts";
 import type { Pitch } from "../sim.ts";
 import { breathe, lowOnFuel, nextFrame, sliced } from "../tasks.ts";
-import { MAX_FLASHES, MAX_HAZE } from "../../../js/gfx.js";
+import { MAX_FLASHES, MAX_HAZE } from "../logic/quality.ts";
 import { reportLoading } from "../progress.ts";
 import { stadiumEnvironment } from "./environment.ts";
 import { ResourceBag, canvasTexture, makeCanvas } from "./resources.ts";

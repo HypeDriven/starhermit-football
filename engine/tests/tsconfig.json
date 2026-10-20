@@ -1,7 +1,6 @@
 {
   // The Node tests of the pure logic modules (engine/src/logic: no host
-  // modules; logic/quality.ts reads the browser's js/gfx.js) and of
-  // world/rigMath.ts. run.sh
+  // modules) and of world/rigMath.ts. run.sh
   // compiles them to a temporary directory and runs them with `node --test`.
   "compilerOptions": {
     "target": "ES2022",
@@ -18,8 +17,6 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "rewriteRelativeImportExtensions": true,
-    "allowJs": true,
-    "checkJs": false,
     "rootDir": "../.."
   },
   // world/rigMath.ts is the footballers' pose as kernels: plain functions
