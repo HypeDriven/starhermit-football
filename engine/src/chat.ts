@@ -1,4 +1,4 @@
-// In-match text chat, online matches only (the browser's js/chat.js). Every
+// In-match text chat, online matches only. Every
 // game session has a platform conversation (session → chatConversationId).
 // History comes from chat.messages, new messages from the SDK's polled
 // channel; the newest lines show bottom-left over the HUD with a text field
@@ -21,7 +21,7 @@ const PAGE_SIZE = 50;
 const FAILS_BEFORE_NOTICE = 3;
 const MAX_CHARS = 300;
 const FIELD = "match-chat-input";
-/** Lines the panel shows (the browser's 9.5em list). */
+/** Lines the panel shows. */
 const VISIBLE_LINES = 8;
 
 export interface MatchChat {

@@ -1,4 +1,4 @@
-// The lobby (the browser's js/lobby.js): create / invite / open / quick-join
+// The lobby: create / invite / open / quick-join
 // against the platform's realtime rooms (spec.md §8), polled every 2 s,
 // drawn with the engine's UI. main.ts drives the transitions.
 import * as ui from "starhermit:ui";
@@ -71,7 +71,7 @@ export class Lobby {
     this.requestedSize = teamSize;
     this.finding = false;
     this.timerText = "";
-    // any open room of the game, as the browser's quick-join asks
+    // any open room of the game
     let room = await P.rooms.quickJoin();
     if (!room) {
       room = await P.rooms.create({ teamCount: 2, seatsPerTeam: teamSize, backfillAfterSeconds: 30, metadata: { game: "football" } });
@@ -200,7 +200,7 @@ export class Lobby {
           } else if (statusOf(fresh) === "closed") {
             void this.leave();
           } else if (statusOf(fresh) === "lobby") {
-            this.timerText = ""; // the browser's render shows the head count again
+            this.timerText = ""; // the head count shows again
           }
         })
         .catch(() => {

@@ -1,4 +1,4 @@
-// Archived replays of my online matches (the browser's js/replays.js): date,
+// Archived replays of my online matches: date,
 // sides, score and a WATCH button that opens the 3D replay viewer.
 import * as ui from "starhermit:ui";
 import type { ReplaySummary } from "starhermit:platform";

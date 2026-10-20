@@ -28,7 +28,7 @@ test("the clock's text changes only with its whole second (the HUD keeps it unti
   }
 });
 
-test("replay dates read like the browser's short form", () => {
+test("replay dates read in the short form", () => {
   const ms = Date.UTC(2026, 9, 17, 14, 5);
   assert.equal(formatReplayDateEnglish(ms, 0), "Oct 17, 02:05 PM");
   assert.equal(formatReplayDateEnglish(ms, 120), "Oct 17, 04:05 PM");
@@ -38,7 +38,7 @@ test("replay dates read like the browser's short form", () => {
   assert.equal(formatReplayDate(undefined, "en-US"), "—");
 });
 
-test("text goes through the translator with the browser's keys", () => {
+test("text goes through the translator with its English keys", () => {
   const seen: string[] = [];
   const t = (key: string): string => { seen.push(key); return `<${key}>`; };
   assert.equal(formatClock(10, 1, 180, t), "<1st {time}>");

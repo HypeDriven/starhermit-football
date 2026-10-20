@@ -1,12 +1,10 @@
-// Procedural footballer factory (the browser's js/world/player.js): a
-// ~1.8 m jointed character built from primitives. The group's origin is at
+// Procedural footballer factory: a ~1.8 m jointed character built from primitives. The group's origin is at
 // the feet; the character faces +x when group.rotation.y = 0. Joints are
 // pivots posed each frame by logic/pose.ts's math, which the runtime runs
 // natively (world/rig.ts: a starhermit:world kernel and node bindings); each
-// joint draws its own body part (the browser hangs the part's mesh under a
-// joint Group) and a skin hand is one mesh with its lower arm, so the scene,
-// which syncs every node every frame, has 18 nodes a footballer instead of
-// 33.
+// joint draws its own body part and a skin hand is one mesh with its lower
+// arm, so the scene, which syncs every node every frame, has 18 nodes a
+// footballer (33 with a Group pivot above each part's mesh).
 import {
   BoxGeometry,
   CanvasTexture,
@@ -47,8 +45,7 @@ interface Geo {
 let geo: Geo | null = null;
 function GEO(): Geo {
   if (!geo) {
-    // The joints' parts are moved by their offsets from the pivots (the
-    // browser's mesh positions under each joint).
+    // The joints' parts are moved by their offsets from the pivots.
     const lowerArm = new CapsuleGeometry(0.042, 0.20, 4, 10).translate(0, -0.12, 0);
     const hand = new SphereGeometry(0.05, 10, 8);
     geo = {
@@ -116,7 +113,7 @@ function numberTexture(number: number, shirt: string): CanvasTexture {
   if (tex) return tex;
   const [c, ctx] = makeCanvas(256, 256);
   const fill = contrastFor(shirt);
-  ctx.font = "bold 170px sans-serif"; // the browser's "Arial Black", Arial (generic families only)
+  ctx.font = "bold 170px sans-serif"; // generic families only
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.lineWidth = 10;

@@ -3,10 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/server-regression.cjs && node --test tests/gfx.test.mjs tests/platform.test.mjs tests/i18n.test.mjs",
-    "test:e2e": "node tests/e2e.mjs"
-  },
-  "devDependencies": {
-    "playwright-core": "^1.62.1"
+    "test": "node tests/server-regression.cjs",
+    "test:engine": "sh engine/tests/run.sh"
   }
 }

@@ -1,9 +1,9 @@
-// Gameplay input (the browser's js/game/input.js) on starhermit:input:
+// Gameplay input on starhermit:input:
 // the manifest's actions (control.* keys, engine.gamepad.* pads, the
 // runtime's on-screen touch controls), pointer lock with mouse look and
 // mouse buttons, and the gamepad's right stick for the camera. The player
 // rebinds actions in the runtime's Options menu, so nothing here names a
-// key except the browser's fixed shortcuts (T chat, M mic, Escape).
+// key except the game's fixed shortcuts (T chat, M mic, Escape).
 import {
   exitPointerLock,
   gamepads,
@@ -31,8 +31,8 @@ function touchLabel(key: string): string {
   return T(key).slice(0, 16);
 }
 
-/** The on-screen layout (logical pixels from the anchor corner), after the
- * browser's: a joystick bottom-left, TACKLE · PASS · SHOOT bottom-right. */
+/** The on-screen layout (logical pixels from the anchor corner): a joystick
+ * bottom-left, TACKLE · PASS · SHOOT bottom-right. */
 function touchLayout(): TouchControl[] {
   return [
     { kind: "stick", up: "up", down: "down", left: "left", right: "right", anchor: "bottom-left", offset: [90, 90], radius: 66 },
@@ -49,7 +49,7 @@ const STICK_DEAD = 0.15;
 
 export interface GameInput {
   /** The touch layout is in use: the player's primary pointer is coarse
-   * (the browser's `matchMedia('(pointer: coarse)')`). */
+   * (a touch screen). */
   readonly touchMode: boolean;
   readonly pointerLocked: boolean;
   getState(camYaw: number, dt: number): InputFrame;
@@ -229,7 +229,7 @@ export function createInput(): GameInput {
       filter = f;
     },
     tick(): void {
-      safe(() => vibrate(4)); // the browser's navigator.vibrate(4)
+      safe(() => vibrate(4));
     },
   };
 }

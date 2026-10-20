@@ -1,5 +1,5 @@
 // Loads the repository's server.js into a fresh VM context — as the
-// browser's classic <script> and the runtime's loadClassic do — and returns
+// platform's sandbox and the runtime's loadClassic do — and returns
 // its globals.
 import { readFileSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";

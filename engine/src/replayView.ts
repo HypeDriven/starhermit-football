@@ -1,5 +1,4 @@
-// Render-only 3D playback of an archived online match (the browser's
-// js/replayview.js). Loads the replay log embedded in the archived session
+// Render-only 3D playback of an archived online match. Loads the replay log embedded in the archived session
 // state (replays.get → state.replay) and plays it on a virtual 30 Hz tick
 // clock, interpolating between the 2 fps keyframes with the live snapshot
 // rules. No net, no input, no audio. A bar at the bottom plays, pauses,

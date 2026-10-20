@@ -1,7 +1,6 @@
 // Text the HUD and menus show, as pure functions. Strings go through a
 // translator `t` (the game's T from i18n.ts; English with placeholders filled
-// by default) with the browser's English keys, so js/i18n/strings.js
-// translates them.
+// by default) with the English keys logic/strings.ts translates.
 
 export type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -15,7 +14,7 @@ export function clockSeconds(time: number, half: number, halfLength: number): nu
   return Math.floor(Math.max(0, half === 1 ? tt : tt - halfLength));
 }
 
-/** "1st 02:15" — the half's own clock, as the browser's hud.js shows it. */
+/** "1st 02:15" — the half's own clock, as the HUD shows it. */
 export function formatClock(time: number, half: number, halfLength: number, t: Translate = english): string {
   const tt = Math.min(time, halfLength * 2);
   const shown = Math.max(0, half === 1 ? tt : tt - halfLength);
@@ -26,7 +25,7 @@ export function formatClock(time: number, half: number, halfLength: number, t: T
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** "Oct 17, 02:05 PM": the browser's `toLocaleString(lang, { month: 'short',
+/** "Oct 17, 02:05 PM": `toLocaleString(lang, { month: 'short',
  * day: 'numeric', hour: '2-digit', minute: '2-digit' })` in en-US, built by
  * hand for runtimes without those Intl options. `offsetMinutes` is the local
  * offset from UTC (`-new Date().getTimezoneOffset()`). */
@@ -39,7 +38,7 @@ export function formatReplayDateEnglish(ms: number | null | undefined, offsetMin
   return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${String(h12).padStart(2, "0")}:${mm} ${h24 < 12 ? "AM" : "PM"}`;
 }
 
-/** The replay list's date in the game language, as the browser formats it. */
+/** The replay list's date in the game language. */
 export function formatReplayDate(ms: number | null | undefined, locale: string): string {
   if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return "—";
   try {
@@ -91,8 +90,8 @@ export function halvedSides(names: readonly string[]): string {
     : names[0] || "—";
 }
 
-/** A neutral stand-in name for a user whose profile did not resolve (the
- * browser's `Player <id6>`). */
+/** A neutral stand-in name for a user whose profile did not resolve
+ * (`Player <id6>`). */
 export function fallbackName(userId: string): string {
   return `Player ${String(userId).slice(0, 6)}`;
 }

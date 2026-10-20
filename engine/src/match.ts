@@ -1,4 +1,4 @@
-// Match orchestration (the browser's js/match.js): scene population, the
+// Match orchestration: scene population, the
 // match flow (walkout → coin flip → halves → full time), netcode, audio and
 // HUD wiring.
 //
@@ -346,7 +346,7 @@ export class MatchController {
     this.stadium!.update(dt, this.d.camera.position);
     if (this.pausedFlag && this.mode === "practice") return;
     this.d.hud.setMenuButton(this.stage !== "done");
-    // the mouse hint shows from the walkout, as the browser's showTouchUi
+    // the mouse hint shows from the walkout
     this.d.hud.setMouseHint(this.stage !== "done" && !this.d.input.touchMode && !this.d.input.pointerLocked);
     if (this.stage === "walkout") {
       this.updateWalkout(dt);

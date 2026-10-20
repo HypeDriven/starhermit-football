@@ -1,10 +1,9 @@
-// In-match voice chat with distance-based volume (the browser's js/voice.js,
-// spec.md §13) on starhermit:platform's voice: the SDK joins the match
+// In-match voice chat with distance-based volume (spec.md §9) on starhermit:platform's voice: the SDK joins the match
 // conversation's voice room (the runtime asks for the microphone and lights
 // its indicator) and carries the audio; the client sets each speaker's
 // volume and pan at 10 Hz from the distance and side between the two
 // footballers. Opt-out via the main menu's checkbox (the per-player game
-// setting `voice`, as the browser keeps it), M or the HUD button mutes.
+// setting `voice`), M or the HUD button mutes.
 // Best-effort: any failure degrades to silence.
 import { onKey } from "starhermit:input";
 import * as ui from "starhermit:ui";

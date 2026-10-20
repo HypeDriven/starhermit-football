@@ -1,10 +1,9 @@
-// StarHermit Football — the native client's entry (the browser's
-// js/main.js): boot, the screens state machine (menu → lobby → match →
+// StarHermit Football — the game's entry: boot, the screens state machine (menu → lobby → match →
 // result, leaderboard, replays and the replay viewer, achievements), the
 // in-match menu, SETTINGS, the scene camera and the match lifecycle, on the
 // StarHermit runtime's host API v1. The match simulation is server.js, shared
-// with the platform and the browser (see sim.ts); the strings are the
-// browser's own tables (see i18n.ts).
+// with the platform (see sim.ts); the strings are the game's tables (see
+// i18n.ts).
 import { frame, onFixedUpdate, onRender, onStart, onUpdate, openMenu, setFixedRate } from "starhermit:engine";
 import type { JsonValue } from "starhermit:engine";
 import { ACESFilmicToneMapping, PerspectiveCamera, renderer, scene } from "starhermit:scene";
@@ -43,7 +42,7 @@ import { createVoice } from "./voice.ts";
 
 // ── renderer ──
 // Resolution and frame pacing are the runtime's; the game sets tone mapping
-// as the browser does, and the stadium sets shadows, reflections and the
+// (ACES filmic), and the stadium sets shadows, reflections and the
 // post effects (ambient occlusion, bloom, grade, anti-aliasing) per quality
 // tier.
 const camera = new PerspectiveCamera(55, 16 / 9, 0.1, 800);
@@ -51,7 +50,6 @@ camera.position.set(0, 20, -30);
 renderer.camera = camera;
 renderer.shadowMap.enabled = true;
 renderer.bloom = null;
-// js/graphics.js: ACES filmic at exposure 1
 renderer.toneMapping = ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 
@@ -186,8 +184,8 @@ function acceptInvite(inv: RoomInvite): void {
 // ── session expiry and updated terms ──
 // The runtime holds the StarHermit session; when it expires (or StarHermit
 // needs the player to accept updated terms) online play stops and the
-// prompt offers the way back — the runtime's Account dialog, where the
-// browser relaunches from the StarHermit launcher — or offline practice.
+// prompt offers the way back — the runtime's Account dialog — or offline
+// practice.
 let relaunchShowing = false;
 async function promptRelaunch(kind: "expired" | "terms" = "expired"): Promise<void> {
   if (relaunchShowing) return;
@@ -442,8 +440,8 @@ function pollStartButton(): void {
 
 // ── UI ──
 
-/** The browser's logo (.logo: weight 800, letter spacing 0.12 em, FOOTBALL
- * in the accent, a green glow), drawn once at 64 px. */
+/** The logo (weight 800, letter spacing 0.12 em, FOOTBALL in the accent, a
+ * green glow), drawn once at 64 px. */
 let logo: CanvasTexture | null = null;
 function logoTexture(): CanvasTexture {
   if (logo) return logo;
@@ -474,7 +472,7 @@ function menuUi(): void {
   const online = !!mine;
   const t = platformStrings();
   {
-    // clamp(2rem, 7vw, 4rem) as the browser sizes it, within the window
+    // clamp(2rem, 7vw, 4rem), within the window
     const f = frame();
     const vw = f.width / f.scale;
     const lg = logoTexture();
@@ -733,7 +731,7 @@ function screensUi(): void {
   }, { align: "center", justify: "center", width, height, spacing: 16 });
 }
 
-/** The browser's #loading: the logo over the key art (cover-fitted) under
+/** The loading screen: the logo over the key art (cover-fitted) under
  * a dark veil, the plain colour while the image decodes or if it fails. */
 let keyArt: ImageBitmap | null = null;
 let veil: OffscreenCanvas | null = null;

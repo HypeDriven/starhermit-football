@@ -1,5 +1,4 @@
-// The floodlit-stadium environment map for reflections (js/graphics.js
-// buildEnvironment, which the browser renders with PMREMGenerator.fromScene):
+// The floodlit-stadium environment map for reflections:
 // a night sky over dark stands and turf, four HDR floodlight banks up in the
 // corners and the glowing ad-board ring. The host has no render-to-texture,
 // so the same scene is written as a latitude-longitude image of linear light

@@ -1,4 +1,4 @@
-// The platform leaderboard (the browser's js/leaderboard.js): my rating from
+// The platform leaderboard: my rating from
 // the game info and the ranked entries, paged, with a friends-only filter.
 import * as ui from "starhermit:ui";
 import type { GameStats, LeaderboardEntry } from "starhermit:platform";

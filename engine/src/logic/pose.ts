@@ -1,6 +1,6 @@
-// Procedural footballer pose: the browser's js/world/animator.js math, as a
-// pure function from locomotion state to joint angles. world/animator.ts
-// writes the result onto the rig; nothing here allocates per call.
+// Procedural footballer pose, as a pure function from locomotion state to
+// joint angles; nothing here allocates per call. world/rigMath.ts is the same
+// math as the kernels the runtime runs (the Node tests hold them equal).
 //
 // Joint conventions (character faces +x, up is +y):
 //   - positive rotation.z swings a downward limb forward (+x)

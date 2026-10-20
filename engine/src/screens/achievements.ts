@@ -1,4 +1,4 @@
-// The achievements screen (the browser's js/achievements.js): the game's
+// The achievements screen: the game's
 // catalog — declared by server.js, unlocked only by the server — with the
 // player's unlock state, read-only.
 import * as ui from "starhermit:ui";

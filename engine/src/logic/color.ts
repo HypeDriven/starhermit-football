@@ -20,8 +20,8 @@ export function toHex(r: number, g: number, b: number): string {
   return `#${c(r)}${c(g)}${c(b)}`;
 }
 
-/** The browser's player.js luminance: `new THREE.Color(hex)` holds linear
- * components, weighted 0.299 / 0.587 / 0.114. */
+/** A color's luminance from its linear components (sRGB hex converted as
+ * three.js's `Color` does), weighted 0.299 / 0.587 / 0.114. */
 export function luminance(color: string | number): number {
   const [r, g, b] = parseHex(color);
   return 0.299 * srgbToLinear(r) + 0.587 * srgbToLinear(g) + 0.114 * srgbToLinear(b);

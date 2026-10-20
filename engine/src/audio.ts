@@ -1,5 +1,5 @@
-// Game audio (the browser's js/game/audio.js) on starhermit:audio's Web Audio
-// graph. Two layers, as in the browser: the authored clips (sfx/*.opus,
+// Game audio on starhermit:audio's Web Audio graph. Two layers: the
+// authored clips (sfx/*.opus,
 // bound by event id through sfx/manifest.json and decoded by the engine
 // into graph buffers) and a synthesiser that plays whenever an event has no
 // decoded clip. The crowd bed, the stadium "reverb" (two feedback delays)
@@ -17,7 +17,7 @@ import { settings } from "starhermit:storage";
 import { files } from "starhermit:engine";
 import { clamp01, rand } from "./logic/math.ts";
 
-/** The per-player game setting the browser also keeps (device + account). */
+/** The per-player game setting (device + account). */
 const MUTE_KEY = "muted";
 
 export interface Audio {

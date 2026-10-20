@@ -1,4 +1,4 @@
-// The ambient backdrop behind the main menu (the browser's js/menuScene.js):
+// The ambient backdrop behind the main menu:
 // a full AI-vs-AI match in the night stadium while the camera drifts
 // cinematically around the pitch. The same shared sim (server.js) and the
 // same stadium and player builders as a real match, stepped at the fixed

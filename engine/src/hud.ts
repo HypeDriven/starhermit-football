@@ -1,9 +1,8 @@
-// The in-match HUD (the browser's js/hud.js, its score bar markup and CSS)
-// drawn each frame with starhermit:draw: the score bar with the club crests,
+// The in-match HUD drawn each frame with starhermit:draw: the score bar with the club crests,
 // team names and match clock, the off-screen ball arrow, the shot power bar,
 // event banners, the mouse camera hint, the ☰ match-menu button and the mic
-// toggle. Window coordinates are physical pixels; sizes are the browser's
-// CSS pixels times frame().scale.
+// toggle. Window coordinates are physical pixels; sizes are logical pixels
+// (16 to the rem) times frame().scale.
 import { frame } from "starhermit:engine";
 import type { ColorLike } from "starhermit:engine";
 import * as draw from "starhermit:draw";
@@ -26,7 +25,7 @@ const GLYPH_SHADOW: ColorLike = [0, 0, 0, 0.45];
 const POWER_FILL: ColorLike = [0, 0, 0, 0.55];
 const HINT_FILL: ColorLike = [4 / 255, 9 / 255, 15 / 255, 0.78];
 const MENU_FILL: ColorLike = [4 / 255, 9 / 255, 15 / 255, 0.7];
-/** The ball arrow's box (glyph + label) for its clamp, CSS px. */
+/** The ball arrow's box (glyph + label) for its clamp, logical px. */
 export const ARROW_HALF = { width: 20, height: 22 };
 
 export interface HudButton {
@@ -111,7 +110,7 @@ export function createHud(): Hud {
   let clockTime = 0;
   let clockHalf = 1;
   let clockLength = 180;
-  /** The browser's clock reads "00:00" until play first sets it. */
+  /** The clock reads "00:00" until play first sets it. */
   let clockSet = false;
   let power = 0;
   let bannerText = "";
@@ -190,7 +189,7 @@ export function createHud(): Hud {
   }
 
   function drawScorebar(W: number, s: number, top: number): void {
-    // the browser's #scorebar sizes: 1.25rem, names 0.8rem, clock 0.9rem
+    // the score bar's sizes: 1.25rem, names 0.8rem, clock 0.9rem
     const big = 20 * s;
     const small = 12.8 * s;
     const clockSize = 14.4 * s;

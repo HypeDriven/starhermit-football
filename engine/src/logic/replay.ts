@@ -42,7 +42,7 @@ function arr(v: unknown): readonly unknown[] {
 }
 
 /** The archived session state from a replays.get result: the platform's
- * detail carries it as `state` (the browser reads `data.state`); a bare
+ * detail carries it as `state` (or `data.state`); a bare
  * state is accepted too. */
 export function replayState(detail: unknown): Record<string, unknown> | null {
   const d = rec(detail);

@@ -1,6 +1,5 @@
 // Snapshot layout and the client's interpolation rules, shared by live play
-// and the replay viewer (the browser's js/snapformat.js plus match.js's
-// applyInterp). server.js buildSnapshot() and recordReplayFrame() emit b/pl
+// and the replay viewer. server.js buildSnapshot() and recordReplayFrame() emit b/pl
 // in exactly this layout; keep in sync with server.js.
 import { wrapAngle } from "./math.ts";
 
