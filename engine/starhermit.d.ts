@@ -1,4 +1,4 @@
-// Copied unchanged below this note from the StarHermit runtime 1.14.0
+// Copied unchanged below this note from the StarHermit runtime 1.15.0
 // (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -300,7 +300,10 @@ declare module "starhermit:engine" {
   export function onFocus(callback: (focused: boolean) => void): Unsubscribe;
   /** The runtime's own interface opened or closed over the game (Options,
    * a permission prompt, an error): while it is open no input reaches the
-   * game and `input` reports nothing held. */
+   * game and `input` reports nothing held. Every `true` is followed by a
+   * `false` when it closes; one that opened and closed between two of the
+   * game's frames (a not-responding screen over the call the game was in)
+   * is not reported, and a restarted game hears only what is open over it. */
   export function onOverlay(callback: (open: boolean) => void): Unsubscribe;
 
   /** Fixed steps per second, 1–240 (60 until set); RangeError otherwise.
@@ -1068,6 +1071,12 @@ declare module "starhermit:input" {
     readonly y: number;
     /** The first finger down. */
     readonly primary: boolean;
+    /** The finger went down on one of the `setTouchControls` controls
+     * (for its whole touch, even once a new set or a menu lets go of it):
+     * it plays the control, so a drag-to-look or tap handler skips it
+     * (since API_MINOR 17). Such fingers are still delivered, for games
+     * that track every finger; the game's UI never takes them. */
+    readonly control: boolean;
   }
   export function onTouch(listener: (event: TouchEvent) => void): Unsubscribe;
   export type TouchAnchor = "top-left" | "top-right" | "bottom-left" | "bottom-right";
@@ -1096,7 +1105,15 @@ declare module "starhermit:input" {
       };
   /** Shows these controls on touch screens (null hides them); at most 16
    * and 16 KiB as JSON (RangeError). Actions they name must be declared
-   * (TypeError). */
+   * (TypeError). They show while the player is on touch: from the start on
+   * a touch-first device (a coarse primary pointer and no mouse or pen; in
+   * browsers `(pointer: coarse)` or touch points without
+   * `(any-pointer: fine)`), and elsewhere from the first touch, until
+   * keyboard, mouse or gamepad use hides them (the next touch shows them
+   * again). Replacing the set (a menu's controls, then play's) keeps
+   * whether they show. A button or D-pad direction tapped down and up
+   * between two frames still presses once (`wasPressed`, `onAction` press
+   * and release). */
   export function setTouchControls(controls: readonly TouchControl[] | null): void;
 
   // -- Gamepads ---------------------------------------------------------------
@@ -1318,6 +1335,17 @@ declare module "starhermit:scene" {
     multiplyScalar(s: number): this;
     length(): number;
     normalize(): this;
+    dot(v: Vector2): number;
+    lengthSq(): number;
+    distanceTo(v: Vector2): number;
+    lerp(v: Vector2, alpha: number): this;
+    equals(v: Vector2): boolean;
+    toArray(array?: number[], offset?: number): number[];
+    // Since API_MINOR 17.
+    fromArray(array: ArrayLike<number>, offset?: number): this;
+    addVectors(a: Vector2, b: Vector2): this;
+    subVectors(a: Vector2, b: Vector2): this;
+    distanceToSquared(v: Vector2): number;
   }
   /** Four numbers (since API_MINOR 6): a custom material's `vec4f`
    * uniform, an instance's custom data. */
@@ -1943,6 +1971,10 @@ declare module "starhermit:scene" {
      * runtime made one, 4 bytes a vertex). */
     setIndex(index: BufferAttribute | readonly number[] | null): this;
     getIndex(): BufferAttribute | null;
+    /** The index (`getIndex()`) and the attributes by name, as three.js
+     * has them. */
+    readonly index: BufferAttribute | null;
+    readonly attributes: Readonly<Record<string, BufferAttribute>>;
     computeVertexNormals(): void;
     /** Model-space bounding sphere (for culling, picking and shadows). */
     computeBoundingSphere(): void;
@@ -1983,15 +2015,28 @@ declare module "starhermit:scene" {
      * RangeError). */
     readonly drawRange: { start: number; count: number };
     setDrawRange(start: number, count: number): void;
+    /** Ranges of the index (of the vertices without one), each drawn with
+     * the `materialIndex`th material of a mesh's material array (three.js;
+     * since API_MINOR 17). A mesh with one material draws the whole
+     * geometry whatever its groups. Copied by `clone`, `copy` and
+     * `toNonIndexed`. */
+    groups: { start: number; count: number; materialIndex: number }[];
+    addGroup(start: number, count: number, materialIndex?: number): void;
+    clearGroups(): void;
   }
   /** One geometry from several (three.js's `BufferGeometryUtils.
    * mergeGeometries`): they must share their attributes (all indexed or
-   * none); null when they do not. Bounded as any geometry (RangeError). */
-  export function mergeGeometries(geometries: readonly BufferGeometry[]): BufferGeometry | null;
+   * none); null when they do not. Bounded as any geometry (RangeError).
+   * `useGroups` (since API_MINOR 17) adds a group for each geometry, its
+   * place in the list its material index. */
+  export function mergeGeometries(geometries: readonly BufferGeometry[], useGroups?: boolean): BufferGeometry | null;
   // three.js's built-in shapes with its parameters, defaults and vertex
   // layout; their `position`, `normal` and `uv` attributes and index are
   // readable (and writable) like any geometry's. Segment counts are at most
-  // 1,024 (RangeError).
+  // 1,024 (RangeError). Since API_MINOR 17 boxes, cylinders and cones have
+  // three.js's groups (a box's faces +x, -x, +y, -y, +z, -z as materials 0
+  // to 5; a cylinder's side 0, top 1 and bottom 2), so material arrays
+  // work.
   export class BoxGeometry extends BufferGeometry {
     constructor(width?: number, height?: number, depth?: number, widthSegments?: number, heightSegments?: number, depthSegments?: number);
   }
@@ -2019,6 +2064,199 @@ declare module "starhermit:scene" {
   }
   export class CircleGeometry extends BufferGeometry {
     constructor(radius?: number, segments?: number, thetaStart?: number, thetaLength?: number);
+  }
+
+  // -- Curves, paths and shapes (since API_MINOR 17) -----------------------------
+  // three.js r185's 2D curves, paths, shapes and ShapeUtils, statement by
+  // statement: the points they give are three.js's, natively and in
+  // browsers. 3D curves (CatmullRomCurve3 and the like), `toJSON` and
+  // `fromJSON` are not supported.
+  /** A 2D curve: `getPoint(t)` for t from 0 to 1 (each kind its own), and
+   * from it points spaced by arc length (`arcLengthDivisions` samples),
+   * lengths and tangents. */
+  export class Curve {
+    type: string;
+    arcLengthDivisions: number;
+    needsUpdate: boolean;
+    getPoint(t: number, optionalTarget?: Vector2): Vector2;
+    getPointAt(u: number, optionalTarget?: Vector2): Vector2;
+    getPoints(divisions?: number): Vector2[];
+    getSpacedPoints(divisions?: number): Vector2[];
+    getLength(): number;
+    getLengths(divisions?: number): number[];
+    updateArcLengths(): void;
+    getUtoTmapping(u: number, distance?: number | null): number;
+    getTangent(t: number, optionalTarget?: Vector2): Vector2;
+    getTangentAt(u: number, optionalTarget?: Vector2): Vector2;
+    clone(): this;
+    copy(source: Curve): this;
+  }
+  export class EllipseCurve extends Curve {
+    constructor(aX?: number, aY?: number, xRadius?: number, yRadius?: number, aStartAngle?: number, aEndAngle?: number, aClockwise?: boolean, aRotation?: number);
+    readonly isEllipseCurve: true;
+    aX: number;
+    aY: number;
+    xRadius: number;
+    yRadius: number;
+    aStartAngle: number;
+    aEndAngle: number;
+    aClockwise: boolean;
+    aRotation: number;
+  }
+  export class ArcCurve extends EllipseCurve {
+    constructor(aX?: number, aY?: number, aRadius?: number, aStartAngle?: number, aEndAngle?: number, aClockwise?: boolean);
+    readonly isArcCurve: true;
+  }
+  export class LineCurve extends Curve {
+    constructor(v1?: Vector2, v2?: Vector2);
+    readonly isLineCurve: true;
+    v1: Vector2;
+    v2: Vector2;
+  }
+  export class QuadraticBezierCurve extends Curve {
+    constructor(v0?: Vector2, v1?: Vector2, v2?: Vector2);
+    readonly isQuadraticBezierCurve: true;
+    v0: Vector2;
+    v1: Vector2;
+    v2: Vector2;
+  }
+  export class CubicBezierCurve extends Curve {
+    constructor(v0?: Vector2, v1?: Vector2, v2?: Vector2, v3?: Vector2);
+    readonly isCubicBezierCurve: true;
+    v0: Vector2;
+    v1: Vector2;
+    v2: Vector2;
+    v3: Vector2;
+  }
+  /** A Catmull-Rom spline through points. */
+  export class SplineCurve extends Curve {
+    constructor(points?: Vector2[]);
+    readonly isSplineCurve: true;
+    points: Vector2[];
+  }
+  /** Curves end to end. `getPoints(divisions)` (default 12) divides each
+   * curve by `divisions` (an ellipse or arc by twice it, a line not at
+   * all, a spline by it times its points), leaving out a point equal to
+   * the one before; past 1,048,576 points it is a RangeError. */
+  export class CurvePath extends Curve {
+    curves: Curve[];
+    autoClose: boolean;
+    add(curve: Curve): void;
+    /** Joins the end back to the start with a line, if they differ. */
+    closePath(): this;
+    getCurveLengths(): number[];
+  }
+  /** A path drawn as on a canvas: each call adds a curve from the current
+   * point. `arc` and `ellipse` take their center relative to the current
+   * point, `absarc` and `absellipse` absolutely (angles in radians,
+   * counter-clockwise unless `aClockwise`); either joins the current point
+   * to the arc's start with a line when they differ. */
+  export class Path extends CurvePath {
+    constructor(points?: Vector2[]);
+    currentPoint: Vector2;
+    setFromPoints(points: Vector2[]): this;
+    moveTo(x: number, y: number): this;
+    lineTo(x: number, y: number): this;
+    quadraticCurveTo(aCPx: number, aCPy: number, aX: number, aY: number): this;
+    bezierCurveTo(aCP1x: number, aCP1y: number, aCP2x: number, aCP2y: number, aX: number, aY: number): this;
+    splineThru(pts: Vector2[]): this;
+    arc(aX: number, aY: number, aRadius: number, aStartAngle: number, aEndAngle: number, aClockwise?: boolean): this;
+    absarc(aX: number, aY: number, aRadius: number, aStartAngle: number, aEndAngle: number, aClockwise?: boolean): this;
+    ellipse(aX: number, aY: number, xRadius: number, yRadius: number, aStartAngle: number, aEndAngle: number, aClockwise?: boolean, aRotation?: number): this;
+    absellipse(aX: number, aY: number, xRadius: number, yRadius: number, aStartAngle: number, aEndAngle: number, aClockwise?: boolean, aRotation?: number): this;
+  }
+  /** A path with holes, what ShapeGeometry and ExtrudeGeometry fill. */
+  export class Shape extends Path {
+    constructor(points?: Vector2[]);
+    readonly uuid: string;
+    holes: Path[];
+    getPointsHoles(divisions?: number): Vector2[][];
+    /** The outline's points and its holes', as `getPoints(divisions)`. */
+    extractPoints(divisions?: number): { shape: Vector2[]; holes: Vector2[][] };
+  }
+  /** Sub-paths that make shapes with holes (as SVG and font loaders give
+   * them). */
+  export class ShapePath {
+    constructor();
+    readonly type: "ShapePath";
+    color: Color;
+    subPaths: Path[];
+    currentPath: Path | null;
+    userData: Record<string, any>;
+    moveTo(x: number, y: number): this;
+    lineTo(x: number, y: number): this;
+    quadraticCurveTo(aCPx: number, aCPy: number, aX: number, aY: number): this;
+    bezierCurveTo(aCP1x: number, aCP1y: number, aCP2x: number, aCP2y: number, aX: number, aY: number): this;
+    splineThru(pts: Vector2[]): this;
+    /** The shapes the sub-paths fill, by three.js r185's rule: each nested
+     * in the smallest larger sub-path containing it, filled by
+     * `userData.style.fillRule` (`"nonzero"`, the default, or
+     * `"evenodd"`). Older three.js's `isCCW` is taken and not needed. */
+    toShapes(isCCW?: boolean): Shape[];
+  }
+  export class ShapeUtils {
+    /** The signed area (negative for clockwise points). */
+    static area(contour: Vector2[]): number;
+    static isClockWise(pts: Vector2[]): boolean;
+    /** Triangles filling the contour less its holes (mapbox earcut, as
+     * three.js triangulates), three indices each into the contour's points
+     * then the holes' in order. A last point equal to the first is removed
+     * from the contour and each hole first (the arrays change), as three.js
+     * does. */
+    static triangulateShape(contour: Vector2[], holes: Vector2[][]): number[][];
+  }
+  export class Earcut {
+    /** Triangles over flat x, y pairs whose holes start at `holeIndices`
+     * (points); `dim` must be 2. */
+    static triangulate(data: ArrayLike<number>, holeIndices?: ArrayLike<number> | null, dim?: number): number[];
+  }
+  /** Shapes' flat faces in the XY plane facing +Z (three.js
+   * `ShapeGeometry`): each shape's curves divided by `curveSegments`
+   * (default 12), its holes left open, UVs its x and y; indexed, with a
+   * group a shape (material i) for an array of shapes. Default: a
+   * triangle. */
+  export class ShapeGeometry extends BufferGeometry {
+    constructor(shapes?: Shape | Shape[], curveSegments?: number);
+    readonly type: "ShapeGeometry";
+    readonly parameters: { shapes: Shape | Shape[]; curveSegments: number };
+  }
+  /** `ExtrudeGeometry`'s settings, three.js's defaults: `depth` 1,
+   * `bevelEnabled` true, `bevelThickness` 0.2, `bevelSize`
+   * `bevelThickness - 0.1`, `bevelOffset` 0, `bevelSegments` 3,
+   * `curveSegments` 12, `steps` 1 (`steps` at least 1 and `bevelSegments`
+   * whole numbers up to 1,024: fractions are dropped). `extrudePath`
+   * (extruding along a 3D curve) and a custom `UVGenerator` are not
+   * supported (TypeError). */
+  export interface ExtrudeGeometryOptions {
+    curveSegments?: number;
+    steps?: number;
+    depth?: number;
+    bevelEnabled?: boolean;
+    bevelThickness?: number;
+    bevelSize?: number;
+    bevelOffset?: number;
+    bevelSegments?: number;
+  }
+  /** Shapes extruded from z = 0 to `depth` along +Z, their edges bevelled
+   * outward (three.js `ExtrudeGeometry`): triangles not indexed, flat
+   * normals, UVs as three.js's `WorldUVGenerator`, and for each shape a
+   * group of its front and back caps (material 0) and one of its sides
+   * (material 1), so `new Mesh(geometry, [face, side])` works. Default: a
+   * unit square. Past 1,048,576 vertices it is a RangeError. */
+  export class ExtrudeGeometry extends BufferGeometry {
+    constructor(shapes?: Shape | Shape[], options?: ExtrudeGeometryOptions);
+    readonly type: "ExtrudeGeometry";
+    readonly parameters: { shapes: Shape | Shape[]; options: ExtrudeGeometryOptions };
+  }
+  /** A geometry's edges where its faces meet at more than `thresholdAngle`
+   * degrees (default 1), and its open edges, as three.js computes them
+   * (points within 1e-4 one point; edges in three.js's order): `position`
+   * holds two vertices an edge, for `LineSegments`. A box gives its 12
+   * edges. */
+  export class EdgesGeometry extends BufferGeometry {
+    constructor(geometry?: BufferGeometry | null, thresholdAngle?: number);
+    readonly type: "EdgesGeometry";
+    readonly parameters: { geometry: BufferGeometry | null; thresholdAngle: number };
   }
 
   // -- Materials ----------------------------------------------------------------
@@ -2418,6 +2656,27 @@ declare module "starhermit:scene" {
     size: number;
     sizeAttenuation: boolean;
   }
+  export interface LineBasicMaterialParameters extends MaterialParameters {
+    /** Kept, and always 1: lines are one pixel wide, as WebGL draws them
+     * (three.js's `linewidth` has no effect there either). */
+    linewidth?: number;
+    linecap?: string;
+    linejoin?: string;
+  }
+  /** Lines' material (three.js `LineBasicMaterial`, since API_MINOR 17):
+   * unlit `color` (× the geometry's colors with `vertexColors`), `opacity`
+   * with `transparent`, blending, depth and fog as other materials. Lines
+   * are one pixel wide whatever `linewidth` says; polygon offsets do not
+   * apply to them; `map` is not read (lines carry no texture coordinates)
+   * and custom hooks are not run. Only `Line`, `LineSegments` and
+   * `LineLoop` draw with it (a mesh with it draws nothing). */
+  export class LineBasicMaterial extends Material {
+    constructor(parameters?: LineBasicMaterialParameters);
+    readonly isLineBasicMaterial: true;
+    linewidth: number;
+    linecap: string;
+    linejoin: string;
+  }
   /** Unlit: shows `color` × `map` whatever lights the scene. */
   export class MeshBasicMaterial extends Material {
     constructor(parameters?: MaterialParameters);
@@ -2508,10 +2767,21 @@ declare module "starhermit:scene" {
   export class Group extends Object3D {
     constructor();
   }
-  export class Mesh extends Object3D {
-    constructor(geometry?: BufferGeometry, material?: Material);
+  export class Mesh<TMaterial extends Material | Material[] = Material> extends Object3D {
+    constructor(geometry?: BufferGeometry, material?: TMaterial);
     geometry: BufferGeometry;
-    material: Material;
+    /** Since API_MINOR 17 also an array of materials (three.js's
+     * multi-material meshes): each of the geometry's groups drawn with the
+     * material at its `materialIndex` (a group whose material is missing
+     * or not `visible` draws nothing, and without groups nothing draws).
+     * Each group draws as an object of its own, an indexed geometry's
+     * groups each uploading the geometry's vertices (keep the attributes'
+     * arrays: one released after upload cannot make the groups again).
+     * Rays hit the groups' triangles. An InstancedMesh takes one
+     * material. (`Mesh<Material[]>`, as `new Mesh(geometry, [a, b])`
+     * infers, types it as an array; three.js's own typings say `Material |
+     * Material[]`.) */
+    material: TMaterial;
   }
   /** One geometry and material drawn `count` times with per-instance
    * transforms and colors. A game's instanced meshes hold at most 262,144
@@ -2519,7 +2789,7 @@ declare module "starhermit:scene" {
    * `count`s say; since API_MINOR 9 they no longer count toward the
    * 65,536 meshes and points a game holds (before, each instance of the
    * capacity did, and the bound was 65,536 for everything). */
-  export class InstancedMesh extends Mesh {
+  export class InstancedMesh extends Mesh<Material> {
     constructor(geometry: BufferGeometry, material: Material, count: number);
     /** Instances drawn, at most the constructor's count. */
     count: number;
@@ -2574,6 +2844,33 @@ declare module "starhermit:scene" {
     constructor(geometry?: BufferGeometry, material?: PointsMaterial);
     geometry: BufferGeometry;
     material: PointsMaterial;
+  }
+  /** A line through the geometry's `position` vertices (three.js `Line`,
+   * since API_MINOR 17), by its index when it has one, within its draw
+   * range, drawn one pixel wide with a `LineBasicMaterial` (another
+   * material is a TypeError as the scene syncs). Lines cast no shadows,
+   * take no part in ambient occlusion or the scene-depth texture
+   * (`renderer.sceneDepth`), are culled by their vertices' bounds, and
+   * rays pass through them (three.js's line picking and
+   * `raycaster.params.Line` are not supported). A geometry a line draws
+   * makes a line mesh, counted against the mesh budget, which lines
+   * drawing that geometry alike (the same kind, with or without its
+   * colors) share; changing its positions, colors, index or draw range
+   * makes it again. */
+  export class Line extends Object3D {
+    constructor(geometry?: BufferGeometry, material?: LineBasicMaterial);
+    readonly isLine: true;
+    geometry: BufferGeometry;
+    material: LineBasicMaterial;
+  }
+  /** Separate segments between vertices 0 and 1, 2 and 3… (three.js
+   * `LineSegments`): what `EdgesGeometry` gives draws so. */
+  export class LineSegments extends Line {
+    readonly isLineSegments: true;
+  }
+  /** A line closed back to its first vertex (three.js `LineLoop`). */
+  export class LineLoop extends Line {
+    readonly isLineLoop: true;
   }
   /** A quad facing the view; `scale.x`/`scale.y` are its size (world units)
    * and `center` the point placed at its position (0–1 from bottom-left).
@@ -3134,6 +3431,9 @@ declare module "starhermit:scene" {
     near: number;
     far: number;
     readonly ray: { readonly origin: Vector3; readonly direction: Vector3 };
+    /** three.js's per-kind settings, kept for ports (since API_MINOR 17);
+     * not read: rays pass through lines and points. */
+    params: Record<string, Record<string, unknown>>;
     set(origin: Vector3, direction: Vector3): void;
     /** From normalized device coordinates (−1..1, y up) through a camera. */
     setFromCamera(coords: Vector2, camera: Camera): void;
@@ -3912,8 +4212,15 @@ declare module "starhermit:ui" {
    * runtime reads the clipboard for a paste, never the game: the pasted
    * text arrives as typed text does (a `text` event, then the field's new
    * value), on one line (trailing line breaks dropped, the others spaces),
-   * at most 64 KiB natively. No capability is needed. */
-  export function textField(id: string, value: string, options?: WidgetOptions & { maxChars?: number; width?: number; placeholder?: string }): string;
+   * at most 64 KiB natively. No capability is needed. While it has focus
+   * the field has the keyboard (`capturingKeys()` is true): since
+   * API_MINOR 17 the keyboard presses no actions meanwhile. Arrows and the
+   * D-pad reach a field only from focus the player sees (navigating the
+   * UI), never from nothing focused or from a press, since API_MINOR 17
+   * (older games: as any widget); `arrows: false` (since API_MINOR 17)
+   * keeps them out always: Tab, a press, `setFocus` and screen readers
+   * still focus it (a chat field beside a game steered with the arrows). */
+  export function textField(id: string, value: string, options?: WidgetOptions & { maxChars?: number; width?: number; placeholder?: string; arrows?: boolean }): string;
   /** Whether Enter was pressed in the text field `id` this frame (the field
    * keeps focus; `setFocus(null)` leaves it). */
   export function submitted(id: string): boolean;
@@ -3973,11 +4280,21 @@ declare module "starhermit:ui" {
    * whether it is still open (Back or Escape closes it). Styled as
    * `dialog`: its style is the panel (its padding and border hold the
    * title and content, since API_MINOR 12), its part `backdrop` the dim
-   * over the screen behind it. */
-  export function dialog(label: string, title: string, open: boolean, build: () => void): boolean;
+   * over the screen behind it. `title` is its heading above `build`'s
+   * content and its accessible name. Since API_MINOR 17 an empty or null
+   * title draws no heading: the content starts at the top of the padding
+   * (a game's own title, or something above it), and screen readers name
+   * the dialog by `label`, so make `label` readable (games declaring an
+   * older `engine.minor` keep a heading: empty, or `"null"`). */
+  export function dialog(label: string, title: string | null, open: boolean, build: () => void): boolean;
   /** Back (Escape, East) pressed this frame and not taken by a dialog. */
   export function back(): boolean;
-  /** A text field or similar has the keyboard: game shortcuts should wait. */
+  /** The UI has the keyboard, as the last frame ended: a text field has
+   * focus or a key capture waits for a key. Game shortcuts read from keys
+   * should wait. Since API_MINOR 17 the keyboard presses no actions
+   * meanwhile (`onAction`, `isDown`; releases still come, so nothing stays
+   * held, and `key` events still do); older games hear them and hold them
+   * back themselves. */
   export function capturingKeys(): boolean;
   /** Whether the pointer is over a widget (the game should not act on its
    * clicks). */
@@ -3986,6 +4303,20 @@ declare module "starhermit:ui" {
    * nothing had focus); the same all through a frame (since API_MINOR 12:
    * before, it was null once the frame's first widget was built). */
   export function focused(): string | null;
+  /** Names an area the game draws itself (since API_MINOR 17): a Canvas 2D
+   * game's button shown with `draw.image`, a board's tile. It is a node of
+   * the UI's accessibility tree named `text` over `rect` (window pixels,
+   * clipped as widgets built where it is: in a scroll area, out of view
+   * when scrolled away), a button or, with `role: "label"`, text that only
+   * reads, and it lays out, draws, focuses and takes nothing: the pointer
+   * over it stays the game's (`starhermit:input`), so the game's own hit
+   * tests answer clicks there. Play scripts (`click TEXT`, `until TEXT`)
+   * find it as they find a widget, so a game need not draw its labels as
+   * overlay text to be tested. Call it every frame the area shows, like a
+   * widget (it counts toward the widgets a frame); its identity is `id()`
+   * or `text`. A rect that is not an object, or another role, is a
+   * TypeError. */
+  export function target(text: string, rect: Rect, options?: { role?: "button" | "label" }): void;
   /** Has the player's screen reader speak `text` (since API_MINOR 9): what
    * a game drawn without widgets cannot say otherwise ("hal played Nf3,
    * check", "Checkmate — you won"). Natively a UI Automation notification
@@ -4001,8 +4332,16 @@ declare module "starhermit:ui" {
    * are dropped, so announce what changed, not every frame. Players
    * without a screen reader hear nothing. */
   export function announce(text: string, options?: { politeness?: "polite" | "assertive" }): void;
-  /** Focuses the widget with this label from the next frame (null: none). */
-  export function setFocus(id: string | null): void;
+  /** Focuses a widget from the next frame (null: none), with its focus
+   * ring, as keyboard focus is: a scroll area holding it scrolls it into
+   * view. `name` is a widget's `ui.id`, else its label (its accessible
+   * name): the first focusable widget whose id it is, else the first
+   * whose label it is, so one widget's id wins over another's label. It
+   * names the widgets of the frame it is called in, before or after they
+   * are built; when that frame has none, the next frame's (the screen the
+   * game switches to), unless focus moved elsewhere meanwhile. Within an
+   * open modal dialog, only its widgets. */
+  export function setFocus(name: string | null): void;
   /** The language widgets announce (BCP 47) and its direction (right-to-left
    * mirrors the layout); default the player's language. */
   export function setLanguage(tag: string, direction?: "ltr" | "rtl"): void;
@@ -5237,6 +5576,10 @@ declare module "starhermit:platform" {
   // the platform's rate limits; sends that the SDK paces return false
   // instead of throwing. Leaderboard scores, achievements and match
   // results are written by the game's server script, never by clients.
+  // A guest (signed out, or a run with `--guest`) makes only the platform's
+  // public reads, which it answers without a sign-in: `serverTime()` and
+  // `leaderboards.entries()` by a board's id (not `friendsOnly`); every
+  // other call rejects with `signed-out`.
   // Started by the StarHermit client, a game plays as the client's signed-in
   // player from its first frame (`player()` answers in `onStart`); the
   // player signs in and out in the client, and the session ends with
@@ -5354,6 +5697,39 @@ declare module "starhermit:platform" {
    * (`https://dashboard.starhermit.com/game-invite/<userId>/<slug>`);
    * rejects with `signed-out` for a guest. */
   export function inviteLink(): Promise<string>;
+
+  // -- The platform's clock (since API_MINOR 17) ---------------------------------
+  // Trusted time for what the player must not move by setting the device's
+  // clock (a daily challenge's seed, a cooldown): the platform's clock
+  // (`GET /api/v1/time`), read the same way natively and in browsers, in a
+  // run the StarHermit client started and on the platform's page. Guests
+  // read it too (the platform answers it without a sign-in; signed in, the
+  // player's session asks). With the platform out of reach `serverTime()`
+  // rejects (`transport`, `unavailable`, `rate-limited`) and `serverNow()`
+  // stays null until a reading succeeds, so the game falls back to the
+  // device's clock (or refuses the daily challenge) as it chooses.
+  /** The platform's time when its answer arrived, in whole milliseconds
+   * since the Unix epoch (since API_MINOR 17): the platform's reading plus
+   * half the request's round trip, the platform being taken to read its
+   * clock halfway through it (within half the round trip, typically tens
+   * of milliseconds). One request, never retried (`rate-limited` with
+   * `retryAfter` when the platform is busy); calls made while one waits
+   * share its answer. Each answer is also `serverNow()`'s new reading. */
+  export function serverTime(): Promise<number>;
+  /** The platform's time now, in whole milliseconds since the Unix epoch,
+   * without a request (since API_MINOR 17): the last `serverTime()`
+   * reading carried forward on the monotonic clock (`performance.now()`),
+   * so changing the device's clock does not move it; cheap enough for
+   * every frame. Accurate to the reading's (half its round trip) plus the
+   * monotonic clock's drift; signing in or out keeps it. Null until the
+   * first reading: the first call starts one (as
+   * `await serverTime()` at the start does), and later calls read again
+   * after 30 minutes, when the wall and monotonic clocks part by more than
+   * 5 seconds (the device slept or its clock was set; until then the time
+   * is the monotonic clock's), or when a reading's answer took over 10
+   * seconds to reach the game. A failed reading is tried again a minute
+   * later, each in the background. */
+  export function serverNow(): number | null;
 
   // -- Friends and presence -------------------------------------------------------
   export interface Friend {
@@ -5604,8 +5980,14 @@ declare module "starhermit:platform" {
     readonly submittedAt: number;
   }
   export const leaderboards: {
+    /** The game's active boards (their ids and keys). A player's: a guest's
+     * call rejects with `signed-out`, so keep the ids a signed-in run
+     * listed to show a guest their entries. */
     list(): Promise<Leaderboard[]>;
-    /** `pageSize` 1–100. */
+    /** A page of a board's entries, by its id; `pageSize` 1–100. Anyone's,
+     * guests included (the platform answers it without a sign-in), except
+     * `friendsOnly`, which is a player's (a guest's rejects with
+     * `signed-out`). An unknown id rejects with `not-found`. */
     entries(leaderboardId: string, options?: { friendsOnly?: boolean; page?: number; pageSize?: number; scope?: string; region?: string }): Promise<{ items: LeaderboardEntry[]; total: number; page: number; pageSize: number }>;
   };
   export interface Achievement {
