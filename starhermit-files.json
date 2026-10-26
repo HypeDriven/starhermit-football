@@ -2,13 +2,13 @@
   "files": {
     "CLAUDE.md": {"sha256": "996cafe0dc42dbb66223f1512cdc806c3bdc68f4d3aace7a60f17a09f10ae868", "size": 2844},
     "LICENSE.md": {"sha256": "13324de5e020665146bea6eafc542805d5058daacbf163d89d9434f9367f33b8", "size": 4463},
-    "README.md": {"sha256": "47823291edbc9e8c19647efbf1081743eca1af15985a4f6a71529ebb7d1d8f4c", "size": 5859},
+    "README.md": {"sha256": "b4b2792015a078b45433e1c9aeb26681792fab34b8fe272c12532562a25f6436", "size": 5861},
     "assets/crest-blue.webp": {"sha256": "1cee0fdb699c1a6bee2f64bf6c56fb1e212e641a9626de36bba65fc6aaa1c645", "size": 4854},
     "assets/crest-red.webp": {"sha256": "d7eddd1b7f341426e0705b792aa7dd1dd82adcaeb7714b2fc8304bb223746b08", "size": 5122},
     "assets/keyart-night-stadium.webp": {"sha256": "465bc1fdcb936a4abdc160e851e97becf71cb7003ee6a3768991a8ec90732dd5", "size": 94500},
     "cover.jpg": {"sha256": "fd950a201665c0bd4f2961367e79defa36e01e8b5cce1ef4c4476c008c094451", "size": 253349},
     "coverart.png": {"sha256": "1841b4c9aaadb6712eab461619837f59a60ecccf63ea490e12fcb6aefdf10bd6", "size": 358555},
-    "engine/HOST-API-GAPS.md": {"sha256": "f048cc0620b69ad20bc18ba4760ac8ac02743308c8780592f7fc2056c712c4ef", "size": 3058},
+    "engine/HOST-API-GAPS.md": {"sha256": "600a4bead59b537478dc8a3641736c478f822c2ba89f0170bcf135acae47b5bc", "size": 3063},
     "engine/src/audio.ts": {"sha256": "ea31a40f4c2828e73c98b564df220b56067191162fb366692860267f6462a05a", "size": 29351},
     "engine/src/chat.ts": {"sha256": "74563831a8aedb1a21e2ca42937893a1a7763d6cec91c6beb4c330ab83a5e925", "size": 7420},
     "engine/src/hud.ts": {"sha256": "a44f26b632f503268db21c0b4692523aad89416a0319243efe4a08bf2eb27f15", "size": 16529},
@@ -59,7 +59,7 @@
     "engine/src/world/rigMath.ts": {"sha256": "6f6f1292664caae70c2e4358fde4e2c7d42452857a7f0b7ac36423ecc6d76698", "size": 12829},
     "engine/src/world/stadium.ts": {"sha256": "94f066e6d48e8e0e13445630cdca23fd1b36704cd1d19b3af0ae06dd230473f0", "size": 62669},
     "icon.png": {"sha256": "2c8eaa4a5320ab35826f421574675909ac4c59a7be22cb83240e49038208e1a8", "size": 9579},
-    "index.html": {"sha256": "d135aa96f6dd2cf07dad0e7bc33384876158e28b6dfa1836b5149da3d267e44e", "size": 1752},
+    "index.html": {"sha256": "285a301d19387666b83ca3cb5db50f0e9db5b762d849bf63bdbbd220b0db8309", "size": 1752},
     "leaderboards.json": {"sha256": "7d871b691e91dbb0dd69c14f512aab836c896073cc7b614e9b2fd011942d8dd0", "size": 137},
     "server.js": {"sha256": "a95928a4a8c5f7baf7abb7faca077f87ebcca4722db029cec7fe2ea6a3254bd9", "size": 78992},
     "sfx/ball-bounce.opus": {"sha256": "23300d17f503532823ad0480808e34fa2694fc7710195bf0209af79b04303ae6", "size": 12266},
@@ -84,8 +84,8 @@
     "sfx/whistle-long.opus": {"sha256": "83277873d61e0c3a04b865df41e71e104e9cda4e3ba681d2a1db7cf8ec60a86f", "size": 35099},
     "sfx/whistle-short.opus": {"sha256": "a6d8da0535a483f98cf9485749beed378857a70809ce3291807dcc820b4bd24c", "size": 12965},
     "sh-language.js": {"sha256": "307a2066b6df3cd7fd9b41202d32342389583059386a67436b12d07d50740b01", "size": 13930},
-    "spec.md": {"sha256": "b2a40281d12845d6ac280d6e2f5582778f8281d7596233315dc987d91822baab", "size": 47213},
-    "starhermit.txt": {"sha256": "47a07844112221581b7e9854ca196a131b277c661140af5019728a8c289502e5", "size": 3121}
+    "spec.md": {"sha256": "b111a64ba3d2084c67f12f63c62ca19c1aa3f3276b98b4fdbe0862a32fde7d7d", "size": 47355},
+    "starhermit.txt": {"sha256": "1366ad2ed3fe48c38e7f86c2ddf476ef9d3d2840be811d7d2acf8c868d2c90c8", "size": 3121}
   },
   "excluded": ["engine/starhermit.d.ts", "engine/tests/", "engine/tsconfig.json", "node_modules/", "package-lock.json", "package.json", "tests/"],
   "format": 1

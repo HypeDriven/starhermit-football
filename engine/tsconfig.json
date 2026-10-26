@@ -21,10 +21,7 @@
     "noFallthroughCasesInSwitch": true,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
-    "allowImportingTsExtensions": true,
-    // starhermit.d.ts 1.13.1 names AntialiasMode outside the module that
-    // declares it (reported to the engine); drop this once it is fixed.
-    "skipLibCheck": true
+    "allowImportingTsExtensions": true
   },
   "files": ["starhermit.d.ts"],
   "include": ["src/**/*.ts"]

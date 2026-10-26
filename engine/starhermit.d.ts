@@ -1,4 +1,4 @@
-// Copied unchanged below this note from the StarHermit runtime 1.13.1
+// Copied unchanged below this note from the StarHermit runtime 1.13.2
 // (`starhermit types .`, host API 1.15). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -176,6 +176,8 @@ declare function btoa(data: string): string;
 
 // ===========================================================================
 declare module "starhermit:engine" {
+  import type { AntialiasMode } from "starhermit:scene";
+
   /** The host API's major version. */
   export const API_VERSION: 1;
   /** The runtime's minor version of the host API (members it added). */
