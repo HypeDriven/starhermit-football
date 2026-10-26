@@ -467,6 +467,26 @@ function logoTexture(): CanvasTexture {
   return logo;
 }
 
+/** Muted text as one label, or wrapped at word breaks into several when it is
+ * wider than the window (a phone in portrait). */
+function mutedLines(text: string): void {
+  const f = frame();
+  const room = (f.width / f.scale) * 0.94;
+  if (ui.measureText(text).width / f.scale <= room) {
+    ui.label(text, { tone: "muted" });
+    return;
+  }
+  let line = "";
+  for (const word of text.split(" ")) {
+    const next = line ? `${line} ${word}` : word;
+    if (line && ui.measureText(next).width / f.scale > room) {
+      ui.label(line, { tone: "muted" });
+      line = word;
+    } else line = next;
+  }
+  if (line) ui.label(line, { tone: "muted" });
+}
+
 function menuUi(): void {
   const mine = me();
   const online = !!mine;
@@ -480,9 +500,9 @@ function menuUi(): void {
     const w = Math.min((lg.width * px) / 64, vw * 0.94);
     ui.image("STARHERMIT FOOTBALL", lg, { width: w, height: (w * lg.height) / lg.width });
   }
-  ui.label(online
+  mutedLines(online
     ? T("Signed in as {name}", { name: displayNameNow(mine.userId) ?? mine.displayName })
-    : T("Offline mode — practice only (launch via StarHermit for multiplayer)"), { tone: "muted" });
+    : T("Offline mode — practice only (launch via StarHermit for multiplayer)"));
   ui.column("menu-buttons", () => {
     // signing in is the runtime's (its Options menu)
     if (!online && ui.button(upper(t["signIn"]!), { tone: "accent" })) {

@@ -1,0 +1,4 @@
+# Development files the package leaves out (starhermit package / check).
+tests/
+engine/tests/
+engine/starhermit.d.ts

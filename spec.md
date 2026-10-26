@@ -454,7 +454,8 @@ fr-CA, pt-BR, it-IT**.
 
 All platform traffic goes through `starhermit:platform`, which holds the player's credentials: the
 game sees no token, renewal or URL. Signed out, the menu is offline mode (Practice only) and **SIGN
-IN WITH STARHERMIT** opens the runtime's Account dialog; signing in there brings the online modes.
+IN WITH STARHERMIT** opens the runtime's Account dialog; signing in there brings the online modes. The line under the logo (offline mode, or who is signed in)
+wraps at word breaks when it is wider than the window, as on a phone in portrait.
 
 Uses: profiles (nickname first with a `Player <id>` fallback, avatars); the share link (**INVITE A
 FRIEND** on the menu and **COPY INVITE LINK** in the lobby copy the platform's `inviteLink()`, which

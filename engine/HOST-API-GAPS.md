@@ -1,12 +1,17 @@
 # Host API gaps found by the football
 
 What the game (`engine/src`) still needs from the StarHermit runtime's host API
-(`engine/starhermit.d.ts`, copied from the runtime at da27a93). Each entry
+(`engine/starhermit.d.ts`, from the 1.13.1 runtime, host API 1.15). Each entry
 names the module and member, the semantics wanted, why football needs it, and
 what the game does meanwhile. Nothing here is football-specific. The answered
 entries are kept below, briefly, for their history.
 
 ## Open
+
+0. **`starhermit.d.ts` does not type-check on its own (1.10.0–1.13.1)**:
+   `starhermit:engine` names `AntialiasMode`, which only `starhermit:scene`
+   declares. Fixed on the engine (unreleased); `engine/tsconfig.json` sets
+   `skipLibCheck` until a release carries it.
 
 2. **`PMREMGenerator.fromScene`** (no render-to-texture): the floodlit
    environment is a small scene (four lamp banks, the LED ring, turf and a
