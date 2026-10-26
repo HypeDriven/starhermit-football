@@ -1,5 +1,5 @@
-// Copied unchanged below this note from the StarHermit runtime 1.13.2
-// (`starhermit types .`, host API 1.15). Refresh it with each engine re-pin.
+// Copied unchanged below this note from the StarHermit runtime 1.14.0
+// (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
 // (`starhermit`) is the only trusted code; a game package is data, and every
@@ -430,7 +430,12 @@ declare module "starhermit:engine" {
     readonly time: number;
     /** Seconds since the last frame. */
     readonly delta: number;
-    /** The window's drawable size in physical pixels. */
+    /** The window's drawable size in physical pixels: 0 × 0 before the
+     * first frame (at module scope and in `onStart`): size layout and
+     * cameras in a frame (`onUpdate`, `onRender`). Without a window,
+     * `starhermit check` plays its frames at 640 × 360 and
+     * `--render-check` at 480 × 270 (960 × 540 with `--script`), both at
+     * scale 1. */
     readonly width: number;
     readonly height: number;
     /** Physical pixels per logical pixel. */
@@ -467,7 +472,9 @@ declare module "starhermit:engine" {
     readonly overlayOpen: boolean;
     readonly fixedRate: number;
   }
-  /** This frame's information (the same object all frame). */
+  /** This frame's information (the same object all frame). Before the
+   * first frame (module scope, `onStart`) its size is 0 × 0, in a window
+   * and in checks alike; `starhermit check` plays at 640 × 360, scale 1. */
   export function frame(): FrameInfo;
   export interface FrameStats {
     /** Fixed steps run this frame. */
@@ -920,14 +927,25 @@ declare module "starhermit:input" {
   }
   /** Each press and release (a press is a user gesture). */
   export function onAction(listener: (event: ActionEvent) => void): Unsubscribe;
-  /** The label of an action's first binding as the player's keyboard layout
-   * shows it (`"Space"`, `"Z"`, `"A button"`), for on-screen prompts. */
+  /** The label of an action's first binding of a device (keyboard by
+   * default), for on-screen prompts; `""` when it has none. A key whose
+   * place in the player's layout prints one character is that character in
+   * upper case (`"D"`, `"Z"` on a French layout's `KeyW`, `"1"`, `"Ö"`); any
+   * other key, or any key where the layout is unknown (as in render-check
+   * and browsers without the Keyboard API's layout map), is its code's name
+   * with letters and digits as a US keyboard prints them (`KeyD` `"D"`,
+   * `Digit1` `"1"`) and other names spaced into words (`"Space"`,
+   * `"Enter"`, `"Arrow Up"`, `"Shift Left"`, `"Numpad 1"`, `"F1"`). The
+   * same on every platform and in browsers, and what the Options menu's
+   * controls show. A gamepad label is the control's name (`"South"`,
+   * `"LeftStickUp"`). */
   export function bindingLabel(action: string, device?: "keyboard" | "gamepad"): string;
   export interface Binding {
     readonly device: "keyboard" | "mouse" | "gamepad";
     /** The `KeyboardEvent.code`, mouse button or gamepad control name. */
     readonly code: string;
-    /** As the player's layout shows it. */
+    /** As `bindingLabel` labels it (a key `"D"`, `"Arrow Up"`); a mouse
+     * button or gamepad control is its name. */
     readonly label: string;
   }
   /** Every binding of an action, in the player's order. */
@@ -1629,20 +1647,60 @@ declare module "starhermit:scene" {
   /** Prefiltered environment lighting (three.js `PMREMGenerator`): image-based
    * diffuse and specular light for standard, physical and Lambert
    * materials, from a latitude-longitude texture (a DataTexture of linear
-   * floats for light above white, a CanvasTexture or a package image) or a
-   * CubeTexture. It is made off the game's thread and lights the scene a
-   * few frames later (see `environmentReady`); a game holds at most 8
-   * (RangeError), each counting about 1.4 MiB against the image budget,
-   * and images waiting for their prefilters hold at most 256 MiB together
-   * (RangeError; cube faces are squares of at most 2,048). `fromScene` throws a TypeError (render the scene into a
-   * `RenderTarget` instead, since API_MINOR 8). */
+   * floats for light above white, a CanvasTexture or a package image), a
+   * CubeTexture or (since API_MINOR 16) a `RoomEnvironment`. It is made off
+   * the game's thread and lights the scene a few frames later (see
+   * `environmentReady`); a game holds at most 8 (RangeError), each counting
+   * about 1.4 MiB against the image budget, and images waiting for their
+   * prefilters hold at most 256 MiB together (RangeError; cube faces are
+   * squares of at most 2,048; a room counts 8 MiB while it is made). */
   export class PMREMGenerator {
     constructor(renderer?: Renderer);
     fromEquirectangular(texture: Texture): { readonly texture: Texture; readonly width: number; readonly height: number; dispose(): void };
     fromCubemap(cube: CubeTexture): { readonly texture: Texture; readonly width: number; readonly height: number; dispose(): void };
-    fromScene(): never;
+    /** three.js's `fromScene` for a `RoomEnvironment` (since API_MINOR 16;
+     * before, it threw a TypeError for any scene):
+     * `pmrem.fromScene(new RoomEnvironment(), 0.04).texture` is the room as
+     * three.js renders it, seen from `options.position` (the origin by
+     * default) less the room's `position`, blurred by `sigma` radians (0
+     * or less, or NaN, none; above 0.1, as 0.1, about where three.js
+     * truncates its blur). `near`, `far` and `options.size` are ignored.
+     * Any other scene throws a TypeError: render a scene into a
+     * `RenderTarget` instead (since API_MINOR 8). Natively and in browsers
+     * alike. */
+    fromScene(
+      scene: RoomEnvironment,
+      sigma?: number,
+      near?: number,
+      far?: number,
+      options?: { size?: number; position?: Vector3 },
+    ): { readonly texture: Texture; readonly width: number; readonly height: number; dispose(): void };
     compileEquirectangularShader(): void;
     compileCubemapShader(): void;
+    dispose(): void;
+  }
+  /** three.js's `RoomEnvironment` (`three/addons/environments/
+   * RoomEnvironment.js`; since API_MINOR 16), for
+   * `PMREMGenerator.fromScene`: the studio-like room of model-viewer's
+   * EnvironmentScene. A white box room (`MeshStandardMaterial`, roughness
+   * 1) with six white boxes on its floor, lit by one point light
+   * (intensity 900, distance 28, decay 2) and showing six emissive panels
+   * (intensities 50, 50, 17, 43, 20 and 100), all at three.js's sizes and
+   * places. The runtime makes the room's image itself (traced, shaded as
+   * three.js's renderer shades it in `fromScene`'s cube camera, on the
+   * prefilter's worker), so this is not an Object3D and holds nothing.
+   * three.js r155–r162 constructed without a renderer gave the light its
+   * legacy-lights intensity 5, which their physically based lights show as
+   * a near-black room; this is r163 and later (and r155–r162 given a
+   * renderer, and the legacy lights' look before r155). three.js r18x lowers the room by
+   * setting `position.y = -3.5`; here `position` is (0, 0, 0), as in r16x,
+   * and only moves the room. */
+  export class RoomEnvironment {
+    constructor(renderer?: unknown);
+    name: string;
+    /** Moves the room (its rotation and scale are three.js's, fixed). */
+    readonly position: Vector3;
+    /** Kept for ports: the room holds nothing. */
     dispose(): void;
   }
   /** Whether an environment value (a PMREM texture, or a texture or cube
@@ -2530,24 +2588,55 @@ declare module "starhermit:scene" {
   export abstract class Camera extends Object3D {
     near: number;
     far: number;
-    /** As three.js, for the window's current aspect. */
+    /** As three.js, for the window's current aspect (or the camera's view
+     * offset, when one is set). */
     readonly projectionMatrix: Matrix4;
     readonly projectionMatrixInverse: Matrix4;
     readonly matrixWorldInverse: Matrix4;
+  }
+  /** A camera's view offset (three.js `camera.view`, since API_MINOR 16):
+   * what `setViewOffset` sets. Its fields may be changed in place, as in
+   * three.js; the scene's sync reads them. */
+  export interface CameraView {
+    enabled: boolean;
+    fullWidth: number;
+    fullHeight: number;
+    offsetX: number;
+    offsetY: number;
+    width: number;
+    height: number;
   }
   /** Looks down its -Z. `fov` is the vertical field of view in degrees
    * (three.js); the aspect follows the window. `far` may be Infinity. */
   export class PerspectiveCamera extends Camera {
     constructor(fov?: number, aspect?: number, near?: number, far?: number);
     fov: number;
-    /** Ignored: the window's aspect is used. */
+    /** Ignored without a view offset: the window's aspect is used. With
+     * one, the projection uses it as three.js does (`setViewOffset` sets it
+     * to `fullWidth / fullHeight`). */
     aspect: number;
+    /** three.js's view offset (since API_MINOR 16): null until
+     * `setViewOffset`; `enabled` false after `clearViewOffset`. */
+    view: CameraView | null;
+    /** three.js `setViewOffset` (since API_MINOR 16): the window shows the
+     * `width` × `height` part at `x`, `y` (from the top-left corner, y down)
+     * of a `fullWidth` × `fullHeight` image the camera would fill, in any
+     * units, and `aspect` becomes `fullWidth / fullHeight`. The projection
+     * is then three.js's own, which moves its centre: say,
+     * `setViewOffset(w, h, -panel, 0, w + panel, h)` keeps what the camera
+     * looks at centred in the window's right `w` beside a `panel` on the
+     * left. A size of 0 or a value that is not finite draws nothing, as in
+     * three.js. Natively and in browsers alike. */
+    setViewOffset(fullWidth: number, fullHeight: number, x: number, y: number, width: number, height: number): void;
+    /** three.js `clearViewOffset` (since API_MINOR 16): the projection is
+     * centered on the window's aspect again. */
+    clearViewOffset(): void;
     /** Kept for ports; projection changes apply without it. */
     updateProjectionMatrix(): void;
   }
   /** The view is centered: `top - bottom` sets its height in world units and
    * the width follows the window's aspect (`left`/`right` are kept but not
-   * used for the extent). */
+   * used for the extent, unless a view offset is set). */
   export class OrthographicCamera extends Camera {
     constructor(left?: number, right?: number, top?: number, bottom?: number, near?: number, far?: number);
     left: number;
@@ -2555,6 +2644,17 @@ declare module "starhermit:scene" {
     top: number;
     bottom: number;
     zoom: number;
+    /** three.js's view offset (since API_MINOR 16), as
+     * `PerspectiveCamera.view`. */
+    view: CameraView | null;
+    /** three.js `setViewOffset` (since API_MINOR 16): while it is set the
+     * projection is three.js's from `left`, `right`, `top`, `bottom` and
+     * `zoom` (so `right - left` should keep the window's aspect), showing
+     * the `width` × `height` part at `x`, `y` of the `fullWidth` ×
+     * `fullHeight` image they span. */
+    setViewOffset(fullWidth: number, fullHeight: number, x: number, y: number, width: number, height: number): void;
+    /** three.js `clearViewOffset` (since API_MINOR 16). */
+    clearViewOffset(): void;
     updateProjectionMatrix(): void;
   }
 
@@ -3566,7 +3666,10 @@ declare module "starhermit:ui" {
   export interface TextOptions {
     /** Logical pixels, for every text style (labels, headings, buttons):
      * the player's UI scale and text size settings still enlarge it, and
-     * it is at least 10 (smaller sizes draw at 10). */
+     * it is at least 10 (smaller sizes draw at 10). A widget's own `size`
+     * and `font` win over the text its style class sets, as an inline
+     * style over a class; a scope's (`ui.text`, a container's options) are
+     * inherited, so a class's text still wins inside it. */
     size?: number;
     /** A family added with `canvas.fonts` (any case), a generic family
      * (`system-ui`, `sans-serif`, `serif`, `monospace`, `cursive`,
@@ -3702,7 +3805,11 @@ declare module "starhermit:ui" {
   /** An empty child taking a `share` (default 1) of the free space along
    * a row or column of fixed size, as `grow` does for a container (CSS's
    * `flex: 1` spacer): the brand at a header's start, the stats at its
-   * end. A non-positive share throws a RangeError. */
+   * end. Its Rect spans the row's height (the column's width), so the
+   * room a fixed-height column leaves is a region to draw in (a game's
+   * view under a HUD); that span is not content, so it never widens a
+   * column sized by its children. A non-positive share throws a
+   * RangeError. */
   export function spacer(share?: number): Rect;
   /** A tone colors a label's text from the theme (`"muted"`, `"accent"`)
    * or by an explicit color (the theme's text color under high contrast). */
@@ -4474,14 +4581,19 @@ declare module "starhermit:ui" {
   // "From CSS" section.
   //
   // Selectors: the types the UI has kinds for (`button`; `label` and
-  // `span` as `label`; `p` as `paragraph`; `h1`–`h6` as `heading`; `input`
-  // as `textField`, `slider` (`[type=range]`) or `checkbox`; `textarea`,
-  // `select`, `dialog`, `img`, `progress`, `meter`; `table` as `grid`; `tr`,
-  // `td`, `th` as the classes `tr`, `td`, `th` for a grid's `rowStyle` and
-  // `cellStyle`), classes, a compound of classes (`.a.b`) as the class
-  // `"a.b"` (name it last: `ui.style("a", "b", "a.b")`), a type with a
-  // class as the class, and descendants (`.speed button`, also `>`) as
-  // `inside` rules up to 3 deep. `:hover` (on a container kind,
+  // `span` as `label`; `p` as `paragraph`; `input` as `textField`,
+  // `slider` (`[type=range]`) or `checkbox`; `textarea`, `select`,
+  // `dialog`, `img`, `progress`, `meter`; `table` as `grid`; `tr`, `td`,
+  // `th` as the classes `tr`, `td`, `th` for a grid's `rowStyle` and
+  // `cellStyle`), `h1`–`h6` as the classes `h1`–`h6` since API_MINOR 16
+  // (one heading kind: `ui.style("h2").heading(text)`; games declaring an
+  // older `engine.minor` get every level as the `heading` kind), classes,
+  // a compound of classes (`.a.b`) as the class `"a.b"` (name it last:
+  // `ui.style("a", "b", "a.b")`), a type with a class as the class, since
+  // API_MINOR 16 an id with no class (`#menu`, `button#go`) as the class
+  // of its name (`ui.style("menu")`, each listed in `dropped`; dropped for
+  // an older `engine.minor`), and descendants (`.speed button`, also `>`)
+  // as `inside` rules up to 3 deep. `:hover` (on a container kind,
   // `hoverWithin`), `:active`, `:focus`, `:focus-visible`,
   // `:focus-within`, `:disabled`, `:checked`, `:first-child`,
   // `:last-child`, `:nth-child(odd)` and `(even)` are state blocks, as
@@ -4501,6 +4613,19 @@ declare module "starhermit:ui" {
   // descendant rule for a class that the class's own rule also sets loses
   // in the style cascade though CSS's is more specific: it is listed in
   // `dropped` as shadowed.
+  //
+  // Sizes: styles are border-box, so a rule's content-box `width`,
+  // `height`, `min-width` and `min-height` grow by its padding and border.
+  // Content-box is CSS's default; a rule's own `box-sizing`, else `*`'s,
+  // says otherwise. Since API_MINOR 16 `*`'s is that of `*` itself (with
+  // `*::before, *::after`, which alone size no element) or, with
+  // `inherit`, of `html` or `:root`; with no `*` rule `button`, `select`
+  // and checkboxes are border-box as in browsers; and what it cannot
+  // decide (a `box-sizing: inherit` on a rule, a value it cannot read) is
+  // listed in `dropped`. Games declaring an older `engine.minor` read any
+  // `*` rule's (pseudo-elements' too) as border-box or not, and nothing
+  // else. `starhermit css` converts as the newest minor unless given
+  // `--minor N`.
 
   export interface CssOptions {
     /** Logical pixels of `rem` (and of `em` where a rule gives no font
@@ -4514,7 +4639,8 @@ declare module "starhermit:ui" {
      * (default the root). */
     path?: string;
   }
-  /** What has no style, and why. */
+  /** What has no style, or is styled other than as written (an id as a
+   * class, since API_MINOR 16), and why. */
   export interface CssDropped {
     readonly selector: string;
     /** The declaration's property (empty for a whole rule). */
