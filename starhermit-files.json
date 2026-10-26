@@ -8,7 +8,7 @@
     "assets/keyart-night-stadium.webp": {"sha256": "465bc1fdcb936a4abdc160e851e97becf71cb7003ee6a3768991a8ec90732dd5", "size": 94500},
     "cover.jpg": {"sha256": "fd950a201665c0bd4f2961367e79defa36e01e8b5cce1ef4c4476c008c094451", "size": 253349},
     "coverart.png": {"sha256": "1841b4c9aaadb6712eab461619837f59a60ecccf63ea490e12fcb6aefdf10bd6", "size": 358555},
-    "engine/HOST-API-GAPS.md": {"sha256": "884d3e59d9f80e5352b5f346c3afdd758b820408ddbf7d683d83089f5c1176cd", "size": 3063},
+    "engine/HOST-API-GAPS.md": {"sha256": "c3e33bed070b8dd4c1a3aa9bf046227f4f0b51cd36e225aedbf737e1e3a5cae3", "size": 3063},
     "engine/src/audio.ts": {"sha256": "ea31a40f4c2828e73c98b564df220b56067191162fb366692860267f6462a05a", "size": 29351},
     "engine/src/chat.ts": {"sha256": "74563831a8aedb1a21e2ca42937893a1a7763d6cec91c6beb4c330ab83a5e925", "size": 7420},
     "engine/src/hud.ts": {"sha256": "a44f26b632f503268db21c0b4692523aad89416a0319243efe4a08bf2eb27f15", "size": 16529},
