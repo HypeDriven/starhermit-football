@@ -1,4 +1,4 @@
-// Copied unchanged below this note from the StarHermit runtime 1.15.2
+// Copied unchanged below this note from the StarHermit runtime 1.16.0
 // (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -87,6 +87,26 @@
 // `"allowImportingTsExtensions": true` type-checks every accepted form.
 //
 // Language. Strict-mode ECMAScript 2022 plus TypeScript syntax (erased).
+// Natively the interpreter erases the types; on the web the same eraser
+// hands each module to the browser's engine as JavaScript with every line
+// where it was (columns too, but on the line of an enum or of a parameter
+// property's constructor or class body), and `starhermit check` parses and
+// links what it hands over. Supported: annotations and return types
+// anywhere (also over several lines before an arrow's `=>`), generics
+// (`<T,>(x: T) => x` in arrows), `as`, `as const`, `satisfies`, `!`,
+// `x!: T`, optional members, `declare` fields and declarations, `abstract`
+// classes and members, overloads, index signatures, interfaces and type
+// aliases, `import type`, `export type` and inline `type` specifiers (an
+// import used only as a type is left out), `implements`, accessibility and
+// `readonly` modifiers, enums and const enums (compiled to objects) and
+// parameter properties (fields declared before the class's own and
+// assigned as the constructor starts, after `super()`: TypeScript for
+// ES2022). Not supported, refused natively and by check: decorators,
+// value namespaces (type-only namespaces erase), `import x = require()`
+// and `import x = N.y`, auto-accessors, JSX, `<T>x` assertions broken
+// across lines after `return`, `throw` or `yield` (use `as`), and line
+// breaks in an async arrow's type parameters (`async <T>` and its `(`
+// on different lines); none of these would be JavaScript once erased.
 // BigInt is included (literals, operators, `BigInt.asIntN`/`asUintN`,
 // `BigInt64Array`, `BigUint64Array`, DataView's BigInt accessors, exact
 // `toLocaleString` and `Intl.NumberFormat`). A BigInt holds at most
@@ -540,6 +560,10 @@ declare module "starhermit:engine" {
      * `engine.limits.image_mib=` lowers it or raises it, up to 512 (MiB);
      * images count against it within `gpuMib`. */
     readonly imageMib: number;
+    /** The clip count: 128 unless the manifest's
+     * `engine.limits.audio_clips=` lowers it or raises it, up to 1,024
+     * (since API_MINOR 18; before, the manifest's default read 1,024 while
+     * the mixer held 128). */
     readonly audioClips: number;
     readonly audioMib: number;
     readonly voices: number;
@@ -609,7 +633,7 @@ declare module "starhermit:engine" {
     readonly waitingUploadBytes: number;
   }
   /** The budgets: the manifest's limits within the engine's (120
-   * textures, 128 clips and 64 MiB of clip data in the mixer) less what
+   * textures, 1,024 clips and 64 MiB of clip data in the mixer) less what
    * the runtime keeps for its interface. `meshes` is the mesh count:
    * 1,008, or what `engine.limits.meshes=` sets (at most 4,096, since
    * API_MINOR 14). `meshBytes` is the mesh
@@ -720,7 +744,15 @@ declare module "starhermit:engine" {
    * `.starhermitignore` lists (gitignore-style rules; `!name` keeps a
    * default). Such a file does not exist for the game: a read or import of
    * one fails with a `NotFoundError` (a load error for an import) that
-   * names the rule, so `starhermit check` catches a static import. On the
+   * names the rule, so `starhermit check` catches a static import. One
+   * exception, for development config that is never uploaded: a native
+   * `--dev` run of a package directory reads the files the game's own
+   * `.starhermitignore` leaves out (`exists`, `size`, `status` and
+   * the reads see them; not dot-names, not the defaults, not imports) and
+   * the console warns once a file: `files: "config/dev.json" is read only
+   * in development: not part of the package (…)`. Normal runs, checks and
+   * browsers see the package only, as players do, so guard such reads
+   * with `files.exists`. On the
    * web a file `starhermit-files.json` does not list is not there either:
    * run `starhermit package` again after adding files. */
   export interface PackageFiles {
@@ -909,6 +941,14 @@ declare module "starhermit:input" {
   // first 32 actions' keys with the player's account; the runtime keeps the
   // rest in the player's settings (synchronized as settings are). Up to 8
   // player slots share the keyboard (slot 0) and gamepads.
+  //
+  // An action's name (`control.<action>=KEYS | Label`) is 1 to 32
+  // characters of lower-case ASCII letters, digits and `_` (`jump`,
+  // `move_left`, `slot2`; no capitals, `-`, `.` or spaces), unique in the
+  // manifest; its label (after `|`, the name when there is none) is 1 to
+  // 128 bytes without `|` or control characters. Anything else refuses
+  // the package: `starhermit.txt control.Jump: invalid input action
+  // 'Jump'`. Games name actions exactly so (`isDown("move_left")`).
 
   /** Whether an action is held (its value is at least 0.5). An undeclared
    * action throws a TypeError. Nothing is held while the runtime's
@@ -1082,7 +1122,13 @@ declare module "starhermit:input" {
   export type TouchAnchor = "top-left" | "top-right" | "bottom-left" | "bottom-right";
   /** On-screen controls drawn by the runtime and fed into the actions
    * (sized and faded by the player's settings). Offsets and radii are
-   * logical pixels from the anchor corner. */
+   * logical pixels from the anchor corner, as `starhermit:ui` lays out:
+   * a control draws within a circle of `radius` x the UI's scale (the
+   * window's scale factor times the player's interface size, as for
+   * `ui.preferences().scale`) x the player's on-screen control size (1 by
+   * default, 0.5 to 2), and its offset grows alike. A button and a stick
+   * are discs of that radius, a D-pad a cross inside it; fingers reach a
+   * control a quarter beyond it. */
   export type TouchControl =
     | {
         readonly kind: "stick" | "dpad";
@@ -1323,10 +1369,59 @@ declare module "starhermit:scene" {
   // still a RangeError.
 
   // -- Math -------------------------------------------------------------------
+  // Since API_MINOR 18 the math classes are three.js r185's (src/math),
+  // whole and transcribed so they give its numbers: every method of
+  // Vector2, Vector3, Vector4, Quaternion, Euler, Matrix3, Matrix4 and
+  // Color, and Box3, Sphere, Plane, Ray, Line3, Triangle, Frustum,
+  // Spherical, Cylindrical and MathUtils. Members marked "18" are new
+  // there; the classes are iterable as three.js's are (`[...v]`).
+
+  /** An array-like a vector's `toArray` writes into. */
+  export type WritableArrayLike = { [index: number]: number };
+  /** What `fromBufferAttribute` reads (a BufferAttribute). */
+  export interface AttributeReader {
+    readonly count: number;
+    getX(index: number): number;
+    getY(index: number): number;
+    getZ(index: number): number;
+    getW(index: number): number;
+  }
+
+  /** three.js's MathUtils (since API_MINOR 18). `seededRandom` is
+   * deterministic (Mulberry32; a seed restarts it). */
+  export const MathUtils: {
+    readonly DEG2RAD: number;
+    readonly RAD2DEG: number;
+    generateUUID(): string;
+    clamp(value: number, min: number, max: number): number;
+    euclideanModulo(n: number, m: number): number;
+    mapLinear(x: number, a1: number, a2: number, b1: number, b2: number): number;
+    inverseLerp(x: number, y: number, value: number): number;
+    lerp(x: number, y: number, t: number): number;
+    /** Frame-rate independent smoothing toward `y` (`lambda` per second). */
+    damp(x: number, y: number, lambda: number, dt: number): number;
+    pingpong(x: number, length?: number): number;
+    smoothstep(x: number, min: number, max: number): number;
+    smootherstep(x: number, min: number, max: number): number;
+    randInt(low: number, high: number): number;
+    randFloat(low: number, high: number): number;
+    randFloatSpread(range: number): number;
+    seededRandom(seed?: number): number;
+    degToRad(degrees: number): number;
+    radToDeg(radians: number): number;
+    isPowerOfTwo(value: number): boolean;
+    ceilPowerOfTwo(value: number): number;
+    floorPowerOfTwo(value: number): number;
+    setQuaternionFromProperEuler(q: Quaternion, a: number, b: number, c: number, order: "XYX" | "YZY" | "ZXZ" | "XZX" | "YXY" | "ZYZ"): void;
+    normalize(value: number, array: Float32Array | Uint32Array | Uint16Array | Uint8Array | Int32Array | Int16Array | Int8Array): number;
+    denormalize(value: number, array: Float32Array | Uint32Array | Uint16Array | Uint8Array | Int32Array | Int16Array | Int8Array): number;
+  };
+
   export class Vector2 {
     constructor(x?: number, y?: number);
     x: number;
     y: number;
+    readonly isVector2: true;
     set(x: number, y: number): this;
     copy(v: Vector2): this;
     clone(): Vector2;
@@ -1340,12 +1435,52 @@ declare module "starhermit:scene" {
     distanceTo(v: Vector2): number;
     lerp(v: Vector2, alpha: number): this;
     equals(v: Vector2): boolean;
-    toArray(array?: number[], offset?: number): number[];
+    toArray<T extends WritableArrayLike = number[]>(array?: T, offset?: number): T;
     // Since API_MINOR 17.
     fromArray(array: ArrayLike<number>, offset?: number): this;
     addVectors(a: Vector2, b: Vector2): this;
     subVectors(a: Vector2, b: Vector2): this;
     distanceToSquared(v: Vector2): number;
+    // Since API_MINOR 18.
+    /** `x` and `y` by their size names. */
+    width: number;
+    height: number;
+    setScalar(scalar: number): this;
+    setX(x: number): this;
+    setY(y: number): this;
+    setComponent(index: number, value: number): this;
+    getComponent(index: number): number;
+    addScalar(s: number): this;
+    addScaledVector(v: Vector2, s: number): this;
+    subScalar(s: number): this;
+    multiply(v: Vector2): this;
+    divide(v: Vector2): this;
+    divideScalar(scalar: number): this;
+    /** As a point (the matrix's translation applies). */
+    applyMatrix3(m: Matrix3): this;
+    min(v: Vector2): this;
+    max(v: Vector2): this;
+    clamp(min: Vector2, max: Vector2): this;
+    clampScalar(min: number, max: number): this;
+    clampLength(min: number, max: number): this;
+    floor(): this;
+    ceil(): this;
+    round(): this;
+    roundToZero(): this;
+    negate(): this;
+    /** The 2D cross product (a number). */
+    cross(v: Vector2): number;
+    manhattanLength(): number;
+    /** Its angle from +X, 0 to 2π. */
+    angle(): number;
+    angleTo(v: Vector2): number;
+    manhattanDistanceTo(v: Vector2): number;
+    setLength(length: number): this;
+    lerpVectors(v1: Vector2, v2: Vector2, alpha: number): this;
+    fromBufferAttribute(attribute: AttributeReader, index: number): this;
+    rotateAround(center: Vector2, angle: number): this;
+    random(): this;
+    [Symbol.iterator](): IterableIterator<number>;
   }
   /** Four numbers (since API_MINOR 6): a custom material's `vec4f`
    * uniform, an instance's custom data. */
@@ -1355,48 +1490,156 @@ declare module "starhermit:scene" {
     y: number;
     z: number;
     w: number;
+    readonly isVector4: true;
     set(x: number, y: number, z: number, w: number): this;
     setScalar(s: number): this;
-    copy(v: Vector4): this;
+    /** A Vector3's w is 1 (three.js). */
+    copy(v: Vector4 | Vector3): this;
     clone(): Vector4;
     add(v: Vector4): this;
     multiplyScalar(s: number): this;
     lerp(v: Vector4, alpha: number): this;
     equals(v: Vector4): boolean;
     fromArray(array: ArrayLike<number>, offset?: number): this;
-    toArray(array?: number[], offset?: number): number[];
+    toArray<T extends WritableArrayLike = number[]>(array?: T, offset?: number): T;
+    // Since API_MINOR 18.
+    /** `z` and `w` by their size names. */
+    width: number;
+    height: number;
+    setX(x: number): this;
+    setY(y: number): this;
+    setZ(z: number): this;
+    setW(w: number): this;
+    setComponent(index: number, value: number): this;
+    getComponent(index: number): number;
+    addScalar(s: number): this;
+    addVectors(a: Vector4, b: Vector4): this;
+    addScaledVector(v: Vector4, s: number): this;
+    sub(v: Vector4): this;
+    subScalar(s: number): this;
+    subVectors(a: Vector4, b: Vector4): this;
+    multiply(v: Vector4): this;
+    applyMatrix4(m: Matrix4): this;
+    divide(v: Vector4): this;
+    divideScalar(scalar: number): this;
+    /** x, y, z the axis and w the angle. */
+    setAxisAngleFromQuaternion(q: Quaternion): this;
+    setAxisAngleFromRotationMatrix(m: Matrix4): this;
+    setFromMatrixPosition(m: Matrix4): this;
+    min(v: Vector4): this;
+    max(v: Vector4): this;
+    clamp(min: Vector4, max: Vector4): this;
+    clampScalar(min: number, max: number): this;
+    clampLength(min: number, max: number): this;
+    floor(): this;
+    ceil(): this;
+    round(): this;
+    roundToZero(): this;
+    negate(): this;
+    dot(v: Vector4): number;
+    lengthSq(): number;
+    length(): number;
+    manhattanLength(): number;
+    normalize(): this;
+    setLength(length: number): this;
+    lerpVectors(v1: Vector4, v2: Vector4, alpha: number): this;
+    fromBufferAttribute(attribute: AttributeReader, index: number): this;
+    random(): this;
+    [Symbol.iterator](): IterableIterator<number>;
   }
   export class Vector3 {
     constructor(x?: number, y?: number, z?: number);
     x: number;
     y: number;
     z: number;
-    set(x: number, y: number, z: number): this;
+    readonly isVector3: true;
+    /** Without `z` (since API_MINOR 18) the vector keeps its own, as
+     * three.js's does. */
+    set(x: number, y: number, z?: number): this;
     setScalar(s: number): this;
     copy(v: Vector3): this;
     clone(): Vector3;
     add(v: Vector3): this;
     addScaledVector(v: Vector3, s: number): this;
+    addVectors(a: Vector3, b: Vector3): this;
     sub(v: Vector3): this;
+    subVectors(a: Vector3, b: Vector3): this;
     multiply(v: Vector3): this;
     multiplyScalar(s: number): this;
+    divideScalar(s: number): this;
+    negate(): this;
     applyQuaternion(q: Quaternion): this;
     applyMatrix4(m: Matrix4): this;
+    /** Rotates and scales by a matrix's upper 3×3, then normalizes. */
+    transformDirection(m: Matrix4): this;
+    setFromMatrixPosition(m: Matrix4): this;
+    setFromMatrixColumn(m: Matrix4, index: number): this;
     dot(v: Vector3): number;
     cross(v: Vector3): this;
     crossVectors(a: Vector3, b: Vector3): this;
     length(): number;
     lengthSq(): number;
+    setLength(length: number): this;
     distanceTo(v: Vector3): number;
+    distanceToSquared(v: Vector3): number;
     normalize(): this;
     lerp(v: Vector3, alpha: number): this;
+    lerpVectors(a: Vector3, b: Vector3, alpha: number): this;
     equals(v: Vector3): boolean;
+    min(v: Vector3): this;
+    max(v: Vector3): this;
     /** World point to the camera's normalized device coordinates, as
      * three.js: x and y −1..1 on screen, z −1 (near) to 1 (far); z > 1 is
      * past the far plane or behind the camera. */
     project(camera: Camera): this;
     /** The inverse of `project`. */
     unproject(camera: Camera): this;
+    fromArray(array: ArrayLike<number>, offset?: number): this;
+    toArray<T extends WritableArrayLike = number[]>(array?: T, offset?: number): T;
+    // Since API_MINOR 18.
+    setX(x: number): this;
+    setY(y: number): this;
+    setZ(z: number): this;
+    setComponent(index: number, value: number): this;
+    getComponent(index: number): number;
+    addScalar(s: number): this;
+    subScalar(s: number): this;
+    multiplyVectors(a: Vector3, b: Vector3): this;
+    applyEuler(euler: Euler): this;
+    applyAxisAngle(axis: Vector3, angle: number): this;
+    applyMatrix3(m: Matrix3): this;
+    /** By a normal matrix (`Matrix3.getNormalMatrix`), then normalized. */
+    applyNormalMatrix(m: Matrix3): this;
+    divide(v: Vector3): this;
+    clamp(min: Vector3, max: Vector3): this;
+    clampScalar(min: number, max: number): this;
+    clampLength(min: number, max: number): this;
+    floor(): this;
+    ceil(): this;
+    round(): this;
+    roundToZero(): this;
+    manhattanLength(): number;
+    projectOnVector(v: Vector3): this;
+    projectOnPlane(planeNormal: Vector3): this;
+    /** Reflected off a plane of unit `normal`. */
+    reflect(normal: Vector3): this;
+    /** The angle between the two, 0 to π (π/2 with a zero vector). */
+    angleTo(v: Vector3): number;
+    manhattanDistanceTo(v: Vector3): number;
+    setFromSpherical(s: Spherical): this;
+    setFromSphericalCoords(radius: number, phi: number, theta: number): this;
+    setFromCylindrical(c: Cylindrical): this;
+    setFromCylindricalCoords(radius: number, theta: number, y: number): this;
+    setFromMatrixScale(m: Matrix4): this;
+    setFromMatrix3Column(m: Matrix3, index: number): this;
+    setFromEuler(e: Euler): this;
+    setFromColor(c: Color): this;
+    fromBufferAttribute(attribute: AttributeReader, index: number): this;
+    /** Each component 0 to 1. */
+    random(): this;
+    /** A random unit vector. */
+    randomDirection(): this;
+    [Symbol.iterator](): IterableIterator<number>;
   }
   export type EulerOrder = "XYZ" | "YXZ" | "ZXY" | "ZYX" | "YZX" | "XZY";
   /** Rotation in radians about each axis, applied in `order`. An object's
@@ -1405,13 +1648,25 @@ declare module "starhermit:scene" {
    * other at once. */
   export class Euler {
     constructor(x?: number, y?: number, z?: number, order?: EulerOrder);
+    static readonly DEFAULT_ORDER: "XYZ";
     x: number;
     y: number;
     z: number;
     order: EulerOrder;
+    readonly isEuler: true;
     set(x: number, y: number, z: number, order?: EulerOrder): this;
     copy(e: Euler): this;
-    setFromQuaternion(q: Quaternion, order?: EulerOrder): this;
+    clone(): Euler;
+    setFromQuaternion(q: Quaternion, order?: EulerOrder, update?: boolean): this;
+    setFromRotationMatrix(m: Matrix4, order?: EulerOrder, update?: boolean): this;
+    toArray(array?: unknown[], offset?: number): unknown[];
+    // Since API_MINOR 18.
+    setFromVector3(v: Vector3, order?: EulerOrder): this;
+    /** The same rotation in another order. */
+    reorder(newOrder: EulerOrder): this;
+    equals(e: Euler): boolean;
+    fromArray(array: ArrayLike<unknown>): this;
+    [Symbol.iterator](): IterableIterator<number | EulerOrder>;
   }
   export class Quaternion {
     constructor(x?: number, y?: number, z?: number, w?: number);
@@ -1419,60 +1674,429 @@ declare module "starhermit:scene" {
     y: number;
     z: number;
     w: number;
+    readonly isQuaternion: true;
     set(x: number, y: number, z: number, w: number): this;
     copy(q: Quaternion): this;
     clone(): Quaternion;
     identity(): this;
     setFromAxisAngle(axis: Vector3, angle: number): this;
     setFromEuler(euler: Euler): this;
+    setFromRotationMatrix(m: Matrix4): this;
     setFromUnitVectors(from: Vector3, to: Vector3): this;
+    angleTo(q: Quaternion): number;
+    dot(q: Quaternion): number;
+    length(): number;
     multiply(q: Quaternion): this;
     premultiply(q: Quaternion): this;
+    multiplyQuaternions(a: Quaternion, b: Quaternion): this;
+    /** three.js r185's slerp (since API_MINOR 18 its numbers). */
     slerp(q: Quaternion, t: number): this;
     invert(): this;
+    conjugate(): this;
     normalize(): this;
+    equals(q: Quaternion): boolean;
+    fromArray(array: ArrayLike<number>, offset?: number): this;
+    toArray<T extends WritableArrayLike = number[]>(array?: T, offset?: number): T;
+    // Since API_MINOR 18.
+    static slerpFlat(dst: WritableArrayLike, dstOffset: number, src0: ArrayLike<number>, srcOffset0: number, src1: ArrayLike<number>, srcOffset1: number, t: number): void;
+    static multiplyQuaternionsFlat<T extends WritableArrayLike>(dst: T, dstOffset: number, src0: ArrayLike<number>, srcOffset0: number, src1: ArrayLike<number>, srcOffset1: number): T;
+    /** Turns toward `q` by at most `step` radians. */
+    rotateTowards(q: Quaternion, step: number): this;
+    lengthSq(): number;
+    slerpQuaternions(qa: Quaternion, qb: Quaternion, t: number): this;
+    /** A uniformly random rotation. */
+    random(): this;
+    fromBufferAttribute(attribute: AttributeReader, index: number): this;
+    toJSON(): number[];
+    [Symbol.iterator](): IterableIterator<number>;
+  }
+  /** three.js's coordinate systems for projections and frustums (since
+   * API_MINOR 18): depth −1 to 1 (WebGL, the default) or 0 to 1. */
+  export const WebGLCoordinateSystem: 2000;
+  export const WebGPUCoordinateSystem: 2001;
+  /** Column-major 3×3, as three.js (since API_MINOR 18): normal matrices,
+   * UV transforms. */
+  export class Matrix3 {
+    constructor();
+    constructor(n11: number, n12: number, n13: number, n21: number, n22: number, n23: number, n31: number, n32: number, n33: number);
+    elements: number[];
+    readonly isMatrix3: true;
+    set(n11: number, n12: number, n13: number, n21: number, n22: number, n23: number, n31: number, n32: number, n33: number): this;
+    identity(): this;
+    copy(m: Matrix3): this;
+    extractBasis(xAxis: Vector3, yAxis: Vector3, zAxis: Vector3): this;
+    setFromMatrix4(m: Matrix4): this;
+    multiply(m: Matrix3): this;
+    premultiply(m: Matrix3): this;
+    multiplyMatrices(a: Matrix3, b: Matrix3): this;
+    multiplyScalar(s: number): this;
+    determinant(): number;
+    invert(): this;
+    transpose(): this;
+    /** The inverse transpose of a matrix's upper 3×3 (for normals). */
+    getNormalMatrix(matrix4: Matrix4): this;
+    transposeIntoArray(r: WritableArrayLike): this;
+    setUvTransform(tx: number, ty: number, sx: number, sy: number, rotation: number, cx: number, cy: number): this;
+    /** @deprecated three.js r185: use makeScale. */
+    scale(sx: number, sy: number): this;
+    /** @deprecated three.js r185: use makeRotation. */
+    rotate(theta: number): this;
+    /** @deprecated three.js r185: use makeTranslation. */
+    translate(tx: number, ty: number): this;
+    makeTranslation(v: Vector2): this;
+    makeTranslation(x: number, y: number): this;
+    makeRotation(theta: number): this;
+    makeScale(x: number, y: number): this;
+    equals(m: Matrix3): boolean;
+    fromArray(array: ArrayLike<number>, offset?: number): this;
+    toArray<T extends WritableArrayLike = number[]>(array?: T, offset?: number): T;
+    clone(): Matrix3;
   }
   /** Column-major 4×4, as three.js. */
   export class Matrix4 {
     constructor();
+    /** Row-major arguments (since API_MINOR 18), as `set`. */
+    constructor(
+      n11: number, n12: number, n13: number, n14: number,
+      n21: number, n22: number, n23: number, n24: number,
+      n31: number, n32: number, n33: number, n34: number,
+      n41: number, n42: number, n43: number, n44: number,
+    );
     elements: number[];
+    readonly isMatrix4: true;
+    /** Row-major arguments, as three.js. */
+    set(
+      n11: number, n12: number, n13: number, n14: number,
+      n21: number, n22: number, n23: number, n24: number,
+      n31: number, n32: number, n33: number, n34: number,
+      n41: number, n42: number, n43: number, n44: number,
+    ): this;
     identity(): this;
+    clone(): Matrix4;
     copy(m: Matrix4): this;
+    equals(m: Matrix4): boolean;
     compose(position: Vector3, quaternion: Quaternion, scale: Vector3): this;
     decompose(position: Vector3, quaternion: Quaternion, scale: Vector3): this;
+    determinant(): number;
     multiply(m: Matrix4): this;
+    premultiply(m: Matrix4): this;
+    multiplyMatrices(a: Matrix4, b: Matrix4): this;
+    makeTranslation(v: Vector3): this;
     makeTranslation(x: number, y: number, z: number): this;
+    makeRotationFromEuler(euler: Euler): this;
     makeRotationFromQuaternion(q: Quaternion): this;
     makeScale(x: number, y: number, z: number): this;
     makeRotationX(angle: number): this;
     makeRotationY(angle: number): this;
     makeRotationZ(angle: number): this;
-    premultiply(m: Matrix4): this;
-    multiplyMatrices(a: Matrix4, b: Matrix4): this;
+    makeRotationAxis(axis: Vector3, angle: number): this;
+    setPosition(v: Vector3): this;
     setPosition(x: number, y: number, z: number): this;
+    extractRotation(m: Matrix4): this;
+    lookAt(eye: Vector3, target: Vector3, up: Vector3): this;
     invert(): this;
+    transpose(): this;
+    /** A `far` of Infinity is an infinite far plane (WebGL depth). */
+    makePerspective(left: number, right: number, top: number, bottom: number, near: number, far: number, coordinateSystem?: number, reversedDepth?: boolean): this;
+    makeOrthographic(left: number, right: number, top: number, bottom: number, near: number, far: number, coordinateSystem?: number, reversedDepth?: boolean): this;
+    getMaxScaleOnAxis(): number;
     fromArray(array: ArrayLike<number>, offset?: number): this;
-    toArray(array?: number[] | Float32Array, offset?: number): number[] | Float32Array;
+    toArray<T extends WritableArrayLike = number[]>(array?: T, offset?: number): T;
+    // Since API_MINOR 18.
+    copyPosition(m: Matrix4): this;
+    setFromMatrix3(m: Matrix3): this;
+    extractBasis(xAxis: Vector3, yAxis: Vector3, zAxis: Vector3): this;
+    makeBasis(xAxis: Vector3, yAxis: Vector3, zAxis: Vector3): this;
+    multiplyScalar(s: number): this;
+    /** The upper 3×3's determinant. */
+    determinantAffine(): number;
+    /** Scales its columns by `v`. */
+    scale(v: Vector3): this;
+    makeShear(xy: number, xz: number, yx: number, yz: number, zx: number, zy: number): this;
+  }
+  /** An HSL color (`Color.getHSL`'s target; since API_MINOR 18). */
+  export interface HSL {
+    h: number;
+    s: number;
+    l: number;
   }
   /** Linear-light RGB, 0–1 (three.js color management): hex numbers and CSS
-   * strings given to it are sRGB and converted. */
+   * strings given to it are sRGB and converted. Since API_MINOR 18 the
+   * methods that take or give a color space (`"srgb"`, `"srgb-linear"`,
+   * `""`) take it last, as three.js's. */
   export class Color {
     constructor(color?: ColorLike | Color);
     constructor(r: number, g: number, b: number);
     r: number;
     g: number;
     b: number;
+    readonly isColor: true;
     set(color: ColorLike | Color): this;
-    setRGB(r: number, g: number, b: number): this;
-    setHex(hex: number): this;
-    setHSL(h: number, s: number, l: number): this;
-    getHex(): number;
+    setRGB(r: number, g: number, b: number, colorSpace?: string): this;
+    setHex(hex: number, colorSpace?: string): this;
+    setHSL(h: number, s: number, l: number, colorSpace?: string): this;
+    /** Any CSS color the engine reads (names, hex, rgb(), hsl()...). */
+    setStyle(style: string, colorSpace?: string): this;
+    setScalar(s: number): this;
+    getHex(colorSpace?: string): number;
+    /** Six hex digits, sRGB. */
+    getHexString(colorSpace?: string): string;
+    /** `rgb(r,g,b)`, sRGB bytes. */
+    getStyle(colorSpace?: string): string;
     copy(c: Color): this;
     clone(): Color;
     lerp(c: Color, alpha: number): this;
+    lerpColors(a: Color, b: Color, alpha: number): this;
+    multiply(c: Color): this;
     multiplyScalar(s: number): this;
+    add(c: Color): this;
+    equals(c: Color): boolean;
+    toArray<T extends WritableArrayLike = number[]>(array?: T, offset?: number): T;
+    // Since API_MINOR 18.
+    /** Three numbers (linear), as `setRGB`. */
+    set(r: number, g: number, b: number): this;
+    setColorName(name: string, colorSpace?: string): this;
+    copySRGBToLinear(c: Color): this;
+    copyLinearToSRGB(c: Color): this;
+    convertSRGBToLinear(): this;
+    convertLinearToSRGB(): this;
+    /** Hue 0–1, saturation and lightness (of the linear values unless a
+     * color space is given). */
+    getHSL<T extends HSL>(target: T, colorSpace?: string): T;
+    getRGB<T extends { r: number; g: number; b: number }>(target: T, colorSpace?: string): T;
+    offsetHSL(h: number, s: number, l: number): this;
+    addColors(a: Color, b: Color): this;
+    addScalar(s: number): this;
+    /** Each channel at least 0. */
+    sub(c: Color): this;
+    lerpHSL(c: Color, alpha: number): this;
+    setFromVector3(v: Vector3): this;
+    applyMatrix3(m: Matrix3): this;
+    fromArray(array: ArrayLike<number>, offset?: number): this;
+    fromBufferAttribute(attribute: AttributeReader, index: number): this;
+    toJSON(): number;
+    [Symbol.iterator](): IterableIterator<number>;
   }
   export type ColorInput = ColorLike | Color;
+  /** Spherical coordinates (since API_MINOR 18): `phi` from +Y, `theta`
+   * around Y from +Z. */
+  export class Spherical {
+    constructor(radius?: number, phi?: number, theta?: number);
+    radius: number;
+    phi: number;
+    theta: number;
+    set(radius: number, phi: number, theta: number): this;
+    copy(other: Spherical): this;
+    /** Keeps `phi` off the poles. */
+    makeSafe(): this;
+    setFromVector3(v: Vector3): this;
+    setFromCartesianCoords(x: number, y: number, z: number): this;
+    clone(): Spherical;
+  }
+  /** Cylindrical coordinates (since API_MINOR 18). */
+  export class Cylindrical {
+    constructor(radius?: number, theta?: number, y?: number);
+    radius: number;
+    theta: number;
+    y: number;
+    set(radius: number, theta: number, y: number): this;
+    copy(other: Cylindrical): this;
+    setFromVector3(v: Vector3): this;
+    setFromCartesianCoords(x: number, y: number, z: number): this;
+    clone(): Cylindrical;
+  }
+  /** An axis-aligned box (since API_MINOR 18); empty while `max` is below
+   * `min` (a new one is). */
+  export class Box3 {
+    constructor(min?: Vector3, max?: Vector3);
+    min: Vector3;
+    max: Vector3;
+    readonly isBox3: true;
+    set(min: Vector3, max: Vector3): this;
+    setFromArray(array: ArrayLike<number>): this;
+    setFromBufferAttribute(attribute: AttributeReader): this;
+    setFromPoints(points: readonly Vector3[]): this;
+    setFromCenterAndSize(center: Vector3, size: Vector3): this;
+    /** The world box around an object and its descendants' geometries:
+     * their boxes moved to the world, or with `precise` their vertices. */
+    setFromObject(object: Object3D, precise?: boolean): this;
+    clone(): Box3;
+    copy(box: Box3): this;
+    makeEmpty(): this;
+    isEmpty(): boolean;
+    getCenter(target: Vector3): Vector3;
+    getSize(target: Vector3): Vector3;
+    expandByPoint(point: Vector3): this;
+    expandByVector(vector: Vector3): this;
+    expandByScalar(scalar: number): this;
+    expandByObject(object: Object3D, precise?: boolean): this;
+    containsPoint(point: Vector3): boolean;
+    containsBox(box: Box3): boolean;
+    getParameter(point: Vector3, target: Vector3): Vector3;
+    intersectsBox(box: Box3): boolean;
+    intersectsSphere(sphere: Sphere): boolean;
+    intersectsPlane(plane: Plane): boolean;
+    intersectsTriangle(triangle: Triangle): boolean;
+    clampPoint(point: Vector3, target: Vector3): Vector3;
+    distanceToPoint(point: Vector3): number;
+    getBoundingSphere(target: Sphere): Sphere;
+    intersect(box: Box3): this;
+    union(box: Box3): this;
+    applyMatrix4(matrix: Matrix4): this;
+    translate(offset: Vector3): this;
+    equals(box: Box3): boolean;
+    toJSON(): { min: number[]; max: number[] };
+    fromJSON(json: { min: ArrayLike<number>; max: ArrayLike<number> }): this;
+  }
+  /** A sphere (since API_MINOR 18); empty while its radius is below 0 (a
+   * new one's is −1). */
+  export class Sphere {
+    constructor(center?: Vector3, radius?: number);
+    center: Vector3;
+    radius: number;
+    readonly isSphere: true;
+    set(center: Vector3, radius: number): this;
+    setFromPoints(points: readonly Vector3[], optionalCenter?: Vector3): this;
+    copy(sphere: { center: Vector3; radius: number }): this;
+    isEmpty(): boolean;
+    makeEmpty(): this;
+    containsPoint(point: Vector3): boolean;
+    distanceToPoint(point: Vector3): number;
+    intersectsSphere(sphere: Sphere): boolean;
+    intersectsBox(box: Box3): boolean;
+    intersectsPlane(plane: Plane): boolean;
+    clampPoint(point: Vector3, target: Vector3): Vector3;
+    getBoundingBox(target: Box3): Box3;
+    applyMatrix4(matrix: Matrix4): this;
+    translate(offset: Vector3): this;
+    expandByPoint(point: Vector3): this;
+    union(sphere: Sphere): this;
+    equals(sphere: Sphere): boolean;
+    clone(): Sphere;
+    toJSON(): { radius: number; center: number[] };
+    fromJSON(json: { radius: number; center: ArrayLike<number> }): this;
+  }
+  /** The points p where `normal · p + constant` is 0 (since API_MINOR 18). */
+  export class Plane {
+    constructor(normal?: Vector3, constant?: number);
+    normal: Vector3;
+    constant: number;
+    readonly isPlane: true;
+    set(normal: Vector3, constant: number): this;
+    setComponents(x: number, y: number, z: number, w: number): this;
+    setFromNormalAndCoplanarPoint(normal: Vector3, point: Vector3): this;
+    setFromCoplanarPoints(a: Vector3, b: Vector3, c: Vector3): this;
+    copy(plane: Plane): this;
+    normalize(): this;
+    negate(): this;
+    /** Signed: positive on the normal's side. */
+    distanceToPoint(point: Vector3): number;
+    distanceToSphere(sphere: Sphere): number;
+    projectPoint(point: Vector3, target: Vector3): Vector3;
+    intersectLine(line: Line3, target: Vector3, clampToLine?: boolean): Vector3 | null;
+    intersectsLine(line: Line3): boolean;
+    intersectsBox(box: Box3): boolean;
+    intersectsSphere(sphere: Sphere): boolean;
+    coplanarPoint(target: Vector3): Vector3;
+    applyMatrix4(matrix: Matrix4, optionalNormalMatrix?: Matrix3): this;
+    translate(offset: Vector3): this;
+    equals(plane: Plane): boolean;
+    clone(): Plane;
+  }
+  /** A ray from `origin` along `direction` (unit length; since
+   * API_MINOR 18): `Raycaster.ray` is one. */
+  export class Ray {
+    constructor(origin?: Vector3, direction?: Vector3);
+    origin: Vector3;
+    direction: Vector3;
+    set(origin: Vector3, direction: Vector3): this;
+    copy(ray: Ray): this;
+    at(t: number, target: Vector3): Vector3;
+    lookAt(v: Vector3): this;
+    recast(t: number): this;
+    closestPointToPoint(point: Vector3, target: Vector3): Vector3;
+    distanceToPoint(point: Vector3): number;
+    distanceSqToPoint(point: Vector3): number;
+    distanceSqToSegment(v0: Vector3, v1: Vector3, optionalPointOnRay?: Vector3, optionalPointOnSegment?: Vector3): number;
+    intersectSphere(sphere: Sphere, target: Vector3): Vector3 | null;
+    intersectsSphere(sphere: Sphere): boolean;
+    distanceToPlane(plane: Plane): number | null;
+    intersectPlane(plane: Plane, target: Vector3): Vector3 | null;
+    intersectsPlane(plane: Plane): boolean;
+    intersectBox(box: Box3, target: Vector3): Vector3 | null;
+    intersectsBox(box: Box3): boolean;
+    intersectTriangle(a: Vector3, b: Vector3, c: Vector3, backfaceCulling: boolean, target: Vector3): Vector3 | null;
+    applyMatrix4(matrix: Matrix4): this;
+    equals(ray: Ray): boolean;
+    clone(): Ray;
+  }
+  /** A segment (since API_MINOR 18). */
+  export class Line3 {
+    constructor(start?: Vector3, end?: Vector3);
+    start: Vector3;
+    end: Vector3;
+    set(start: Vector3, end: Vector3): this;
+    copy(line: Line3): this;
+    getCenter(target: Vector3): Vector3;
+    delta(target: Vector3): Vector3;
+    distanceSq(): number;
+    distance(): number;
+    at(t: number, target: Vector3): Vector3;
+    closestPointToPointParameter(point: Vector3, clampToLine?: boolean): number;
+    closestPointToPoint(point: Vector3, clampToLine: boolean, target: Vector3): Vector3;
+    /** The squared distance between the two segments' closest points
+     * (written to `c1` and `c2`). */
+    distanceSqToLine3(line: Line3, c1?: Vector3, c2?: Vector3): number;
+    applyMatrix4(matrix: Matrix4): this;
+    equals(line: Line3): boolean;
+    clone(): Line3;
+  }
+  /** A triangle (since API_MINOR 18). */
+  export class Triangle {
+    constructor(a?: Vector3, b?: Vector3, c?: Vector3);
+    a: Vector3;
+    b: Vector3;
+    c: Vector3;
+    static getNormal(a: Vector3, b: Vector3, c: Vector3, target: Vector3): Vector3;
+    static getBarycoord(point: Vector3, a: Vector3, b: Vector3, c: Vector3, target: Vector3): Vector3 | null;
+    static containsPoint(point: Vector3, a: Vector3, b: Vector3, c: Vector3): boolean;
+    static getInterpolation<T extends Vector2 | Vector3 | Vector4>(point: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, v1: T, v2: T, v3: T, target: T): T | null;
+    static getInterpolatedAttribute<T extends Vector2 | Vector3 | Vector4>(attribute: AttributeReader, i1: number, i2: number, i3: number, barycoord: Vector3, target: T): T;
+    static isFrontFacing(a: Vector3, b: Vector3, c: Vector3, direction: Vector3): boolean;
+    set(a: Vector3, b: Vector3, c: Vector3): this;
+    setFromPointsAndIndices(points: readonly Vector3[], i0: number, i1: number, i2: number): this;
+    setFromAttributeAndIndices(attribute: AttributeReader, i0: number, i1: number, i2: number): this;
+    clone(): Triangle;
+    copy(triangle: Triangle): this;
+    getArea(): number;
+    getMidpoint(target: Vector3): Vector3;
+    getNormal(target: Vector3): Vector3;
+    getPlane(target: Plane): Plane;
+    getBarycoord(point: Vector3, target: Vector3): Vector3 | null;
+    getInterpolation<T extends Vector2 | Vector3 | Vector4>(point: Vector3, v1: T, v2: T, v3: T, target: T): T | null;
+    containsPoint(point: Vector3): boolean;
+    isFrontFacing(direction: Vector3): boolean;
+    intersectsBox(box: Box3): boolean;
+    closestPointToPoint(point: Vector3, target: Vector3): Vector3;
+    equals(triangle: Triangle): boolean;
+  }
+  /** Six planes bounding a view (since API_MINOR 18), for the game's own
+   * culling: `setFromProjectionMatrix(new Matrix4().multiplyMatrices(
+   * camera.projectionMatrix, camera.matrixWorldInverse))`. */
+  export class Frustum {
+    constructor(p0?: Plane, p1?: Plane, p2?: Plane, p3?: Plane, p4?: Plane, p5?: Plane);
+    planes: Plane[];
+    set(p0: Plane, p1: Plane, p2: Plane, p3: Plane, p4: Plane, p5: Plane): this;
+    copy(frustum: Frustum): this;
+    setFromProjectionMatrix(m: Matrix4, coordinateSystem?: number, reversedDepth?: boolean): this;
+    /** By its (or its geometry's) bounding sphere in the world. */
+    intersectsObject(object: Object3D): boolean;
+    intersectsSprite(sprite: Sprite): boolean;
+    intersectsSphere(sphere: Sphere): boolean;
+    intersectsBox(box: Box3): boolean;
+    containsPoint(point: Vector3): boolean;
+    clone(): Frustum;
+  }
 
   // -- Constants (three.js names) ----------------------------------------------
   export type Side = "front" | "back" | "double";
@@ -1620,9 +2244,31 @@ declare module "starhermit:scene" {
     /** Releases the GPU image; materials using it draw without it. Using a
      * disposed texture throws a TypeError. */
     dispose(): void;
+    name: string;
+    userData: Record<string, unknown>;
+    /** A texture of the same image with its own settings (three.js; since
+     * API_MINOR 18 its offset, repeat, wrapping and filters may differ
+     * from this one's, as for a sprite sheet's frames): a CanvasTexture's
+     * shows the same canvas, a DataTexture's the same data, a loaded
+     * texture's the same package image (loaded again, a frame or so; this
+     * one's image until then), each a GPU image of its own. A render
+     * target's, a CubeTexture's and a PMREM texture's share the image (a
+     * render target's its sampler and UV transform too). Before
+     * API_MINOR 18 `clone` returned the texture itself. */
+    clone(): Texture;
+    /** `source`'s settings: wrapping, filters, offset, repeat, center,
+     * rotation, anisotropy, mapping, color space, mipmaps, name, userData
+     * by JSON (since API_MINOR 18). */
+    copy(source: Texture): this;
   }
   /** A canvas's pixels; set `needsUpdate` after drawing to show changes. */
   export class CanvasTexture extends Texture {
+    /** Makes the canvas's image (an empty canvas's once it has a size),
+     * counted against the image budget at once: past it the constructor
+     * throws a RangeError naming the budget and `engine.limits.image_mib`,
+     * which the game may catch, and the game runs on. A canvas grown past
+     * the budget since keeps showing its last image, with a warning, when
+     * `needsUpdate` asks for the new one. */
     constructor(canvas: OffscreenCanvas);
     readonly canvas: OffscreenCanvas;
   }
@@ -1681,7 +2327,12 @@ declare module "starhermit:scene" {
    * `environmentReady`); a game holds at most 8 (RangeError), each counting
    * about 1.4 MiB against the image budget, and images waiting for their
    * prefilters hold at most 256 MiB together (RangeError; cube faces are
-   * squares of at most 2,048; a room counts 8 MiB while it is made). */
+   * squares of at most 2,048; a room counts 8 MiB while it is made). Since
+   * API_MINOR 18 it is prefiltered as three.js r16x's PMREM is (its
+   * Gaussian blurs for each roughness, the light weighed by solid angle);
+   * before, light near the zenith or nadir (a ceiling's lamp, a high sun, a
+   * cube's top face) lit rough and mid-rough surfaces up to three times too
+   * brightly, which older minors keep. */
   export class PMREMGenerator {
     constructor(renderer?: Renderer);
     fromEquirectangular(texture: Texture): { readonly texture: Texture; readonly width: number; readonly height: number; dispose(): void };
@@ -1712,15 +2363,17 @@ declare module "starhermit:scene" {
    * `PMREMGenerator.fromScene`: the studio-like room of model-viewer's
    * EnvironmentScene. A white box room (`MeshStandardMaterial`, roughness
    * 1) with six white boxes on its floor, lit by one point light
-   * (intensity 900, distance 28, decay 2) and showing six emissive panels
-   * (intensities 50, 50, 17, 43, 20 and 100), all at three.js's sizes and
-   * places. The runtime makes the room's image itself (traced, shaded as
-   * three.js's renderer shades it in `fromScene`'s cube camera, on the
-   * prefilter's worker), so this is not an Object3D and holds nothing.
-   * three.js r155–r162 constructed without a renderer gave the light its
-   * legacy-lights intensity 5, which their physically based lights show as
-   * a near-black room; this is r163 and later (and r155–r162 given a
-   * renderer, and the legacy lights' look before r155). three.js r18x lowers the room by
+   * (distance 28, decay 2) and showing six emissive panels (intensities
+   * 50, 50, 17, 43, 20 and 100), all at three.js's sizes and places. The
+   * runtime makes the room's image itself (traced, shaded as three.js's
+   * renderer shades it in `fromScene`'s cube camera, on the prefilter's
+   * worker), so this is not an Object3D and holds nothing. The light's
+   * intensity is three.js r155–r162's (since API_MINOR 18): 900 for
+   * `new RoomEnvironment(renderer)`, 5 for `new RoomEnvironment()` (a
+   * near-black room lit by its panels, about a third as bright on what it
+   * lights, as three.js r16x games constructed it). A port of three.js
+   * r163 or later, where the light is always 900, passes the renderer.
+   * Before API_MINOR 18 the light is 900 either way. three.js r18x lowers the room by
    * setting `position.y = -3.5`; here `position` is (0, 0, 0), as in r16x,
    * and only moves the room. */
   export class RoomEnvironment {
@@ -1837,7 +2490,10 @@ declare module "starhermit:scene" {
     readonly isWebGLRenderTarget: true;
   }
   /** Loads package images (PNG or WebP; an animated WebP's first frame)
-   * through the engine's decoders. */
+   * through the engine's decoders. Loads requested at once read their
+   * files side by side, each holding its file's size of the 64 MiB the
+   * engine keeps for files being read; past that they wait for the ones
+   * before them rather than fail. */
   export class TextureLoader {
     constructor();
     /** Rejects with a TypeError for a bad path, an Error named
@@ -1855,17 +2511,28 @@ declare module "starhermit:scene" {
     scenes: Group[];
     /** Always empty (animations are not read). */
     animations: never[];
-    /** Optional features present in the file that were not applied
-     * (normal maps, texture transforms, extra attributes), each once. */
+    /** What the file has that was not applied, each once (extensions,
+     * texture transforms, maps on a second UV set, extra attributes,
+     * animations and skins, morph targets, images that did not decode),
+     * as the console warning names them. */
     ignored: string[];
   }
   /** three.js's GLTFLoader for package `.glb` and `.gltf` files, read off
    * the game's thread (since API_MINOR 5). Each node becomes an `Object3D` with the node's name
    * and transform: a `Mesh` for a mesh of one primitive, otherwise a
    * `Group` holding a `Mesh` per primitive (the mesh's name on each).
-   * Materials are `MeshStandardMaterial` (metallic-roughness: base color
-   * factor and texture, metalness, roughness, alpha mode, double-sided) or
-   * `MeshBasicMaterial` for `KHR_materials_unlit`; a primitive with
+   * Materials are `MeshStandardMaterial` or `MeshBasicMaterial` for
+   * `KHR_materials_unlit` (base color only), with glTF 2.0's core material
+   * as three.js's GLTFLoader maps it: base color factor and `map`;
+   * metalness and roughness factors and the metallic-roughness texture as
+   * both `roughnessMap` and `metalnessMap`; `normalMap` with
+   * `normalScale` (scale, scale) (three.js negates y for glTF's unflipped
+   * UVs; the engine's are flipped, so it does not); `aoMap` with
+   * `aoMapIntensity` from the occlusion strength; `emissive`,
+   * `emissiveMap` and `emissiveIntensity` from `emissiveFactor` and
+   * `KHR_materials_emissive_strength`; alpha mode and cutoff;
+   * double-sided. Maps use UV set 0 only (the engine has no second UV
+   * set): one on `texCoord` 1 is left out. A primitive with
    * `COLOR_0` gets its own copy with `vertexColors` (a four-component
    * `color` attribute). Geometries carry `position`, `normal`, `uv` (in
    * three.js's bottom-left convention) and 32-bit indices; a mesh used by
@@ -1875,10 +2542,36 @@ declare module "starhermit:scene" {
    * positions, normals and texture coordinates) are decoded in-house on
    * the same thread; decoded Draco data counts toward the 128 MiB of
    * binary data a document may hold. External buffers and images are
-   * package files beside the document (`uri` relative to it); external
-   * images load as `TextureLoader` textures, embedded PNG and WebP images
-   * through a canvas; an image that fails to load leaves its material
-   * untextured. A file and its buffers are at most 64 MiB, and the
+   * package files beside the document (`uri` relative to it). Textures
+   * are made as three.js's GLTFLoader makes them: the glTF sampler's
+   * `magFilter`, `minFilter`, `wrapS` and `wrapT` (WebGL's codes as
+   * three.js's filter and wrapping constants; without a sampler, or for a
+   * filter it leaves unset, repeat wrapping, `LinearFilter` and
+   * `LinearMipmapLinearFilter`, with mipmaps for a mipmap minification
+   * filter), `SRGBColorSpace` for base color, and the texture's or image's
+   * name. glTF's top-left UVs are converted instead of setting three.js's
+   * `flipY = false` (the engine's textures have no `flipY`; the result
+   * looks the same). External and embedded PNG and WebP images (at most
+   * 16 MiB encoded) decode off the game's thread as textures, not
+   * canvases, so the canvas bounds do not apply: an image past 4,096
+   * pixels on a side, or past what the game's image budget has left
+   * (`engine.limits.image_mib`; a 4096 × 4096 image with mipmaps takes
+   * 85 MiB of the default 56), is halved until it fits, as three.js and
+   * browsers resize a texture past the GPU's largest, with a console
+   * warning naming the image and the limit; one past the decoders' bounds
+   * (16,384 pixels on a side, 16,777,216 in all) or with no image budget
+   * left rejects the load with a RangeError naming the image and the
+   * limit. JPEG images are not decoded (the engine decodes PNG and WebP
+   * only); one, or an image that fails to decode or is missing, leaves its
+   * maps out. `EXT_texture_webp`, required or optional, is read as
+   * three.js reads it: the texture's WebP image first, its core `source`
+   * when that fails (named in the warning). Not applied: JPEG and other
+   * image formats (`KHR_texture_basisu`),
+   * `KHR_texture_transform`, UV sets past 0, other material extensions
+   * (clearcoat, transmission, sheen, …), cameras, lights, animations,
+   * skins and morph targets. The rest of the model loads, and one console
+   * warning per model names all that was not applied (also in `ignored`),
+   * never silently. A file and its buffers are at most 64 MiB, and the
    * document within the reader's limits (1,048,576 vertices and 3,145,728
    * indices per primitive, 4,096 primitives, 16,384 nodes, 256 images,
    * 128 MiB of decoded buffers).
@@ -1951,9 +2644,73 @@ declare module "starhermit:scene" {
      * `updateRange`/`addUpdateRange`). */
     addUpdateRange(offset: number, count: number): void;
     clearUpdateRanges(): void;
+    /** Item `index`'s components (normalized values as numbers, written
+     * back as the array's integers), as three.js. */
+    getX(index: number): number;
+    getY(index: number): number;
+    getZ(index: number): number;
+    getW(index: number): number;
+    setX(index: number, x: number): this;
+    setY(index: number, y: number): this;
+    setZ(index: number, z: number): this;
+    setXY(index: number, x: number, y: number): this;
+    setXYZ(index: number, x: number, y: number, z: number): this;
+    setXYZW(index: number, x: number, y: number, z: number, w: number): this;
+    /** A copy with its own values. */
+    clone(): BufferAttribute;
+    // Since API_MINOR 18.
+    setW(index: number, w: number): this;
+    getComponent(index: number, component: number): number;
+    setComponent(index: number, component: number, value: number): this;
+    /** Item `index2` of `attribute` into item `index1` (raw values). */
+    copyAt(index1: number, attribute: BufferAttribute, index2: number): this;
+    /** Raw values from an array (it must fit). */
+    copyArray(array: ArrayLike<number>): this;
+    /** Raw values from an array at `offset` (it must fit). */
+    set(value: ArrayLike<number>, offset?: number): this;
+    /** A copy of `source`'s values, item size, normalization, name and
+     * usage (its count becomes `source`'s). */
+    copy(source: BufferAttribute): this;
+    /** Each item (two or three components) times the matrix. */
+    applyMatrix3(m: Matrix3): this;
+    /** Each item a point times the matrix. */
+    applyMatrix4(m: Matrix4): this;
+    /** Each item a normal times a normal matrix, normalized. */
+    applyNormalMatrix(m: Matrix3): this;
+    /** Each item a direction turned by the matrix, normalized. */
+    transformDirection(m: Matrix4): this;
+    name: string;
+    /** three.js's usage hint (`StaticDrawUsage`, `DynamicDrawUsage`):
+     * kept, the engine uploads what changed either way. */
+    usage: number;
+    setUsage(usage: number): this;
+    toJSON(): { itemSize: number; type: string; array: number[]; normalized: boolean };
+    dispose(): void;
   }
+  export const StaticDrawUsage: 35044;
+  export const DynamicDrawUsage: 35048;
+  export const StreamDrawUsage: 35040;
   export class Float32BufferAttribute extends BufferAttribute {
-    constructor(array: ArrayLike<number>, itemSize: number);
+    /** An array of numbers, or (since API_MINOR 18) a length, and
+     * `normalized`. */
+    constructor(array: ArrayLike<number> | number, itemSize: number, normalized?: boolean);
+  }
+  // three.js's other typed attributes (since API_MINOR 18): an array of
+  // numbers or a length made into the type's array.
+  export class Int8BufferAttribute extends BufferAttribute {
+    constructor(array: ArrayLike<number> | number, itemSize: number, normalized?: boolean);
+  }
+  export class Uint8BufferAttribute extends BufferAttribute {
+    constructor(array: ArrayLike<number> | number, itemSize: number, normalized?: boolean);
+  }
+  export class Int16BufferAttribute extends BufferAttribute {
+    constructor(array: ArrayLike<number> | number, itemSize: number, normalized?: boolean);
+  }
+  export class Uint16BufferAttribute extends BufferAttribute {
+    constructor(array: ArrayLike<number> | number, itemSize: number, normalized?: boolean);
+  }
+  export class Uint32BufferAttribute extends BufferAttribute {
+    constructor(array: ArrayLike<number> | number, itemSize: number, normalized?: boolean);
   }
   export type AttributeName = "position" | "normal" | "uv" | "color" | "custom";
   export class BufferGeometry {
@@ -1976,8 +2733,13 @@ declare module "starhermit:scene" {
     readonly index: BufferAttribute | null;
     readonly attributes: Readonly<Record<string, BufferAttribute>>;
     computeVertexNormals(): void;
-    /** Model-space bounding sphere (for culling, picking and shadows). */
+    /** Model-space bounding sphere (for culling, picking and shadows): a
+     * Sphere since API_MINOR 18. */
     computeBoundingSphere(): void;
+    /** The box around the positions (since API_MINOR 18; null until
+     * `computeBoundingBox`, which `Box3.setFromObject` calls). */
+    boundingBox: Box3 | null;
+    computeBoundingBox(): void;
     /** Culls the geometry's meshes when set (since API_MINOR 7), in place
      * of a sphere around its vertices: set or inflate it when a custom
      * material's vertex hook moves vertices past them (skinning, wind).
@@ -1986,7 +2748,7 @@ declare module "starhermit:scene" {
      * three.js draws such meshes (earlier engines threw). Changing it
      * uploads the geometry again. A geometry without attributes (see
      * `drawRange`) culls by it alone: without it, it is never culled. */
-    boundingSphere: { center: Vector3; radius: number } | null;
+    boundingSphere: Sphere | { center: Vector3; radius: number } | null;
     translate(x: number, y: number, z: number): this;
     rotateX(angle: number): this;
     rotateY(angle: number): this;
@@ -1997,10 +2759,28 @@ declare module "starhermit:scene" {
     applyQuaternion(quaternion: Quaternion): this;
     /** Each triangle its own three vertices (no index). */
     toNonIndexed(): BufferGeometry;
+    /** A BufferGeometry with copies of the attributes, index, groups,
+     * bounds and (since API_MINOR 18) draw range and name. */
     clone(): BufferGeometry;
+    /** Copies of `source`'s attributes, index, groups, bounds and draw
+     * range, its name, and its userData shared (three.js). */
+    copy(source: BufferGeometry): this;
+    name: string;
+    userData: Record<string, unknown>;
     /** Releases the GPU mesh (it is made again if drawn). */
     dispose(): void;
-    /** Which vertices `Points` draw (meshes with attributes draw all).
+    /** Which elements draw, as three.js draws them: `count` from `start`
+     * (`count` Infinity, the default, to the end), of the index when the
+     * geometry has one, else of its vertices in order (three a
+     * triangle). `Points` draw the range's vertices, `Line`,
+     * `LineSegments` and `LineLoop` its vertices or indices, and since
+     * API_MINOR 18 a `Mesh` (an `InstancedMesh`'s every instance, and a
+     * material array's groups within it) draws the range too, natively and
+     * in browsers (before, meshes with attributes drew all). Changing it
+     * only changes the draw: nothing is uploaded again, so a ribbon or a
+     * trail can fill a buffer ahead and extend its range each frame. A
+     * range past the geometry draws what lies within it; rays hit only
+     * the range's triangles.
      *
      * A geometry with no `position` (and no other attribute or index)
      * draws `count` vertices, three a triangle, for a custom material's
@@ -2258,6 +3038,85 @@ declare module "starhermit:scene" {
     readonly type: "EdgesGeometry";
     readonly parameters: { geometry: BufferGeometry | null; thresholdAngle: number };
   }
+  /** Every triangle's edges, each once whichever way round (three.js
+   * `WireframeGeometry`, since API_MINOR 18): `position` holds two
+   * vertices an edge, for `LineSegments`. An indexed geometry's groups
+   * are read in turn (its whole index without groups). */
+  export class WireframeGeometry extends BufferGeometry {
+    constructor(geometry?: BufferGeometry | null);
+    readonly type: "WireframeGeometry";
+    readonly parameters: { geometry: BufferGeometry | null };
+  }
+
+  // -- Polyhedra, lathe, torus knot and rounded box (since API_MINOR 18) ---------
+  // three.js r185's, built as it builds them: positions, normals, UVs, index
+  // and groups are three.js's, bit for bit. Segment counts are whole
+  // numbers (fractions dropped) of 1 to 1,024, and a geometry past
+  // 1,048,576 vertices is refused before it is made (RangeError).
+  /** `vertices` (x, y, z each) and `indices` (three a face) pushed out to
+   * a sphere of `radius`, each face divided `detail` times (a whole number
+   * from 0, else RangeError), as three.js `PolyhedronGeometry`: not
+   * indexed, UVs by longitude and latitude, flat normals at detail 0 and
+   * smooth above. */
+  export class PolyhedronGeometry extends BufferGeometry {
+    constructor(vertices?: number[], indices?: number[], radius?: number, detail?: number);
+    readonly type: "PolyhedronGeometry" | "IcosahedronGeometry" | "OctahedronGeometry" | "DodecahedronGeometry" | "TetrahedronGeometry";
+    /** The subclasses' hold only `radius` and `detail`. */
+    readonly parameters: { vertices?: number[]; indices?: number[]; radius: number; detail: number };
+  }
+  /** 20 faces (radius 1, detail 0 by default; detail 1 or more is a
+   * geodesic sphere). */
+  export class IcosahedronGeometry extends PolyhedronGeometry {
+    constructor(radius?: number, detail?: number);
+    readonly type: "IcosahedronGeometry";
+  }
+  /** 8 faces. */
+  export class OctahedronGeometry extends PolyhedronGeometry {
+    constructor(radius?: number, detail?: number);
+    readonly type: "OctahedronGeometry";
+  }
+  /** 12 pentagons, three triangles each. */
+  export class DodecahedronGeometry extends PolyhedronGeometry {
+    constructor(radius?: number, detail?: number);
+    readonly type: "DodecahedronGeometry";
+  }
+  /** 4 faces. */
+  export class TetrahedronGeometry extends PolyhedronGeometry {
+    constructor(radius?: number, detail?: number);
+    readonly type: "TetrahedronGeometry";
+  }
+  /** `points` (x the distance from the Y axis, y the height) turned about
+   * the Y axis in `segments` steps (default 12) over `phiLength` (default
+   * a full turn, at most one) from `phiStart` (three.js `LatheGeometry`):
+   * indexed. Default: a diamond of three points; one point is a
+   * TypeError. */
+  export class LatheGeometry extends BufferGeometry {
+    constructor(points?: Vector2[], segments?: number, phiStart?: number, phiLength?: number);
+    readonly type: "LatheGeometry";
+    readonly parameters: { points: Vector2[]; segments: number; phiStart: number; phiLength: number };
+  }
+  /** A tube of radius `tube` (default 0.4) along a (`p`, `q`) torus knot
+   * (default 2, 3) of `radius` (default 1), `tubularSegments` (default 64)
+   * along and `radialSegments` (default 8) around (three.js
+   * `TorusKnotGeometry`): indexed. */
+  export class TorusKnotGeometry extends BufferGeometry {
+    constructor(radius?: number, tube?: number, tubularSegments?: number, radialSegments?: number, p?: number, q?: number);
+    readonly type: "TorusKnotGeometry";
+    readonly parameters: { radius: number; tube: number; tubularSegments: number; radialSegments: number; p: number; q: number };
+  }
+  /** A box (default 1 × 1 × 1) with edges and corners rounded to `radius`
+   * (default 0.1, at most half the shortest side) in `segments` (default 2,
+   * from 0) steps: three.js's addon `RoundedBoxGeometry`
+   * (examples/jsm/geometries/RoundedBoxGeometry.js), exported here as the
+   * engine has no addons path; there it extends BoxGeometry, here
+   * BufferGeometry. Not indexed, a group a face as a box's (+x, -x, +y,
+   * -y, +z, -z); at `segments` 0 three.js's unit box, whatever the
+   * size. */
+  export class RoundedBoxGeometry extends BufferGeometry {
+    constructor(width?: number, height?: number, depth?: number, segments?: number, radius?: number);
+    readonly type: "RoundedBoxGeometry";
+    readonly parameters: { width: number; height: number; depth: number; segments: number; radius: number };
+  }
 
   // -- Materials ----------------------------------------------------------------
   export interface MaterialParameters {
@@ -2366,7 +3225,12 @@ declare module "starhermit:scene" {
      * it compiles when first drawn), throwing a SyntaxError with
      * `shaderError`'s message if it is refused. */
     compile(): void;
+    /** A material of the same class with this one's settings: colors and
+     * vectors copied, textures shared (three.js); since API_MINOR 18 its
+     * userData copied by JSON and a ShaderMaterial's uniforms cloned. */
     clone(): this;
+    /** `source`'s settings, as `clone` takes them (since API_MINOR 18). */
+    copy(source: Material): this;
     dispose(): void;
   }
 
@@ -2578,6 +3442,17 @@ declare module "starhermit:scene" {
     aoMapIntensity?: number;
     envMap?: Texture | null;
     envMapIntensity?: number;
+    /** Since API_MINOR 18: a height map (red channel) whose slope tilts
+     * the normal, read only without a `normalMap` (three.js). */
+    bumpMap?: Texture | null;
+    /** Default 1; within ±16. */
+    bumpScale?: number;
+    /** Since API_MINOR 18: faceted shading (default false). */
+    flatShading?: boolean;
+    /** Since API_MINOR 18: draw the triangles' edges (default false). */
+    wireframe?: boolean;
+    /** Kept, and always 1 (WebGL draws one-pixel lines). */
+    wireframeLinewidth?: number;
   }
   /** Metallic/roughness (glTF-style) shading with three.js's maps. */
   export class MeshStandardMaterial extends Material {
@@ -2600,8 +3475,39 @@ declare module "starhermit:scene" {
      * (default 1). */
     aoMap: Texture | null;
     aoMapIntensity: number;
-    /** Scales the environment's light (default 1). */
+    /** Scales the environment's light (default 1): its `envMap`'s, or the
+     * scene's (`scene.environment`) times `scene.environmentIntensity`.
+     * Until host API 1.18 the scene's environment took only
+     * `environmentIntensity`, as three.js r163 and later's WebGLRenderer
+     * does (it overrides the material's with it); three.js r162 and
+     * earlier, and its WebGPURenderer, take the material's, as this does. */
     envMapIntensity: number;
+    /** Since API_MINOR 18: a height map whose red channel's screen-space
+     * slope tilts the normal (three.js's derivative bump mapping,
+     * `perturbNormalArb`), scaled by `bumpScale` (default 1, within ±16);
+     * three.js reads it only without a `normalMap`, and so does the
+     * runtime. It takes the normal map's UVs and its own transform. */
+    bumpMap: Texture | null;
+    bumpScale: number;
+    /** Since API_MINOR 18: faceted shading, each fragment its triangle's
+     * normal from the screen-space derivatives of its position (facing
+     * the viewer, as three.js's shader makes it), the geometry's normals
+     * unused and unchanged. */
+    flatShading: boolean;
+    /** Since API_MINOR 18: draws each triangle's three edges as lines one
+     * pixel wide (three.js's renderer's wireframe index: an edge two
+     * triangles share is drawn twice), shaded per pixel as the material
+     * shades its surface (lit materials light them with the geometry's
+     * normals). A wireframe casts no shadow (three.js's casts its lines'),
+     * is left out of ambient occlusion, runs no custom hooks, and rays hit
+     * its triangles as three.js's do. Meshes, material arrays' groups and
+     * instanced meshes draw it; other meshes (a glTF's, skinned ones)
+     * draw filled. */
+    wireframe: boolean;
+    /** Kept, and always 1 (WebGL draws one-pixel lines). */
+    wireframeLinewidth: number;
+    wireframeLinecap: string;
+    wireframeLinejoin: string;
   }
   export interface MeshPhysicalMaterialParameters extends MeshStandardMaterialParameters {
     /** 0–1 (default 0). */
@@ -2611,7 +3517,10 @@ declare module "starhermit:scene" {
   }
   /** A standard material with a clear coat over it (three.js
    * `MeshPhysicalMaterial`: `clearcoat`, `clearcoatRoughness`; its other
-   * physical properties are kept but not drawn). */
+   * physical properties are kept but not drawn: sheen, iridescence,
+   * transmission, thickness, specular and anisotropy are not supported,
+   * so `sheen`, `iridescence` and their colors, maps and ranges change
+   * nothing). */
   export class MeshPhysicalMaterial extends MeshStandardMaterial {
     constructor(parameters?: MeshPhysicalMaterialParameters);
     clearcoat: number;
@@ -2626,6 +3535,17 @@ declare module "starhermit:scene" {
     aoMap?: Texture | null;
     aoMapIntensity?: number;
     envMap?: Texture | null;
+    /** Since API_MINOR 18: a height map (red channel) whose slope tilts
+     * the normal, read only without a `normalMap` (three.js). */
+    bumpMap?: Texture | null;
+    /** Default 1; within ±16. */
+    bumpScale?: number;
+    /** Since API_MINOR 18: faceted shading (default false). */
+    flatShading?: boolean;
+    /** Since API_MINOR 18: draw the triangles' edges (default false). */
+    wireframe?: boolean;
+    /** Kept, and always 1 (WebGL draws one-pixel lines). */
+    wireframeLinewidth?: number;
   }
   /** Diffuse light only (three.js `MeshLambertMaterial`), cheaper than
    * standard shading. Its `envMap`, else `scene.environment`, gives it the
@@ -2640,6 +3560,14 @@ declare module "starhermit:scene" {
     normalScale: Vector2;
     aoMap: Texture | null;
     aoMapIntensity: number;
+    /** As MeshStandardMaterial's (since API_MINOR 18). */
+    bumpMap: Texture | null;
+    bumpScale: number;
+    flatShading: boolean;
+    wireframe: boolean;
+    wireframeLinewidth: number;
+    wireframeLinecap: string;
+    wireframeLinejoin: string;
   }
   export interface PointsMaterialParameters extends MaterialParameters {
     /** Pixels (default 1), times the display's pixel ratio, at most 1,024. */
@@ -2677,9 +3605,39 @@ declare module "starhermit:scene" {
     linecap: string;
     linejoin: string;
   }
+  export interface MeshBasicMaterialParameters extends MaterialParameters {
+    /** Since API_MINOR 18: draw the triangles' edges (default false). */
+    wireframe?: boolean;
+    /** Kept, and always 1 (WebGL draws one-pixel lines). */
+    wireframeLinewidth?: number;
+  }
   /** Unlit: shows `color` × `map` whatever lights the scene. */
   export class MeshBasicMaterial extends Material {
+    constructor(parameters?: MeshBasicMaterialParameters);
+    /** Since API_MINOR 18: draws each triangle's three edges as lines one
+     * pixel wide (three.js's renderer's wireframe index: an edge two
+     * triangles share is drawn twice), shaded per pixel as the material
+     * shades its surface (lit materials light them with the geometry's
+     * normals). A wireframe casts no shadow (three.js's casts its lines'),
+     * is left out of ambient occlusion, runs no custom hooks, and rays hit
+     * its triangles as three.js's do. Meshes, material arrays' groups and
+     * instanced meshes draw it; other meshes (a glTF's, skinned ones)
+     * draw filled. */
+    wireframe: boolean;
+    /** Kept, and always 1 (WebGL draws one-pixel lines). */
+    wireframeLinewidth: number;
+    wireframeLinecap: string;
+    wireframeLinejoin: string;
+  }
+  /** Since API_MINOR 18: three.js `ShadowMaterial`, for shadow-catcher
+   * floors: draws only the shadows its mesh receives (`receiveShadow`),
+   * `color` (default black) at `opacity` times how shadowed each point is
+   * (every shadow-casting light's shadow multiplied), transparent elsewhere
+   * and where it receives none; not otherwise lit. `transparent` is true by
+   * default; fog applies (`fog`). Not with `hooks` (they are ignored). */
+  export class ShadowMaterial extends Material {
     constructor(parameters?: MaterialParameters);
+    readonly isShadowMaterial: true;
   }
   export interface SpriteMaterialParameters extends MaterialParameters {
     /** Radians, counter-clockwise in the view plane. */
@@ -2713,6 +3671,9 @@ declare module "starhermit:scene" {
     /** Lower draws first among opaque objects, and among blended ones before
      * they sort farthest first (three.js `renderOrder`). */
     renderOrder: number;
+    /** Since API_MINOR 18 a mesh with a transparent (blended) material
+     * casts too, its depth whole as an opaque one's, whatever its opacity
+     * (three.js); games declaring older minors' cast none. */
     castShadow: boolean;
     receiveShadow: boolean;
     /** Whether a mesh out of view (by its geometry's bounds, or for an
@@ -2763,6 +3724,63 @@ declare module "starhermit:scene" {
     worldToLocal(vector: Vector3): Vector3;
     traverse(callback: (object: Object3D) => void): void;
     getObjectByName(name: string): Object3D | undefined;
+    // Since API_MINOR 18.
+    /** The layers a Raycaster tests it on (layer 0 by default). The
+     * renderer draws every visible object whatever its layers. */
+    readonly layers: Layers;
+    /** three.js's (kept, not played). */
+    animations: unknown[];
+    /** An object of the same class with this one's settings and, unless
+     * `recursive` is false, clones of its children, as three.js's: meshes,
+     * points, lines and sprites share their geometry and material (an
+     * array copied), an InstancedMesh copies its instances' matrices,
+     * colors and custom values, cameras and lights copy their settings (a
+     * light's target is cloned), userData is copied by JSON. A glTF
+     * model's `gltf.scene.clone()` is a copy to add as often as wanted,
+     * sharing the model's geometry and materials. A class of the game's
+     * own is made with no constructor arguments, as in three.js. The
+     * scene cannot be cloned (TypeError). */
+    clone(recursive?: boolean): this;
+    /** `source`'s settings (name, up, position, rotation, quaternion,
+     * scale, matrixAutoUpdate, layers, visible, castShadow, receiveShadow,
+     * noAO, frustumCulled, renderOrder, animations, userData by JSON) and,
+     * unless `recursive` is false, clones of its children added here. */
+    copy(source: Object3D, recursive?: boolean): this;
+    readonly up: Vector3;
+    matrixAutoUpdate: boolean;
+    getObjectById(id: number): Object3D | undefined;
+    getObjectByProperty(name: string, value: unknown): Object3D | undefined;
+    getObjectsByProperty(name: string, value: unknown, result?: Object3D[]): Object3D[];
+    traverseVisible(callback: (object: Object3D) => void): void;
+    traverseAncestors(callback: (object: Object3D) => void): void;
+    getWorldScale(target: Vector3): Vector3;
+    rotateOnWorldAxis(axis: Vector3, angle: number): this;
+    translateOnAxis(axis: Vector3, distance: number): this;
+    attach(object: Object3D): this;
+    /** Its transform becomes `matrix` times it. */
+    applyMatrix4(matrix: Matrix4): this;
+    applyQuaternion(q: Quaternion): this;
+    setRotationFromAxisAngle(axis: Vector3, angle: number): void;
+    setRotationFromEuler(euler: Euler): void;
+    setRotationFromMatrix(m: Matrix4): void;
+    setRotationFromQuaternion(q: Quaternion): void;
+    updateMatrix(): void;
+    updateWorldMatrix(updateParents?: boolean, updateChildren?: boolean): void;
+  }
+  /** Which of 32 layers an object is on (three.js `Layers`; since
+   * API_MINOR 18). */
+  export class Layers {
+    /** One bit a layer (layer 0 by default). */
+    mask: number;
+    set(layer: number): void;
+    enable(layer: number): void;
+    enableAll(): void;
+    toggle(layer: number): void;
+    disable(layer: number): void;
+    disableAll(): void;
+    /** Whether the two share a layer. */
+    test(layers: Layers): boolean;
+    isEnabled(layer: number): boolean;
   }
   export class Group extends Object3D {
     constructor();
@@ -2782,6 +3800,8 @@ declare module "starhermit:scene" {
      * infers, types it as an array; three.js's own typings say `Material |
      * Material[]`.) */
     material: TMaterial;
+    /** Vertex `index`'s model-space position (since API_MINOR 18). */
+    getVertexPosition(index: number, target: Vector3): Vector3;
   }
   /** One geometry and material drawn `count` times with per-instance
    * transforms and colors. A game's instanced meshes hold at most 262,144
@@ -2834,6 +3854,12 @@ declare module "starhermit:scene" {
      * API_MINOR 7). */
     setCustomAt(index: number, value: Vector4, slot?: number): void;
     getCustomAt(index: number, target: Vector4, slot?: number): void;
+    /** The box and sphere around its first `count` instances (three.js;
+     * since API_MINOR 18; null until computed). */
+    boundingBox: Box3 | null;
+    boundingSphere: Sphere | null;
+    computeBoundingBox(): void;
+    computeBoundingSphere(): void;
   }
   /** Points (three.js `Points`): a square per vertex of the geometry's
    * `position` in its draw range, colored by its `color` attribute when the
@@ -2882,6 +3908,8 @@ declare module "starhermit:scene" {
   }
 
   // -- Cameras ------------------------------------------------------------------
+  /** Objects and lights parented to a camera (a held item, a headlamp) draw
+   * only once the camera itself is added to the scene, as in three.js. */
   export abstract class Camera extends Object3D {
     near: number;
     far: number;
@@ -3054,8 +4082,42 @@ declare module "starhermit:scene" {
   export class Scene extends Object3D {
     #private;
     private constructor();
-    /** The clear color behind everything (default black); null keeps black. */
-    background: Color | null;
+    /** What is behind everything (three.js), in the window and in
+     * `renderer.render(scene, camera)` passes into a render target (which
+     * once took only `renderer.setClearColor`): a Color clears
+     * to it (a pass of the scene clears to it whatever `autoClear` says,
+     * as three.js's does); null keeps black (a pass the renderer's clear
+     * color). Since API_MINOR 18 a texture too, drawn over the clear
+     * behind everything, unfogged, tone mapped unless its `colorSpace` is
+     * `SRGBColorSpace` (three.js r16x's `WebGLBackground`):
+     * - a Texture or CanvasTexture of `UVMapping` (the default) stretched
+     *   over the view, its UVs from the view's bottom left as a plane's
+     *   through its `offset`, `repeat`, `rotation` and `center` (three.js
+     *   leaves the aspect to them: `repeat.x = viewAspect / imageAspect`
+     *   and `offset.x = (1 - repeat.x) / 2` cover a wider view);
+     * - a sky in every direction: a CubeTexture (its images at full
+     *   detail: package paths load through `TextureLoader` once, counted
+     *   against the image budget like any texture; nothing shows until all
+     *   six have; one that cannot load shows the environment instead), a
+     *   texture whose `mapping` is `EquirectangularReflectionMapping` (or
+     *   `EquirectangularRefractionMapping`), or a PMREM texture
+     *   (`PMREMGenerator`'s, which shows its prefiltered 512 × 256 image).
+     *   `backgroundBlurriness` above 0 shows the sky's prefiltered
+     *   environment at that roughness (made as `scene.environment` makes
+     *   one, and shared with it for the same texture: it shows a few frames
+     *   later); a `FloatType` DataTexture's light past 1 comes from it too.
+     *   Other values draw nothing. */
+    background: Color | Texture | null;
+    /** Since API_MINOR 18: a sky background's blur, 0 (sharp, the
+     * default) to 1 (three.js `backgroundBlurriness`; clamped). */
+    backgroundBlurriness: number;
+    /** Since API_MINOR 18: a texture or sky background's light is its
+     * image's times this (three.js `backgroundIntensity`; default 1). */
+    backgroundIntensity: number;
+    /** Since API_MINOR 18: turns a sky background (three.js
+     * `backgroundRotation`, as `environmentRotation` turns the
+     * environment). */
+    readonly backgroundRotation: Euler;
     fog: Fog | FogExp2 | null;
     /** Lights standard, physical and Lambert materials without an `envMap`
      * (three.js): a PMREM texture, a latitude-longitude texture or a
@@ -3358,8 +4420,9 @@ declare module "starhermit:scene" {
      * backend; since API_MINOR 8). The window's scene, drawn at the
      * frame's end, takes the values they have then. The object is placed
      * by its parents, and only the lights under it light it; drawing the
-     * scene brings its fog and environment. Target passes draw without
-     * shadows and post effects (`bloom`, `ao`, `grade`, `antialias`), with
+     * scene brings its fog, environment and background (a background
+     * color clears the area even without `autoClear`). Target passes draw
+     * without shadows and post effects (`bloom`, `ao`, `grade`, `antialias`), with
      * `toneMapping`. A target's own texture cannot show in its pass (the
      * pass is left out with a warning). Without a render target set, it
      * does nothing (three.js ports calling it every frame keep working). A
@@ -3430,15 +4493,29 @@ declare module "starhermit:scene" {
     constructor(origin?: Vector3, direction?: Vector3, near?: number, far?: number);
     near: number;
     far: number;
-    readonly ray: { readonly origin: Vector3; readonly direction: Vector3 };
+    /** A Ray since API_MINOR 18. */
+    readonly ray: Ray;
     /** three.js's per-kind settings, kept for ports (since API_MINOR 17);
      * not read: rays pass through lines and points. */
     params: Record<string, Record<string, unknown>>;
+    /** The layers objects are tested on (since API_MINOR 18): an object is
+     * hit when its `layers` share one with these (layer 0 by default). As
+     * three.js tests layers and not visibility, from API_MINOR 18
+     * (`engine.minor=18`) invisible objects, and objects under invisible
+     * parents, are hit when their layers match (ports pick with invisible
+     * proxy meshes; the ray's sync then sends invisible subtrees too).
+     * Games declaring an older minor keep invisible objects unhit. Only
+     * objects in the scene are hit, as before. */
+    layers: Layers;
+    /** The camera of the last `setFromCamera` (since API_MINOR 18). */
+    camera: Camera | null;
     set(origin: Vector3, direction: Vector3): void;
     /** From normalized device coordinates (−1..1, y up) through a camera. */
     setFromCamera(coords: Vector2, camera: Camera): void;
-    intersectObject(object: Object3D, recursive?: boolean): Intersection[];
-    intersectObjects(objects: readonly Object3D[], recursive?: boolean): Intersection[];
+    /** Hits nearest first; since API_MINOR 18 appended to `intersects`
+     * (sorted with what it held), as three.js. */
+    intersectObject(object: Object3D, recursive?: boolean, intersects?: Intersection[]): Intersection[];
+    intersectObjects(objects: readonly Object3D[], recursive?: boolean, intersects?: Intersection[]): Intersection[];
   }
   /** Window pixels to normalized device coordinates for `setFromCamera`. */
   export function pointerToNdc(x: number, y: number, target?: Vector2): Vector2;
@@ -3790,7 +4867,20 @@ declare module "starhermit:draw" {
     /** Only the part inside this window rectangle draws. */
     clip?: { x: number; y: number; width: number; height: number };
   }
-  export function rect(x: number, y: number, width: number, height: number, color: ColorLike, options?: Clip): void;
+  /** How an item combines with what is drawn under it (since API_MINOR
+   * 18), as canvas composites: `normal` (`source-over`, the default),
+   * `add` (canvas `"lighter"`: colors added, for glows and additive
+   * particles; two overlapping half-bright items make a full one),
+   * `multiply` (darkens; canvas's own over the opaque frame) and `screen`
+   * (lightens). Items of different blends draw in call order, the same
+   * natively and in browsers. Another name is a TypeError. */
+  export type BlendMode = "normal" | "add" | "multiply" | "screen";
+  export interface Blend {
+    /** Since API_MINOR 18. */
+    blend?: BlendMode;
+  }
+  /** `options.blend` since API_MINOR 18. */
+  export function rect(x: number, y: number, width: number, height: number, color: ColorLike, options?: Clip & Blend): void;
   /** An outline `lineWidth` pixels wide inside the rectangle. */
   export function strokeRect(x: number, y: number, width: number, height: number, color: ColorLike, lineWidth?: number, options?: Clip): void;
   /** Since API_MINOR 12 its edge (as `strokeRoundRect`'s) is antialiased
@@ -3812,12 +4902,42 @@ declare module "starhermit:draw" {
    * not; self-intersecting outlines fill as their triangulation falls). */
   export function polygon(points: readonly (readonly [number, number])[], color: ColorLike, options?: Clip): void;
   /** Turns a text or image about `origin` (default its top-left corner, in
-   * window pixels). */
+   * window pixels; a circle, ellipse or arc about its center). */
   export interface Rotation {
     /** Radians, clockwise on screen. */
     rotation?: number;
     origin?: { x: number; y: number };
   }
+  // Circles, ellipses and arcs (since API_MINOR 18), their edges
+  // antialiased over a pixel as `roundRect`'s, the same natively and in
+  // browsers, as smooth as their size needs (no point limit). Each is one
+  // overlay item. A negative radius is a RangeError; a radius of 0 or a
+  // `lineWidth` of 0 draws nothing. Outlines are centered on the curve
+  // (as canvas strokes it; `strokeRect` draws inside), `lineWidth`
+  // default 1, an arc's ends cut square (canvas's butt caps). Angles are
+  // radians from +x, clockwise on screen (canvas's), an ellipse's
+  // parametric as canvas's `ellipse`.
+  export interface ShapeOptions extends Clip, Rotation, Blend {}
+  export interface ArcOptions extends ShapeOptions {
+    /** Goes from `startAngle` to `endAngle` the other way (canvas's
+     * `counterclockwise`): an arc sweeps the way it goes, a whole turn
+     * when the angles are a turn or more apart that way. */
+    counterclockwise?: boolean;
+  }
+  /** Since API_MINOR 18. */
+  export function circle(x: number, y: number, radius: number, color: ColorLike, options?: ShapeOptions): void;
+  /** Since API_MINOR 18; `rotation` turns its axes. */
+  export function ellipse(x: number, y: number, radiusX: number, radiusY: number, color: ColorLike, options?: ShapeOptions): void;
+  /** A filled sector (a pie slice: the arc closed through the center),
+   * since API_MINOR 18: cooldowns and timers. */
+  export function arc(x: number, y: number, radius: number, startAngle: number, endAngle: number, color: ColorLike, options?: ArcOptions): void;
+  /** Since API_MINOR 18. */
+  export function strokeCircle(x: number, y: number, radius: number, color: ColorLike, lineWidth?: number, options?: ShapeOptions): void;
+  /** Since API_MINOR 18. */
+  export function strokeEllipse(x: number, y: number, radiusX: number, radiusY: number, color: ColorLike, lineWidth?: number, options?: ShapeOptions): void;
+  /** The arc alone (no lines to the center), since API_MINOR 18: rings
+   * and progress arcs. */
+  export function strokeArc(x: number, y: number, radius: number, startAngle: number, endAngle: number, color: ColorLike, lineWidth?: number, options?: ArcOptions): void;
   export interface TextOptions extends Clip, Rotation {
     /** Pixels (default 16). */
     size?: number;
@@ -3839,6 +4959,14 @@ declare module "starhermit:draw" {
     letterSpacing?: number;
     /** Drawn first under the text, offset by `x`/`y` pixels. */
     shadow?: { color: ColorLike; x: number; y: number };
+    /** An outline around each glyph under the fill, as canvas's
+     * `strokeText` then `fillText` draw outlined text (since API_MINOR
+     * 18): `width` pixels (default 1, at most 32, RangeError; 0 draws
+     * none) centered on the glyphs' edges, so half of it shows past them,
+     * with round joins; over the shadow. It bakes into an image once for
+     * each text, size and width (a changing text, a score, once a value),
+     * and the text stays one text item (play scripts match it once). */
+    stroke?: { color: ColorLike; width?: number };
     /** Wrap at this width in pixels. */
     maxWidth?: number;
     direction?: "ltr" | "rtl";
@@ -3849,9 +4977,13 @@ declare module "starhermit:draw" {
    * weight's), letter spacing, wrap width and direction, so a width
    * measured here is the width drawn. Drawing is unscaled: this follows
    * neither the player's interface size nor their text size. To lay out
-   * `starhermit:ui` widgets, measure with `ui.measureText`, which does. */
-  export function measureText(text: string, options?: Pick<TextOptions, "size" | "font" | "weight" | "letterSpacing" | "maxWidth" | "direction">): { width: number; height: number };
-  export interface ImageOptions extends Clip, Rotation {
+   * `starhermit:ui` widgets, measure with `ui.measureText`, which does.
+   * With a `stroke` (since API_MINOR 18) both grow by its width, the
+   * outline reaching half of it past each side (the text's fill stays
+   * where it draws without one). */
+  export function measureText(text: string, options?: Pick<TextOptions, "size" | "font" | "weight" | "letterSpacing" | "maxWidth" | "direction" | "stroke">): { width: number; height: number };
+  /** `blend` since API_MINOR 18 (an additive glow sprite: `"add"`). */
+  export interface ImageOptions extends Clip, Rotation, Blend {
     /** Part of the source in its own pixels (default all of it). */
     source?: { x: number; y: number; width: number; height: number };
     /** Multiplies the image (default white). */
@@ -4095,7 +5227,11 @@ declare module "starhermit:ui" {
    * content) it is laid out at the old size, then moved, input and focus
    * included, to where the anchor puts it. It stays in the focus order
    * where it is built. In a stack it counts toward the stack's size;
-   * elsewhere it takes no room. */
+   * elsewhere it takes no room. It is over what was built before it: the
+   * pointer on it (hover, presses, the wheel) is its widgets', never those
+   * under it (a pause card over a board), as for a container with a
+   * background or a style and a scroll area over what is before them in a
+   * stack. Later is on top, by last frame's rectangles. */
   export function place(
     label: string,
     at: Anchor | { anchor?: Anchor; x?: number; y?: number },
@@ -4135,6 +5271,9 @@ declare module "starhermit:ui" {
   /** Wrapped text at most `width` logical pixels wide; a style's
    * `text.align` places each line (since API_MINOR 12). */
   export function paragraph(text: string, width?: number, options?: TextOptions & WidgetOptions): Rect;
+  /** `size` (logical) is the image's own; styled as `image` (or by a
+   * chained `style`), the style's padding and border go around it and the
+   * image fills what they leave (so a style's fixed size stretches it). */
   export function image(alt: string, texture: Texture, size: { width: number; height: number }, uv?: { min: [number, number]; max: [number, number] }, options?: WidgetOptions): Rect;
   /** `value` 0–1. Styled as `progress`, its parts `track` and `fill`. */
   export function progress(value: number, width?: number, options?: WidgetOptions): Rect;
@@ -4208,7 +5347,12 @@ declare module "starhermit:ui" {
    * takes text input at its caret: typing, input method compositions
    * (shown at the caret; scripts' `text` events get the committed text
    * only) and paste (Ctrl+V or Shift+Insert natively; in browsers, through
-   * a text entry the page puts over the field until it loses focus). The
+   * a text entry the page puts over the field until it loses focus). In
+   * browsers that focused text entry is a real one, so on phones and
+   * tablets tapping a text field brings up the on-screen keyboard (a text
+   * keyboard whose Enter reads Done; the tap's release focuses it within
+   * the gesture, as iOS asks), its typing, suggestions and deletions
+   * reaching the field, and leaving the field puts it away. The
    * runtime reads the clipboard for a paste, never the game: the pasted
    * text arrives as typed text does (a `text` event, then the field's new
    * value), on one line (trailing line breaks dropped, the others spaces),
@@ -4901,7 +6045,9 @@ declare module "starhermit:ui" {
    * spaces) and inline style objects for the next widget or container,
    * later ones winning; falsy entries are skipped:
    * `ui.style("tool", active && "active").button(name)`. Chains with `id`
-   * either way round. A class with no style registered is skipped (one
+   * either way round. The next widget or container takes what is chained
+   * (`style`, `id`, `tooltip`) whether or not it uses it (a spacer drops
+   * it), so it never reaches the one after. A class with no style registered is skipped (one
    * warning). Prefer registered classes to inline objects, which are
    * checked each call. */
   export function style(...styles: readonly (string | Style | false | null | undefined)[]): typeof import("starhermit:ui");
@@ -5201,14 +6347,20 @@ declare module "starhermit:audio" {
   // buses (Options › Audio): clip playback for sound effects and music, and
   // a synthesis graph in the Web Audio model (`context`). The game's sound
   // is muted while the window is unfocused when the player asked for that.
+  // In checks (`--check`, `--render-check`) the game plays silently on the
+  // checks' simulated clock, as `frame().time` does: sounds' and streams'
+  // ends, a stream's `position`, sources' `ended` and `currentTime` follow
+  // the frames played, not real time, so a play script sees them at the
+  // same frames in every run.
 
   /** The player's volume group a sound plays in. */
   export type Bus = "music" | "effects" | "interface";
 
   // -- Clips --------------------------------------------------------------------
   /** Decoded samples registered with the mixer. A game holds at most
-   * min(`engine.limits.audio_clips`, 128) clips and min(`audio_mib`, 64 MiB)
-   * of clip data (RangeError). Clips reach the mixer in the order they were
+   * `engine.limits.audio_clips` clips (128 by default; a manifest may raise
+   * it up to 1,024 since API_MINOR 18) and min(`audio_mib`, 64 MiB) of clip
+   * data (RangeError). Clips reach the mixer in the order they were
    * made, a few at a time; in a browser they wait for its audio, which
    * starts with the player's first press, so load them all at the start.
    * One the mixer could not make is logged as a warning, and `play` of it
@@ -5244,7 +6396,12 @@ declare module "starhermit:audio" {
     /** Default `"effects"`. */
     bus?: Bus;
   }
-  /** A playing clip. Control calls on a finished sound do nothing. */
+  /** A playing clip. Control calls on a finished sound do nothing.
+   * `fade`, `setPitch` and `setPan` never throw for the frame's audio
+   * operations: the frame keeps the last of each per sound and sends the
+   * mixer that one, so setting them every step or many times a frame
+   * costs nothing more (before the runtime with host API 1.18 each counted
+   * as one of the frame's 1,024 operations, a RangeError past them). */
   export class Sound {
     #private;
     private constructor();
@@ -5260,17 +6417,23 @@ declare module "starhermit:audio" {
     onEnded(listener: () => void): Unsubscribe;
   }
   /** At most min(`engine.limits.voices`, 256) sounds at once and 1,024 audio
-   * operations a frame (stops and releases always go through); past either
-   * a RangeError. An Error ("the audio clip could not be made: …") for a
-   * clip the mixer could not make. */
+   * operations a frame (plays, a stream's opening, play and pause, and
+   * stops and releases, which always go through; a sound's or stream's
+   * fade, pitch and pan are not counted); past either a RangeError, which
+   * the game can catch. An Error ("the audio clip could not be made: …") for a
+   * clip the mixer could not make. Past the player's sound limit (Options ›
+   * Audio, by default Auto: the device's, never below 16 however loaded
+   * the machine) a sound is not refused: it runs on silently and is heard
+   * once there is room, as a sound the limit displaced. */
   export function play(clip: AudioClip, options?: PlayOptions): Sound;
 
   // -- Streams (host API 1.14) -----------------------------------------------------
   // Long music decoded as it plays: an Ogg Opus (1–2 channels) or Ogg
   // Vorbis (1–8 channels) package or remote file, holding no clip and none
   // of the clip budget. A stream holds at most 3 seconds of decoded audio
-  // (2 in the mixer, 1 on its way); a game plays at most 4 at once, each one
-  // of its sounds (`play`'s limit). A remote file streams while it arrives
+  // (2 in the mixer, 1 on its way; in a browser 7, 6 in the mixer, so a
+  // page slow to draw does not starve it); a game plays at most 4 at once,
+  // each one of its sounds (`play`'s limit). A remote file streams while it arrives
   // when the package's remote index lists its pieces (packaging does, for
   // Ogg files; each 256 KiB piece is checked against its pinned SHA-256
   // before it is decoded) and stays in the device's cache, so later plays
@@ -5342,7 +6505,9 @@ declare module "starhermit:audio" {
      * the file up to there has; past its end, the end, or the loop's start
      * for a stream that loops). RangeError below 0. */
     seek(seconds: number): void;
-    /** Ramps the gain to `gain` (0–16) over `seconds` (at most 60). */
+    /** Ramps the gain to `gain` (0–16) over `seconds` (at most 60). As
+     * with a `Sound`, the frame keeps the last `fade` and `setPan`, which
+     * never count against its audio operations. */
     fade(gain: number, seconds: number): void;
     setPan(pan: number | null): void;
     /** Each change of `state`, heard as a frame begins. */
@@ -5517,8 +6682,11 @@ declare module "starhermit:audio" {
     readonly currentTime: number;
     readonly sampleRate: number;
     /** `"suspended"` while the game's audio waits to start: in a browser,
-     * until the player's first press on the page (Web Audio's autoplay
-     * policy); `"running"` once it runs, and natively from the start. */
+     * until the player's first press on the page that the browser counts
+     * as a gesture (Web Audio's autoplay policy: a click, a tap or a key,
+     * but not a modifier key alone; until then each press tries again);
+     * `"running"` once it runs, and natively from the start. Clips, sounds,
+     * streams and the graph wait meanwhile. */
     readonly state: "running" | "suspended";
     /** Fires when `state` changes (in a browser, as audio starts); natively
      * never. */
@@ -5707,7 +6875,13 @@ declare module "starhermit:platform" {
   // player's session asks). With the platform out of reach `serverTime()`
   // rejects (`transport`, `unavailable`, `rate-limited`) and `serverNow()`
   // stays null until a reading succeeds, so the game falls back to the
-  // device's clock (or refuses the daily challenge) as it chooses.
+  // device's clock (or refuses the daily challenge) as it chooses. A
+  // guest's failed reading is no error: the runtime notes the first once,
+  // at debug level (the page's console in browsers, stderr natively), and
+  // a host that serves no clock (a plain loopback or self-hosted server,
+  // whose `/api/v1/time` answers 404) is not asked again that run, later
+  // readings rejecting as the first did (`not-found`). A browser may still
+  // list that one request's 404 in its own network log.
   /** The platform's time when its answer arrived, in whole milliseconds
    * since the Unix epoch (since API_MINOR 17): the platform's reading plus
    * half the request's round trip, the platform being taken to read its
@@ -5797,7 +6971,16 @@ declare module "starhermit:platform" {
     joinInProgress?: boolean;
     aiPlayers?: number;
     backfillAfterSeconds?: number;
-    backfillAiPlayers?: boolean;
+    /** How many of the seats still empty when the match starts become AI
+     * players (the platform's backfill allowance): a count from 0 to the
+     * room's seats (`teamCount × seatsPerTeam`; a RangeError past them),
+     * at most that many, the emptiest team first, the rest staying empty;
+     * `true` or none fills every empty seat (the platform's default);
+     * `false` is 0, starting with the empty seats left empty (a game
+     * fine underfilled handles them). A count since 1.16.0; earlier
+     * runtimes take only a boolean. It does not change `aiPlayers`,
+     * seated when the room is created. */
+    backfillAiPlayers?: boolean | number;
     /** At most 16 KB of JSON. */
     metadata?: JsonValue;
   }
@@ -5822,7 +7005,14 @@ declare module "starhermit:platform" {
     /** It reconnects by itself (backoff 0.5 s doubling to 30 s). */
     disconnected: (code: number, retryInMs: number) => void;
     stopped: (reason: SocketStop) => void;
-    /** A participant's binary or text message. */
+    /** A participant's binary or text message (`sendData`), its bytes as
+     * sent. `from` is the sender's participant id: the `id` of their
+     * entry in the room's `participants` (not their `userId`), as a
+     * lower-case GUID (`"00112233-4455-6677-8899-aabbccddeeff"`), which
+     * the platform writes on each frame itself, so it cannot be forged:
+     * trust it, never a sender named inside the payload. A guest's
+     * messages reach only the host and the host's reach everyone else,
+     * so a guest hears only the host's. */
     data: (from: string, payload: Uint8Array) => void;
     /** `ready`, `chat` or a host's `event` frame. */
     control: (from: string, kind: "ready" | "chat" | "event", frame: JsonValue) => void;

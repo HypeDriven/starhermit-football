@@ -12,13 +12,13 @@ that fill any seat a human doesn't take.
 
 The game is a script game of the StarHermit engine: TypeScript in `engine/`
 on the runtime's host API, with `server.js` as the one match simulation. It
-pins engine release 1.15.2 (`engine.version` in `starhermit.txt`): browsers play
+pins engine release 1.16.0 (`engine.version` in `starhermit.txt`): browsers play
 it from `index.html`, the loader page that loads that release's web runtime from
 wiki.starhermit.com, and the StarHermit Windows client plays the same files
 natively. The game holds no engine code. Its old three.js browser client is on
 the `deprecated` branch (and in history up to commit 80b94ff).
 
-After any change, run `starhermit package --web .` with the 1.15.2 runtime (or
+After any change, run `starhermit package --web .` with the 1.16.0 runtime (or
 `cargo starhermit package --web` from the engine checkout) to rewrite
 `index.html` and the file index `starhermit-files.json`, then commit them with
 the change.
