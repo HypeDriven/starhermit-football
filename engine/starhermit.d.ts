@@ -1,4 +1,4 @@
-// Copied unchanged below this note from the StarHermit runtime 1.16.2
+// Copied unchanged below this note from the StarHermit runtime 1.16.3
 // (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
