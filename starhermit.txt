@@ -50,7 +50,7 @@ cover=cover.jpg
 # default pad controls; players rebind keys and pads in the runtime's Options.
 engine.api=1
 engine.entry=engine/src/main.ts
-engine.version=1.17.0
+engine.version=1.18.0
 engine.capabilities=platform,voice,clipboard,storage
 engine.gamepad.up=LeftStickUp+DpadUp
 engine.gamepad.down=LeftStickDown+DpadDown

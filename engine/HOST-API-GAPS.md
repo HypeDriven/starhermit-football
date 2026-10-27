@@ -1,7 +1,7 @@
 # Host API gaps found by the football
 
 What the game (`engine/src`) still needs from the StarHermit runtime's host API
-(`engine/starhermit.d.ts`, from the 1.17.0 runtime, host API 1.19). Each entry
+(`engine/starhermit.d.ts`, from the 1.18.0 runtime, host API 1.20). Each entry
 names the module and member, the semantics wanted, why football needs it, and
 what the game does meanwhile. Nothing here is football-specific. The answered
 entries are kept below, briefly, for their history.

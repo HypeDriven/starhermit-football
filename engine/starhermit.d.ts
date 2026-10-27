@@ -1,4 +1,4 @@
-// Copied unchanged below this note from the StarHermit runtime 1.17.0
+// Copied unchanged below this note from the StarHermit runtime 1.18.0
 // (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -859,6 +859,57 @@ declare module "starhermit:engine" {
      * first, so check the bytes: they may be anything. A file the runtime
      * could not read rejects with `NotReadableError`. */
     open(options?: { accept?: readonly string[] }): Promise<{ name: string; bytes: Uint8Array } | null>;
+    /** Since API_MINOR 20: reads several files the player picks in one
+     * folder (`multiple: true`; natively each press of a file in the
+     * runtime's picker selects or deselects it, then Open), or every file
+     * of a folder the player picks (`folder: true`; natively the player
+     * opens the folder and presses Share this folder, then sees what it
+     * holds, how many files and their size, and presses Share; in a
+     * browser the browser's own folder chooser, which may ask too). Each
+     * is a `SharedFile`, sorted by path; null when they cancelled; an
+     * empty array for a folder without files the game accepts. `accept`
+     * lists and shares only those types (in a browser's chooser for
+     * several files it offers them first, so check the bytes). Hidden
+     * files and folders (a leading dot) are left out, a folder is read at
+     * most 32 folders deep, and links to folders are not followed. A
+     * share holds at most 4,096 files, each at most 64 MiB, and at most
+     * half the game's script heap in all (128 MiB at the default
+     * `heap_mib` of 256; between 64 MiB and 1 GiB), read whole: natively
+     * the picker refuses a larger share, saying why, and in a browser the
+     * promise rejects with a RangeError. Taking both options is a
+     * TypeError. A file the runtime could not read rejects with
+     * `NotReadableError`. */
+    open(options: { accept?: readonly string[]; multiple: true }): Promise<readonly SharedFile[] | null>;
+    open(options: { accept?: readonly string[]; folder: true }): Promise<readonly SharedFile[] | null>;
+    /** Since API_MINOR 20: hears the files and folders the player drops
+     * on the game's window from their file manager, a folder with every
+     * file in it, as `files.open` with `folder` gives them (the same
+     * `SharedFile`s and limits; a dropped file by itself has its name as
+     * its path, a dropped folder's files their paths from the folder's
+     * name down). Only while a listener is registered does the runtime
+     * take drops; then each drop shows the runtime's summary of what it
+     * shares (what was dropped, how many files and their size; or why it
+     * is refused), and the listeners hear it once the player presses
+     * Share, not at all when they cancel. No press is needed, and no
+     * other dialog may be open. With `accept`, the runtime takes only
+     * those types (others dropped are left out of the summary) and this
+     * listener hears only those; a drop holding none shows nothing. The
+     * listener runs with the frame's other events; unsubscribing the last
+     * listener stops the drops. */
+    onDrop(listener: (files: readonly SharedFile[]) => void, options?: { accept?: readonly string[] }): Unsubscribe;
+  }
+  /** A file the player shared (since API_MINOR 20; `files.open` with
+   * `multiple` or `folder`, `files.onDrop`). */
+  export interface SharedFile {
+    /** The file's name (`e1m1.wad`). */
+    readonly name: string;
+    /** Its path in what the player shared, `/`-separated: the name for a
+     * file shared by itself (picked with others, or dropped), else from
+     * the shared folder's name down (`DOOM/base/e1m1.wad`). Never a path
+     * on the player's machine. */
+    readonly path: string;
+    /** Its bytes, read whole. */
+    readonly bytes: Uint8Array;
   }
   /** See `PackageFiles.status`. */
   export type FileStatus = "package" | "ready" | "cached" | "fetching" | "remote" | "failed";
@@ -981,7 +1032,11 @@ declare module "starhermit:input" {
    * `"Enter"`, `"Arrow Up"`, `"Shift Left"`, `"Numpad 1"`, `"F1"`). The
    * same on every platform and in browsers, and what the Options menu's
    * controls show. A gamepad label is the control's name (`"South"`,
-   * `"LeftStickUp"`). */
+   * `"LeftStickUp"`). Answers from module scope and `onStart` on, in a
+   * window, in browsers and in `starhermit check` and render checks alike
+   * (before the window's keyboard layout is known, the layout-free label;
+   * `onBindingsChange` follows when the layout's differs). Throws a
+   * `TypeError` for an action the manifest does not declare. */
   export function bindingLabel(action: string, device?: "keyboard" | "gamepad"): string;
   export interface Binding {
     readonly device: "keyboard" | "mouse" | "gamepad";
@@ -993,15 +1048,35 @@ declare module "starhermit:input" {
   }
   /** Every binding of an action, in the player's order. */
   export function bindings(action: string): readonly Binding[];
-  /** The player rebound something (in the runtime's Options menu). */
+  /** The player rebound something (in the runtime's Options menu), or the
+   * labels changed as the window's keyboard layout became known after the
+   * game started. */
   export function onBindingsChange(listener: () => void): Unsubscribe;
   /** Opens the runtime's Options menu at the controls, where the player
    * rebinds (the game cannot rebind by itself). */
   export function requestRebind(action?: string): void;
   /** The pointer the player mostly uses now: `"coarse"` after touch,
    * `"fine"` after a mouse or pen, `"none"` before either (gamepad or
-   * keyboard play). Changes as the player switches. */
+   * keyboard play). Changes as the player switches. Since API_MINOR 20,
+   * `"coarse"` from the first frame on a touch-first device (where the
+   * touch controls show before any touch, `touchControlsVisible`); games
+   * declaring an older minor read `"none"` there until the first touch. */
   export function primaryPointer(): "fine" | "coarse" | "none";
+  /** Whether the runtime shows its on-screen touch controls
+   * (`setTouchControls`) for the player's input: true from the first frame
+   * on a touch-first device, else from the first touch, until keyboard,
+   * mouse or gamepad use hides them (the next touch shows them again), as
+   * `setTouchControls` describes; the same natively and in browsers. It
+   * follows the player, not the set: a game that has set no controls (or
+   * an empty set) reads it too, to choose its touch layout and prompts
+   * before setting any, and the runtime's interface open over the game
+   * does not change it. The frame's value, as `primaryPointer` (since
+   * API_MINOR 20's runtime). */
+  export function touchControlsVisible(): boolean;
+  /** `touchControlsVisible` changed, before the frame that reads the new
+   * value (at most once a frame; not called for the value at the start).
+   * Since API_MINOR 20's runtime. */
+  export function onTouchControlsChange(listener: (visible: boolean) => void): Unsubscribe;
 
   // -- Keys and text ----------------------------------------------------------
   /** `KeyboardEvent.code` names (`"KeyW"`, `"ArrowLeft"`, `"Space"`). F1 is
@@ -1367,6 +1442,41 @@ declare module "starhermit:scene" {
   // RangeError, its objects left out until it is sent
   // (`engine.usage().waitingUploads`). One mesh larger than 96 MiB is
   // still a RangeError.
+  //
+  // three.js parity (API_MINOR 20; declare `engine.minor=20` for it): a
+  // game declaring 20 or later gets three.js r185's defaults and
+  // conventions where older games keep what they drew:
+  // - every material writes depth unless `depthWrite` is false, transparent
+  //   ones included (the glTF loader sets it false for `BLEND`, as
+  //   three.js's GLTFLoader does);
+  // - `transparent` alone puts a material in the transparent list: additive,
+  //   multiply, subtractive and custom blending without it draw (blended)
+  //   with the opaque ones, and `NoBlending` with it draws unblended with
+  //   the transparent ones;
+  // - the lists sort as three.js's `WebGLRenderList`: opaque by group order
+  //   (a `Group`'s `renderOrder` orders everything under it), render
+  //   order, material `id`, then nearest first by the projected depth of
+  //   the bounds' centre, then object `id`; transparent by group order,
+  //   render order, farthest first, then `id`; an InstancedMesh keeps its
+  //   instances' order;
+  // - the depth test passes on equal depth (three.js's `LessEqualDepth`), so
+  //   of two coplanar surfaces the later drawn shows;
+  // - cameras project from their own numbers, never the window's: a
+  //   PerspectiveCamera from `aspect`, an OrthographicCamera from `left`,
+  //   `right`, `top`, `bottom` and `zoom` (so a game sets `aspect`, or the
+  //   edges, from `engine.frame()`'s size when the window changes, as a
+  //   three.js page does on resize; nothing adjusts them for it);
+  // - a Color background is never tone mapped, with post effects and
+  //   multisampling too (unless a `renderer.post` program reads the scene);
+  // - `scene.environment` lights a standard material by
+  //   `scene.environmentIntensity` alone and a Lambert one not at all
+  //   (three.js r163+'s WebGLRenderer);
+  // - an object hidden by its material's `visible` still draws what is
+  //   under it;
+  // - `TextureLoader.load(url, onLoad, onProgress, onError)`.
+  // Texture coordinates keep the engine's convention at every minor (v
+  // from the image's first row, no `flipY`; three.js-built geometries and
+  // glTF files map as in three.js).
 
   // -- Math -------------------------------------------------------------------
   // Since API_MINOR 18 the math classes are three.js r185's (src/math),
@@ -2103,7 +2213,12 @@ declare module "starhermit:scene" {
   export const FrontSide: "front";
   export const BackSide: "back";
   export const DoubleSide: "double";
-  export type Blending = "normal" | "additive" | "multiply" | "subtractive" | "custom";
+  export type Blending = "none" | "normal" | "additive" | "multiply" | "subtractive" | "custom";
+  /** No blending (three.js `NoBlending`; since API_MINOR 20): the
+   * fragment replaces what is there, `transparent` or not; with
+   * `transparent` it still draws in the transparent list (an alpha test
+   * still applies). */
+  export const NoBlending: "none";
   export const NormalBlending: "normal";
   export const AdditiveBlending: "additive";
   /** Earlier output's color times the material's, its alpha kept (three.js
@@ -2117,9 +2232,11 @@ declare module "starhermit:scene" {
    * fragment's color and alpha straight (not premultiplied), combined
    * with what the target or window holds as `equation(source × src,
    * destination × dst)`. Min and max take no factors. The same on every
-   * backend (Vulkan, Direct3D 12, OpenGL ES, WebGL2, WebGPU). A custom
-   * blended material is drawn with the transparent ones (sorted, no
-   * shadow cast, no depth written unless `depthWrite` says so). An
+   * backend (Vulkan, Direct3D 12, OpenGL ES, WebGL2, WebGPU). Before
+   * API_MINOR 20 a custom blended material is drawn with the transparent
+   * ones (sorted, no depth written unless `depthWrite` says so); from it,
+   * as in three.js, only with `transparent` (otherwise with the opaque
+   * ones, writing depth unless `depthWrite` is false). An
    * equation or factor not listed here is a TypeError at the frame's sync. */
   export const CustomBlending: "custom";
   /** Blend equations (three.js's numbers; since API_MINOR 10): `source +
@@ -2501,7 +2618,10 @@ declare module "starhermit:scene" {
      * cannot decode; RangeError past the texture budget or with 128 loads
      * already waiting. */
     loadAsync(path: string): Promise<Texture>;
-    load(path: string, onLoad?: (texture: Texture) => void, onError?: (error: Error) => void): Texture;
+    /** From API_MINOR 20 three.js's `load(url, onLoad, onProgress,
+     * onError)` (`onProgress` is never called). Games declaring an older
+     * minor pass `onError` third: `load(path, onLoad, onError)`. */
+    load(path: string, onLoad?: (texture: Texture) => void, onProgress?: unknown, onError?: (error: Error) => void): Texture;
   }
 
   /** What `GLTFLoader` gives: the default scene and every scene, as groups
@@ -2712,17 +2832,38 @@ declare module "starhermit:scene" {
   export class Uint32BufferAttribute extends BufferAttribute {
     constructor(array: ArrayLike<number> | number, itemSize: number, normalized?: boolean);
   }
-  export type AttributeName = "position" | "normal" | "uv" | "color" | "custom";
+  export type AttributeName = "position" | "normal" | "uv" | "color" | "custom" | "tangent";
   export class BufferGeometry {
     constructor();
+    /** three.js's: `"BufferGeometry"`, or the built geometry's class name
+     * (since API_MINOR 20; before, only the shapes of API_MINOR 17 and
+     * later had one). */
+    readonly type: string;
     /** `position` (3), `normal` (3), `uv` (2), `color` (3 or 4, linear;
      * any finite values: shading clamps color to 0–65504 and alpha to 0–1,
      * custom materials read them as they are)
      * and `custom` (1 to 4 numbers a vertex, zeros after them; read only by
-     * custom materials as `Vertex.custom`, since API_MINOR 6); other names
-     * throw a TypeError. */
+     * custom materials as `Vertex.custom`, since API_MINOR 6); `tangent`
+     * (4, what `computeTangents` makes; since API_MINOR 20) is kept and not
+     * drawn; other names throw a TypeError. */
     setAttribute(name: AttributeName, attribute: BufferAttribute): this;
     getAttribute(name: AttributeName): BufferAttribute | undefined;
+    /** A float `position` attribute of the points (z 0 for Vector2s), or,
+     * when there is one, its first vertices set to them (as many as it
+     * holds; a warning past it), as three.js (since API_MINOR 20):
+     * `new BufferGeometry().setFromPoints(curve.getPoints(50))` for a
+     * `Line`. */
+    setFromPoints(points: readonly (Vector2 | Vector3)[]): this;
+    /** Turns the positions (and normals) to face `vector` from the origin,
+     * as an Object3D's `lookAt` (since API_MINOR 20). */
+    lookAt(vector: Vector3): this;
+    /** Each normal made unit length (since API_MINOR 20). */
+    normalizeNormals(): void;
+    /** A `tangent` attribute (x, y, z and the handedness w) from the
+     * index, positions, normals and UVs over the groups, as three.js
+     * computes it (since API_MINOR 20); without them it logs an error and
+     * does nothing. */
+    computeTangents(): void;
     /** Without an index the vertices draw in order, three a triangle; from
      * API_MINOR 15 the GPU holds no index list for them (before, the
      * runtime made one, 4 bytes a vertex). */
@@ -2851,29 +2992,61 @@ declare module "starhermit:scene" {
   }
 
   // -- Curves, paths and shapes (since API_MINOR 17) -----------------------------
-  // three.js r185's 2D curves, paths, shapes and ShapeUtils, statement by
+  // three.js r185's curves, paths, shapes and ShapeUtils, statement by
   // statement: the points they give are three.js's, natively and in
-  // browsers. 3D curves (CatmullRomCurve3 and the like), `toJSON` and
-  // `fromJSON` are not supported.
-  /** A 2D curve: `getPoint(t)` for t from 0 to 1 (each kind its own), and
-   * from it points spaced by arc length (`arcLengthDivisions` samples),
-   * lengths and tangents. */
-  export class Curve {
+  // browsers. Since API_MINOR 20 the 3D curves too (`LineCurve3`,
+  // `QuadraticBezierCurve3`, `CubicBezierCurve3`, `CatmullRomCurve3`), each
+  // curve's `computeFrenetFrames`, `toJSON` and `fromJSON`, and paths of 3D
+  // curves.
+  /** What a curve's `toJSON` gives (three.js's): its `type`,
+   * `arcLengthDivisions` and each kind's own fields (vectors as arrays). */
+  export interface CurveJSON {
+    metadata?: { version: number; type: string; generator: string };
+    type: string;
+    arcLengthDivisions: number;
+    [key: string]: any;
+  }
+  /** Frenet frames along a curve: a tangent, normal and binormal at each
+   * of `segments + 1` points spaced by arc length. */
+  export interface FrenetFrames {
+    tangents: Vector3[];
+    normals: Vector3[];
+    binormals: Vector3[];
+  }
+  /** A curve, 2D (`T` Vector2, the default) or 3D (Vector3, since
+   * API_MINOR 20): `getPoint(t)` for t from 0 to 1 (each kind its own),
+   * and from it points spaced by arc length (`arcLengthDivisions`
+   * samples), lengths and tangents. A subclass of your own overrides
+   * `getPoint`. */
+  export class Curve<T extends Vector2 | Vector3 = Vector2> {
     type: string;
     arcLengthDivisions: number;
     needsUpdate: boolean;
-    getPoint(t: number, optionalTarget?: Vector2): Vector2;
-    getPointAt(u: number, optionalTarget?: Vector2): Vector2;
-    getPoints(divisions?: number): Vector2[];
-    getSpacedPoints(divisions?: number): Vector2[];
+    getPoint(t: number, optionalTarget?: T): T;
+    getPointAt(u: number, optionalTarget?: T): T;
+    getPoints(divisions?: number): T[];
+    getSpacedPoints(divisions?: number): T[];
     getLength(): number;
     getLengths(divisions?: number): number[];
     updateArcLengths(): void;
     getUtoTmapping(u: number, distance?: number | null): number;
-    getTangent(t: number, optionalTarget?: Vector2): Vector2;
-    getTangentAt(u: number, optionalTarget?: Vector2): Vector2;
+    /** The unit tangent at `t`, from points 0.0001 either side (a
+     * Vector2 or Vector3 as the curve's points are; a line's exactly). */
+    getTangent(t: number, optionalTarget?: T): T;
+    getTangentAt(u: number, optionalTarget?: T): T;
+    /** Tangents, normals and binormals at `segments + 1` points spaced by
+     * arc length (since API_MINOR 20), as three.js computes them: the
+     * first normal across the first tangent's smallest axis, carried
+     * along by the turn between tangents; `closed` twists them evenly so
+     * the last meets the first. What TubeGeometry and ExtrudeGeometry's
+     * `extrudePath` follow. */
+    computeFrenetFrames(segments: number, closed?: boolean): FrenetFrames;
     clone(): this;
-    copy(source: Curve): this;
+    copy(source: Curve<any>): this;
+    /** Since API_MINOR 20. */
+    toJSON(): CurveJSON;
+    /** Since API_MINOR 20: the curve set from `toJSON`'s data. */
+    fromJSON(json: CurveJSON): this;
   }
   export class EllipseCurve extends Curve {
     constructor(aX?: number, aY?: number, xRadius?: number, yRadius?: number, aStartAngle?: number, aEndAngle?: number, aClockwise?: boolean, aRotation?: number);
@@ -2918,15 +3091,60 @@ declare module "starhermit:scene" {
     readonly isSplineCurve: true;
     points: Vector2[];
   }
-  /** Curves end to end. `getPoints(divisions)` (default 12) divides each
-   * curve by `divisions` (an ellipse or arc by twice it, a line not at
-   * all, a spline by it times its points), leaving out a point equal to
-   * the one before; past 1,048,576 points it is a RangeError. */
-  export class CurvePath extends Curve {
-    curves: Curve[];
+  /** A straight segment in 3D (since API_MINOR 20). */
+  export class LineCurve3 extends Curve<Vector3> {
+    constructor(v1?: Vector3, v2?: Vector3);
+    readonly isLineCurve3: true;
+    v1: Vector3;
+    v2: Vector3;
+  }
+  /** A quadratic Bézier curve in 3D (since API_MINOR 20). */
+  export class QuadraticBezierCurve3 extends Curve<Vector3> {
+    constructor(v0?: Vector3, v1?: Vector3, v2?: Vector3);
+    readonly isQuadraticBezierCurve3: true;
+    v0: Vector3;
+    v1: Vector3;
+    v2: Vector3;
+  }
+  /** A cubic Bézier curve in 3D (since API_MINOR 20). */
+  export class CubicBezierCurve3 extends Curve<Vector3> {
+    constructor(v0?: Vector3, v1?: Vector3, v2?: Vector3, v3?: Vector3);
+    readonly isCubicBezierCurve3: true;
+    v0: Vector3;
+    v1: Vector3;
+    v2: Vector3;
+    v3: Vector3;
+  }
+  /** `CatmullRomCurve3`'s kinds: centripetal (the default; no cusps or
+   * loops within a span), chordal, and uniform (`"catmullrom"`, shaped by
+   * `tension`). */
+  export type CatmullRomCurveType = "centripetal" | "chordal" | "catmullrom";
+  /** A Catmull-Rom spline through 3D points (since API_MINOR 20), open
+   * (its ends extended by mirroring the end spans) or `closed` (a loop),
+   * of `curveType` (default centripetal) and, for `"catmullrom"`,
+   * `tension` (default 0.5). `getPoint` outside 0 to 1 is three.js's too
+   * (a closed curve wraps; an open one below 0 throws). The path to give
+   * TubeGeometry for a trail or pipe through points. */
+  export class CatmullRomCurve3 extends Curve<Vector3> {
+    constructor(points?: Vector3[], closed?: boolean, curveType?: CatmullRomCurveType, tension?: number);
+    readonly isCatmullRomCurve3: true;
+    points: Vector3[];
+    closed: boolean;
+    curveType: CatmullRomCurveType;
+    tension: number;
+  }
+  /** Curves end to end, 2D or (since API_MINOR 20) 3D.
+   * `getPoints(divisions)` (default 12) divides each curve by `divisions`
+   * (an ellipse or arc by twice it, a line not at all, a spline by it
+   * times its points), leaving out a point equal to the one before; past
+   * 1,048,576 points it is a RangeError. `fromJSON` makes each curve of
+   * its type (one of the curve classes above; another is a TypeError). */
+  export class CurvePath<T extends Vector2 | Vector3 = Vector2> extends Curve<T> {
+    curves: Curve<T>[];
     autoClose: boolean;
-    add(curve: Curve): void;
-    /** Joins the end back to the start with a line, if they differ. */
+    add(curve: Curve<T>): void;
+    /** Joins the end back to the start with a line (a LineCurve, or a
+     * LineCurve3 for 3D points), if they differ. */
     closePath(): this;
     getCurveLengths(): number[];
   }
@@ -3008,9 +3226,13 @@ declare module "starhermit:scene" {
    * `bevelEnabled` true, `bevelThickness` 0.2, `bevelSize`
    * `bevelThickness - 0.1`, `bevelOffset` 0, `bevelSegments` 3,
    * `curveSegments` 12, `steps` 1 (`steps` at least 1 and `bevelSegments`
-   * whole numbers up to 1,024: fractions are dropped). `extrudePath`
-   * (extruding along a 3D curve) and a custom `UVGenerator` are not
-   * supported (TypeError). */
+   * whole numbers up to 1,024: fractions are dropped). Since
+   * API_MINOR 20, `extrudePath` extrudes along a 3D curve instead of +Z
+   * (`steps` layers at its `getSpacedPoints(steps)`, each shape point
+   * (x, y) placed along the frame's normal and binormal of
+   * `computeFrenetFrames(steps, closed)`, closed for a closed
+   * CatmullRomCurve3; no bevel and `depth` unused, as three.js), and a
+   * custom `UVGenerator` gives the UVs (before, either was a TypeError). */
   export interface ExtrudeGeometryOptions {
     curveSegments?: number;
     steps?: number;
@@ -3020,6 +3242,18 @@ declare module "starhermit:scene" {
     bevelSize?: number;
     bevelOffset?: number;
     bevelSegments?: number;
+    extrudePath?: Curve<Vector3>;
+    UVGenerator?: UVGenerator;
+  }
+  /** An ExtrudeGeometry's UVs of your own (three.js's `UVGenerator`;
+   * since API_MINOR 20): called for each cap triangle and side quad in
+   * three.js's order with the positions (x, y, z a vertex, as three.js
+   * holds them before rounding to 32-bit floats: the whole geometry's,
+   * where three.js passes those made so far) and the vertices' numbers;
+   * three UVs a triangle and four a quad (a, b, c, d). */
+  export interface UVGenerator {
+    generateTopUV(geometry: ExtrudeGeometry, vertices: number[], indexA: number, indexB: number, indexC: number): Vector2[];
+    generateSideWallUV(geometry: ExtrudeGeometry, vertices: number[], indexA: number, indexB: number, indexC: number, indexD: number): Vector2[];
   }
   /** Shapes extruded from z = 0 to `depth` along +Z, their edges bevelled
    * outward (three.js `ExtrudeGeometry`): triangles not indexed, flat
@@ -3108,6 +3342,25 @@ declare module "starhermit:scene" {
     readonly type: "TorusKnotGeometry";
     readonly parameters: { radius: number; tube: number; tubularSegments: number; radialSegments: number; p: number; q: number };
   }
+  /** A tube of `radius` (default 1) round a 3D curve (three.js
+   * `TubeGeometry`; since API_MINOR 20): `tubularSegments` (default 64)
+   * rings spaced along `path` by arc length, each of `radialSegments`
+   * (default 8) round the curve's Frenet frame there
+   * (`path.computeFrenetFrames(tubularSegments, closed)`, kept as
+   * `tangents`, `normals` and `binormals`); a `closed` tube's last ring is
+   * its first again. Indexed; UVs along (u) then round (v). Default: a
+   * quadratic Bézier from (-1, -1, 0) through (-1, 1, 0) to (1, 1, 0).
+   * Segment counts are whole numbers of 1 to 1,024 (else RangeError);
+   * built from a new curve or new segments, as three.js (a trail that
+   * grows makes a new one, or draws a range of one made long enough). */
+  export class TubeGeometry extends BufferGeometry {
+    constructor(path?: Curve<Vector3>, tubularSegments?: number, radius?: number, radialSegments?: number, closed?: boolean);
+    readonly type: "TubeGeometry";
+    readonly parameters: { path: Curve<Vector3>; tubularSegments: number; radius: number; radialSegments: number; closed: boolean };
+    tangents: Vector3[];
+    normals: Vector3[];
+    binormals: Vector3[];
+  }
   /** A box (default 1 × 1 × 1) with edges and corners rounded to `radius`
    * (default 0.1, at most half the shortest side) in `segments` (default 2,
    * from 0) steps: three.js's addon `RoundedBoxGeometry`
@@ -3132,7 +3385,10 @@ declare module "starhermit:scene" {
     map?: Texture | null;
     /** 0–1 (default 1). Below 1 needs `transparent` to blend. */
     opacity?: number;
-    /** Blends (sorted farthest first, drawn after opaque objects). */
+    /** Draws after opaque objects, sorted farthest first, blending as
+     * `blending` says (normal by default). Before API_MINOR 20 blending
+     * other than normal draws there whatever this says; from it, as in
+     * three.js, this alone decides. */
     transparent?: boolean;
     /** Above 0, pixels whose alpha is below it are discarded (masked). */
     alphaTest?: number;
@@ -3148,8 +3404,16 @@ declare module "starhermit:scene" {
     blendSrcAlpha?: number | null;
     blendDstAlpha?: number | null;
     side?: Side;
-    /** Default: written unless blended. */
+    /** Default from API_MINOR 20: true, as three.js's for every material,
+     * transparent ones included. Before it: written unless blended, so a
+     * port declaring an older minor that relied on a transparent mesh's
+     * depth writes sets `depthWrite: true` (grid lines drawn before a
+     * glass top under them stay visible only where they wrote depth, as
+     * blended meshes draw farthest first). */
     depthWrite?: boolean;
+    /** Depth tests pass on nearer depth, and from API_MINOR 20 on equal
+     * depth too (three.js's default `LessEqualDepth`; `depthFunc` itself
+     * is not offered). */
     depthTest?: boolean;
     /** Whether the scene's fog applies (default true). */
     fog?: boolean;
@@ -3175,6 +3439,10 @@ declare module "starhermit:scene" {
   /** Common to all materials; changes apply from the next frame. */
   export abstract class Material {
     #private;
+    /** three.js's (since API_MINOR 20): a number of its own, in the order
+     * materials are made; from API_MINOR 20 it orders the opaque list
+     * after render order. */
+    readonly id: number;
     name: string;
     userData: Record<string, unknown>;
     color: Color;
@@ -3336,6 +3604,15 @@ declare module "starhermit:scene" {
   // built-in map does; coordinates a hook computes itself (an atlas cell, a
   // texel of data) count rows from the first. Ported three.js GLSL that
   // computes v upward from the bottom (or reads vUv.y) uses 1 - v.
+  // Porting three.js GLSL, two differences to watch:
+  //   - vUv.y is 1.0 - uv.y here (uv.x is the same): a gradient, stripe or
+  //     mask over vUv.y reads `let v = 1.0 - f.uv.y;` (Vertex, Surface and
+  //     Fragment alike); texture sampling takes uv as it is.
+  //   - smoothstep(e0, e1, x) with e0 > e1 is undefined in WGSL (WebGPU
+  //     may return anything; three's GLSL ports rely on the reversed ramp,
+  //     which GLSL also leaves undefined but GPUs happen to compute):
+  //     write `1.0 - smoothstep(e1, e0, x)` instead of
+  //     `smoothstep(e0, e1, x)` when e0 > e1.
   //   var<uniform> uniforms: Uniforms    the material's uniforms by name
   //   NAME: texture_2d<f32>, NAME_sampler: sampler   each texture uniform
   //   const NAME                          each define
@@ -3481,10 +3758,11 @@ declare module "starhermit:scene" {
     aoMapIntensity: number;
     /** Scales the environment's light (default 1): its `envMap`'s, or the
      * scene's (`scene.environment`) times `scene.environmentIntensity`.
-     * Until host API 1.18 the scene's environment took only
-     * `environmentIntensity`, as three.js r163 and later's WebGLRenderer
-     * does (it overrides the material's with it); three.js r162 and
-     * earlier, and its WebGPURenderer, take the material's, as this does. */
+     * Until host API 1.18, and again from API_MINOR 20, the scene's
+     * environment takes only `environmentIntensity`, as three.js r163 and
+     * later's WebGLRenderer does (it overrides the material's with it);
+     * three.js r162 and earlier, and its WebGPURenderer, take the
+     * material's, as API_MINOR 18 and 19 do. */
     envMapIntensity: number;
     /** Since API_MINOR 18: a height map whose red channel's screen-space
      * slope tilts the normal (three.js's derivative bump mapping,
@@ -3552,9 +3830,11 @@ declare module "starhermit:scene" {
     wireframeLinewidth?: number;
   }
   /** Diffuse light only (three.js `MeshLambertMaterial`), cheaper than
-   * standard shading. Its `envMap`, else `scene.environment`, gives it the
-   * environment's diffuse light (irradiance along the normal; before
-   * API_MINOR 8 environments lit it not at all, despite this file). */
+   * standard shading. Its `envMap`, else (before API_MINOR 20)
+   * `scene.environment`, gives it the environment's diffuse light
+   * (irradiance along the normal; before API_MINOR 8 environments lit it
+   * not at all, despite this file). From API_MINOR 20, as in three.js,
+   * `scene.environment` does not light it. */
   export class MeshLambertMaterial extends Material {
     constructor(parameters?: MeshLambertMaterialParameters);
     emissive: Color;
@@ -3673,7 +3953,9 @@ declare module "starhermit:scene" {
     readonly matrixWorld: Matrix4;
     visible: boolean;
     /** Lower draws first among opaque objects, and among blended ones before
-     * they sort farthest first (three.js `renderOrder`). */
+     * they sort farthest first (three.js `renderOrder`). From API_MINOR 20
+     * a `Group`'s orders everything under it first (three.js's
+     * `groupOrder`, up to the next Group). */
     renderOrder: number;
     /** Since API_MINOR 18 a mesh with a transparent (blended) material
      * casts too, its depth whole as an opaque one's, whatever its opacity
@@ -3786,6 +4068,8 @@ declare module "starhermit:scene" {
     test(layers: Layers): boolean;
     isEnabled(layer: number): boolean;
   }
+  /** From API_MINOR 20 its `renderOrder` orders everything under it first
+   * (three.js's `groupOrder`, up to the next Group). */
   export class Group extends Object3D {
     constructor();
   }
@@ -3917,8 +4201,9 @@ declare module "starhermit:scene" {
   export abstract class Camera extends Object3D {
     near: number;
     far: number;
-    /** As three.js, for the window's current aspect (or the camera's view
-     * offset, when one is set). */
+    /** As three.js: from API_MINOR 20 from the camera's own aspect or
+     * edges; before it for the window's current aspect (or the camera's
+     * view offset, when one is set). */
     readonly projectionMatrix: Matrix4;
     readonly projectionMatrixInverse: Matrix4;
     readonly matrixWorldInverse: Matrix4;
@@ -3936,13 +4221,17 @@ declare module "starhermit:scene" {
     height: number;
   }
   /** Looks down its -Z. `fov` is the vertical field of view in degrees
-   * (three.js); the aspect follows the window. `far` may be Infinity. */
+   * (three.js). From API_MINOR 20 the projection takes `aspect` as three.js
+   * does (a game keeps it at the window's, `engine.frame()`'s width over
+   * height, or the image stretches); before it the aspect follows the
+   * window. `far` may be Infinity. */
   export class PerspectiveCamera extends Camera {
     constructor(fov?: number, aspect?: number, near?: number, far?: number);
     fov: number;
-    /** Ignored without a view offset: the window's aspect is used. With
-     * one, the projection uses it as three.js does (`setViewOffset` sets it
-     * to `fullWidth / fullHeight`). */
+    /** From API_MINOR 20 always the projection's, as three.js's. Before it
+     * ignored without a view offset (the window's aspect is used); with
+     * one, the projection uses it as three.js does (`setViewOffset` sets
+     * it to `fullWidth / fullHeight`). */
     aspect: number;
     /** three.js's view offset (since API_MINOR 16): null until
      * `setViewOffset`; `enabled` false after `clearViewOffset`. */
@@ -3963,9 +4252,14 @@ declare module "starhermit:scene" {
     /** Kept for ports; projection changes apply without it. */
     updateProjectionMatrix(): void;
   }
-  /** The view is centered: `top - bottom` sets its height in world units and
-   * the width follows the window's aspect (`left`/`right` are kept but not
-   * used for the extent, unless a view offset is set). */
+  /** From API_MINOR 20 three.js's projection: `left`, `right`, `top`,
+   * `bottom` (asymmetric ones too) and `zoom` as given, whatever the
+   * window's aspect (a game keeps `right - left` at the window's aspect
+   * times `top - bottom`, or the image stretches, as in three.js; nothing
+   * changes them when the window does). Before it the view is centered:
+   * `top - bottom` sets its height in world units and the width follows
+   * the window's aspect (`left`/`right` are kept but not used for the
+   * extent, unless a view offset is set). */
   export class OrthographicCamera extends Camera {
     constructor(left?: number, right?: number, top?: number, bottom?: number, near?: number, far?: number);
     left: number;
@@ -4090,7 +4384,10 @@ declare module "starhermit:scene" {
      * `renderer.render(scene, camera)` passes into a render target (which
      * once took only `renderer.setClearColor`): a Color clears
      * to it (a pass of the scene clears to it whatever `autoClear` says,
-     * as three.js's does); null keeps black (a pass the renderer's clear
+     * as three.js's does), never tone mapped; before API_MINOR 20 the
+     * window's was tone mapped with the scene when post effects or
+     * multisampling drew it (from API_MINOR 20 only when a `renderer.post`
+     * program reads the scene); null keeps black (a pass the renderer's clear
      * color). Since API_MINOR 18 a texture too, drawn over the clear
      * behind everything, unfogged, tone mapped unless its `colorSpace` is
      * `SRGBColorSpace` (three.js r16x's `WebGLBackground`):
@@ -4848,7 +5145,13 @@ declare module "starhermit:draw" {
   // `onRender`. Coordinates are window pixels from the top-left corner. At
   // most 16,384 items a frame, 4,096 characters a text and 65,536
   // characters a frame (RangeError). The runtime's own interface always
-  // draws above it.
+  // draws above it. The frame's overlay draws at most 262,144 vertices
+  // (three a triangle): a frame past them draws none of its overlay (the
+  // console says so once: "2D vertex budget exceeded"). `box` is the
+  // costly item: a plain box takes a few dozen vertices, a gradient a few
+  // hundred, and a repeating radial gradient a ring at each stop of each
+  // period (about 5,200 for hard rings every 10 pixels over a 120-pixel
+  // box, so about fifty such boxes fill the budget).
   //
   // Fonts. Text in no family the game added draws with the operating
   // system's fonts, as browsers map the generic families: `system-ui` (the
@@ -4881,17 +5184,25 @@ declare module "starhermit:draw" {
   // alone is text style), U+FE0E for text style; neither draws anything.
   // An emoji's own colours draw whatever the text's color (its opacity
   // still applies), except parts the font gives the text's color (as it
-  // draws text-style symbols such as `✔ ☀`). The font is original art,
-  // under the engine's licence, and has 699 glyphs: the common single
+  // draws text-style symbols such as `✔ ☀`). It also has symbols that
+  // Unicode gives no emoji form (`⌖ ☆ ✓ ● ⚀`), drawn in the text's
+  // color, and like any face draws them wherever no face before it has
+  // them (loading for them as for emoji). The font is original art,
+  // under the engine's licence, and has 711 glyphs: the common single
   // emoji, one code point each (an emoji it lacks draws with the faces
-  // before it, or as the pixel font's box); this version draws no
-  // emoji sequences: in a ZWJ sequence (`👩‍💻`) each emoji draws on its
-  // own and the joiner draws nothing, a skin-tone modifier is dropped (the
-  // emoji draws in its default tone), and a flag draws as its two
-  // regional indicator letters where a face has them. The font loads the
+  // before it, or as the pixel font's box), and the twelve keycaps
+  // (`0`–`9`, `#` or `*`, U+FE0F, U+20E3: `2️⃣ #️⃣`, also without the
+  // U+FE0F), each one key drawn the same everywhere. U+20E3 never draws
+  // on its own: anywhere else the character before it draws as plain
+  // text. This version draws no other emoji sequences: in a ZWJ sequence
+  // (`👩‍💻`) each emoji draws on its own and the joiner draws nothing, a
+  // skin-tone modifier is dropped (the emoji draws in its default tone),
+  // and a flag draws as its two regional indicator letters where a face
+  // has them. The font loads the
   // first time text needs it, never before (a game without emoji never
   // loads it): until it arrives, which takes a moment in a browser, emoji
-  // draw as nothing in the room they take once it is in (an em each), so
+  // (and its symbols that no other face has) draw as nothing in the room
+  // they take once it is in (an em each), so
   // text keeps its layout, and then they draw. Nothing waits or throws.
 
   export interface Clip {
@@ -5070,10 +5381,10 @@ declare module "starhermit:ui" {
   // emoji font and pixel font. Emoji draw in colour from the engine's own
   // emoji font, StarHermit Emoji, loaded the first time text needs it;
   // until then they keep their room and draw nothing, and measured widths
-  // (`measureText`) are already theirs. Single emoji only in this version:
-  // ZWJ sequences draw as their emoji one by one, skin tones are dropped,
-  // flags draw as regional indicator letters (see "Emoji" in
-  // `starhermit:draw`).
+  // (`measureText`) are already theirs. Single emoji and keycaps (`2️⃣`)
+  // only in this version: ZWJ sequences draw as their emoji one by one,
+  // skin tones are dropped, flags draw as regional indicator letters (see
+  // "Emoji" in `starhermit:draw`).
 
   /** A widget's or container's rectangle (window pixels): a new frozen
    * object each call, so one the game keeps never changes. */
@@ -5517,6 +5828,12 @@ declare module "starhermit:ui" {
    * or `text`. A rect that is not an object, or another role, is a
    * TypeError. */
   export function target(text: string, rect: Rect, options?: { role?: "button" | "label" }): void;
+  // Screen readers, and in browsers the page's ARIA mirror of the UI (a
+  // layer of elements over the canvas, each at its widget, which
+  // automation such as Playwright's getByRole finds by role and name and
+  // clicks), see every widget with its role, name and states, and focus
+  // and activate widgets as the player does, whatever minor the game
+  // declares.
   /** Has the player's screen reader speak `text` (since API_MINOR 9): what
    * a game drawn without widgets cannot say otherwise ("hal played Nf3,
    * check", "Checkmate — you won"). Natively a UI Automation notification
@@ -5540,7 +5857,17 @@ declare module "starhermit:ui" {
    * names the widgets of the frame it is called in, before or after they
    * are built; when that frame has none, the next frame's (the screen the
    * game switches to), unless focus moved elsewhere meanwhile. Within an
-   * open modal dialog, only its widgets. */
+   * open modal dialog, only its widgets.
+   *
+   * Since API_MINOR 20 keys go to the game unless a widget has focus, as
+   * keys go to a browser's page unless a focusable element has it: the
+   * keyboard's arrows never focus a widget from nothing focused, so the
+   * arrows and Enter stay a board cursor's until the player gives the UI
+   * focus (Tab, a press on a widget, the gamepad's D-pad or stick, this
+   * call, a dialog opening), and a press on no widget outside a modal
+   * dialog takes focus away. Older games' arrows focus the first or last
+   * widget from nothing focused, and such a game calls `setFocus(null)`
+   * to give the keys back. */
   export function setFocus(name: string | null): void;
   /** The language widgets announce (BCP 47) and its direction (right-to-left
    * mirrors the layout); default the player's language. */
@@ -5701,7 +6028,11 @@ declare module "starhermit:ui" {
     /** Repeating rings (since API_MINOR 12; CSS
      * `repeating-radial-gradient`): `at` in logical pixels along the
      * horizontal radius, as `LinearGradient.repeating`. Rings are drawn
-     * on a grid of at most 96 cells a side, so very fine ones blur. */
+     * as polygons at each stop, a quarter of a pixel at most inside
+     * their curves (they were drawn on a grid of up to 96 cells a side,
+     * several times the vertices); a box of rings that would take more
+     * vertices than such a grid draws on the grid, so very fine ones
+     * blur. */
     repeating?: boolean;
   }
   /** An image filling the box (since API_MINOR 12; CSS
@@ -5758,9 +6089,12 @@ declare module "starhermit:ui" {
   /** CSS `box-shadow`: logical pixels; `blur` as CSS's (a Gaussian of
    * deviation blur / 2), at most 128 (RangeError). Blurred and inset
    * shadows are baked once into images that count against the game's
-   * image budget (16 MiB of them at most, the least recently used let go);
-   * an outer shadow draws under the whole box, so it shows through a
-   * translucent background. */
+   * image budget (16 MiB of them at most, the least recently used let go).
+   * An inset shadow draws only inside the box. Since API_MINOR 20, as in
+   * browsers, an outer shadow draws only outside the box's (rounded or
+   * cut) border edge, so a translucent background never shows it through
+   * (a focus ring made of `spread` stays a ring); before, it draws under
+   * the whole box too, showing through a translucent background. */
   export interface Shadow {
     x?: Length;
     y?: Length;
@@ -7085,6 +7419,16 @@ declare module "starhermit:platform" {
     /** `ready`, `chat` or a host's `event` frame (an addressed one without
      * its recipients). */
     control: (from: string, kind: "ready" | "chat" | "event", frame: JsonValue) => void;
+    /** The platform pushes the room on connecting and on every change,
+     * carrying only its `status`, `gameSessionId` and `participants` (the
+     * host marked by `isHost`, which sets `hostUserId`). The runtime merges
+     * the push into the room as last known (from the game's room calls or
+     * an earlier push), so `joinCode`, `metadata`, `name`, `revision` and
+     * the shape (`teamCount`, `seatsPerTeam`, `backfillAfterSeconds`) stay
+     * what they were: a game may replace its room with this one (since
+     * API_MINOR 19's runtime; earlier ones left them null or 0). A push before
+     * any room call returned the room has only what it carries: no join
+     * code, null metadata and a zero shape. */
     roster: (room: Room) => void;
     result: (result: JsonValue) => void;
     presence: (userId: string, online: boolean) => void;
@@ -7846,10 +8190,23 @@ declare module "starhermit:script" {
   // -- Workers and authorities ---------------------------------------------------
   //
   // A worker is a package script in a realm of its own on a thread of its
-  // own, so its work leaves the game's thread (since API_MINOR 2). It gets the platform
-  // sandbox's rules and nothing of the host: no imports of built-in
-  // modules, no `Date`, no `Math.random`, no timers, and `Intl` dates read
-  // the epoch (an authority's: the invocation's `ctx.now`). It and the game
+  // own, so its work leaves the game's thread (since API_MINOR 2). It has
+  // the game's standard globals as the game's realm has them: `Date` (the
+  // wall clock, as the game's), `Math.random`, `Intl` in the player's
+  // language, `console`, `queueMicrotask`, `performance` (the game's
+  // timeline: `now()` reads as the game's would at that moment, also under
+  // `starhermit check`'s simulated clock, where each message starts from
+  // the game's clock as its last frame began; `timeOrigin` is the game's),
+  // `TextEncoder`/`TextDecoder` and `atob`/`btoa`, plus `self`,
+  // `postMessage` and `onmessage`. It has nothing of the engine: no
+  // imports of built-in modules and no timers (`setTimeout`,
+  // `setInterval`: the game's run on its frames; a worker works as
+  // messages arrive). Runtimes up to 1.17.1 gave a worker the platform
+  // sandbox's rules (no `Date`, no `Math.random`, none of the globals
+  // beyond ECMAScript). An authority keeps those rules, as the
+  // platform runs its server script: no imports, no `Date`, no
+  // `Math.random`, no timers, and `Intl` dates read the invocation's
+  // `ctx.now`. It and the game
   // exchange JSON only: a message is copied as JSON text (at most 1 MiB,
   // nesting at most 128 deep; functions and `undefined` are left out as
   // `JSON.stringify` leaves them, and a host object arrives as `{}`), and
