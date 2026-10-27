@@ -1,4 +1,4 @@
-// Copied unchanged below this note from the StarHermit runtime 1.16.0
+// Copied unchanged below this note from the StarHermit runtime 1.16.1
 // (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -5227,11 +5227,16 @@ declare module "starhermit:ui" {
    * content) it is laid out at the old size, then moved, input and focus
    * included, to where the anchor puts it. It stays in the focus order
    * where it is built. In a stack it counts toward the stack's size;
-   * elsewhere it takes no room. It is over what was built before it: the
-   * pointer on it (hover, presses, the wheel) is its widgets', never those
-   * under it (a pause card over a board), as for a container with a
-   * background or a style and a scroll area over what is before them in a
-   * stack. Later is on top, by last frame's rectangles. */
+   * elsewhere it takes no room. Since API_MINOR 18 the topmost takes the
+   * pointer, by last frame's rectangles (later is on top): a placed
+   * container with a background or a style (a pause card over a board),
+   * any container with one in a stack, and a scroll area take the pointer
+   * (hover, presses, the wheel) over their whole box from what was built
+   * before them under it, and an interactive widget from those under its
+   * own rectangle. A placed container painting nothing (an effects layer
+   * drawn over the UI, a widget of role "none") lets the pointer through
+   * between its interactive widgets. Games declaring an older minor keep
+   * the earlier rule: the first widget built under the pointer takes it. */
   export function place(
     label: string,
     at: Anchor | { anchor?: Anchor; x?: number; y?: number },
