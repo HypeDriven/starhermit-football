@@ -1,4 +1,4 @@
-// Copied unchanged below this note from the StarHermit runtime 1.18.0
+// Copied unchanged below this note from the StarHermit runtime 1.19.1
 // (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -158,8 +158,19 @@ interface Console {
 declare var console: Console;
 
 /** Timers run on the game clock (they pause while the game is suspended)
- * just before `onUpdate`, at most once a frame each; `delay` is in
- * milliseconds as on the web. At most 1,024 timers at once (RangeError). */
+ * just before `onUpdate`; `delay` is in milliseconds as on the web. At
+ * most 1,024 timers at once (RangeError). A `setTimeout` runs once, at
+ * the earliest in the next frame (so a chain of them runs a step a
+ * frame). Since API_MINOR 21 a `setInterval` runs as in a browser: once
+ * for each of its periods (at least 4 ms, browsers' clamp) that falls in
+ * the frame's span of the game clock, interleaved with the other timers
+ * in the order they fall due (a 4 ms interval runs about four times a
+ * 60 Hz frame), and a run missed before that span is not caught up, as a
+ * browser runs a late interval once (after a long frame, at most 0.1 s
+ * worth). Before 21 an interval runs at most once a frame. A simulation
+ * that must tick at a fixed rate whatever the frame rate (catching up
+ * after a slow frame, up to five steps a frame) belongs in
+ * `onFixedUpdate` at `setFixedRate(hz)`, not an interval. */
 declare function setTimeout(callback: () => void, delay?: number): number;
 declare function clearTimeout(id: number | undefined): void;
 declare function setInterval(callback: () => void, delay?: number): number;
@@ -193,6 +204,26 @@ declare class TextDecoder {
  * `Uint8Array.from(atob(text), (c) => c.charCodeAt(0))`. */
 declare function atob(data: string): string;
 declare function btoa(data: string): string;
+
+/** Cryptographic randomness as on the web (since API_MINOR 21). Natively
+ * `crypto` is the engine's, from the operating system's generator, and has
+ * only these two members; browsers keep their own `crypto`, which also
+ * has the platform's other members (`subtle` and the like): a game should
+ * not rely on those, as natively they are absent. Workers have it too;
+ * server scripts (`sandbox`, authorities) do not, as on the platform,
+ * whose dice are `ctx.random`. */
+interface Crypto {
+  /** Fills an integer typed array (`Int8Array` to `Uint32Array`,
+   * `Uint8ClampedArray`, the BigInt arrays) with random values in place
+   * and returns it. Another view throws an Error named
+   * `TypeMismatchError`; more than 65,536 bytes one named
+   * `QuotaExceededError`. */
+  getRandomValues<T extends Int8Array | Uint8Array | Uint8ClampedArray | Int16Array | Uint16Array | Int32Array | Uint32Array | BigInt64Array | BigUint64Array>(array: T): T;
+  /** A random RFC 4122 version 4 UUID in lowercase hex
+   * (`xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxxxxxxxxxx`). */
+  randomUUID(): `${string}-${string}-${string}-${string}-${string}`;
+}
+declare var crypto: Crypto;
 
 // ===========================================================================
 declare module "starhermit:engine" {
@@ -560,6 +591,10 @@ declare module "starhermit:engine" {
      * `engine.limits.image_mib=` lowers it or raises it, up to 512 (MiB);
      * images count against it within `gpuMib`. */
     readonly imageMib: number;
+    /** The image count (since API_MINOR 21): 120 unless the manifest's
+     * `engine.limits.images=` lowers it or raises it, up to 1,024; what
+     * counts is in `Budgets`. */
+    readonly images: number;
     /** The clip count: 128 unless the manifest's
      * `engine.limits.audio_clips=` lowers it or raises it, up to 1,024
      * (since API_MINOR 18; before, the manifest's default read 1,024 while
@@ -632,9 +667,25 @@ declare module "starhermit:engine" {
     readonly waitingUploads: number;
     readonly waitingUploadBytes: number;
   }
-  /** The budgets: the manifest's limits within the engine's (120
-   * textures, 1,024 clips and 64 MiB of clip data in the mixer) less what
-   * the runtime keeps for its interface. `meshes` is the mesh count:
+  /** The budgets: the manifest's limits within the engine's (1,024
+   * clips and 64 MiB of clip data in the mixer) less what the runtime
+   * keeps for its interface. `textures` is the image count, the same
+   * natively and in browsers: 120, or what `engine.limits.images=` sets
+   * (at most 1,024, since API_MINOR 21; declare `engine.minor=21` with
+   * it). Each texture, render target and environment counts one while it
+   * lives, and so does each OffscreenCanvas or ImageBitmap the overlay
+   * draws (`draw.image`) or a CanvasTexture shows: the image the GPU
+   * samples. A canvas only drawn onto other canvases (`drawImage`,
+   * patterns) holds no image and counts nothing. An overlay-only canvas's
+   * image goes with the canvas (since API_MINOR 21 natively and in
+   * browsers alike; before, it stayed until the game ended), and when the
+   * count or `textureBytes` is full the overlay lets go of the images of
+   * canvases it did not draw this frame and makes each again when drawn
+   * (an upload; the console says so once), so only one frame's canvases
+   * must fit. Past the budget, making an image throws a RangeError that
+   * names it (`draw.image` of more canvases in one frame than the count
+   * too); catch it, or draw static layers into one canvas once and draw
+   * that, and pack sprites into sheets drawn by `source`. `meshes` is the mesh count:
    * 1,008, or what `engine.limits.meshes=` sets (at most 4,096, since
    * API_MINOR 14). `meshBytes` is the mesh
    * budget: 124 MiB, or what `engine.limits.mesh_mib=` sets (at most
@@ -1058,13 +1109,15 @@ declare module "starhermit:input" {
   /** The pointer the player mostly uses now: `"coarse"` after touch,
    * `"fine"` after a mouse or pen, `"none"` before either (gamepad or
    * keyboard play). Changes as the player switches. Since API_MINOR 20,
-   * `"coarse"` from the first frame on a touch-first device (where the
-   * touch controls show before any touch, `touchControlsVisible`); games
-   * declaring an older minor read `"none"` there until the first touch. */
+   * `"coarse"` from the start on a touch-first device (at module scope, in
+   * `onStart` and every frame; where the touch controls show before any
+   * touch, `touchControlsVisible`); games declaring an older minor read
+   * `"none"` there until the first touch. */
   export function primaryPointer(): "fine" | "coarse" | "none";
   /** Whether the runtime shows its on-screen touch controls
-   * (`setTouchControls`) for the player's input: true from the first frame
-   * on a touch-first device, else from the first touch, until keyboard,
+   * (`setTouchControls`) for the player's input: true from the start on a
+   * touch-first device (already while the game's module is evaluated, and
+   * in `onStart`), else from the first touch, until keyboard,
    * mouse or gamepad use hides them (the next touch shows them again), as
    * `setTouchControls` describes; the same natively and in browsers. It
    * follows the player, not the set: a game that has set no controls (or
@@ -1074,8 +1127,10 @@ declare module "starhermit:input" {
    * API_MINOR 20's runtime). */
   export function touchControlsVisible(): boolean;
   /** `touchControlsVisible` changed, before the frame that reads the new
-   * value (at most once a frame; not called for the value at the start).
-   * Since API_MINOR 20's runtime. */
+   * value (at most once a frame). Not called for the value at the start:
+   * `touchControlsVisible` reads it right from module scope, so read it
+   * once as the game loads and listen for changes. Since API_MINOR 20's
+   * runtime. */
   export function onTouchControlsChange(listener: (visible: boolean) => void): Unsubscribe;
 
   // -- Keys and text ----------------------------------------------------------
@@ -4201,9 +4256,12 @@ declare module "starhermit:scene" {
   export abstract class Camera extends Object3D {
     near: number;
     far: number;
-    /** As three.js: from API_MINOR 20 from the camera's own aspect or
-     * edges; before it for the window's current aspect (or the camera's
-     * view offset, when one is set). */
+    /** As three.js: from the camera's own aspect or edges. Before API_MINOR
+     * 20 the window's camera (`renderer.camera`) without a view offset
+     * takes the window's current aspect, as it draws; every other camera
+     * (one kept for maths, such as a probe a view is fitted through, for
+     * `project`, `unproject`, `Raycaster.setFromCamera` or a `Frustum`)
+     * takes its own on every minor. */
     readonly projectionMatrix: Matrix4;
     readonly projectionMatrixInverse: Matrix4;
     readonly matrixWorldInverse: Matrix4;
@@ -4229,9 +4287,11 @@ declare module "starhermit:scene" {
     constructor(fov?: number, aspect?: number, near?: number, far?: number);
     fov: number;
     /** From API_MINOR 20 always the projection's, as three.js's. Before it
-     * ignored without a view offset (the window's aspect is used); with
-     * one, the projection uses it as three.js does (`setViewOffset` sets
-     * it to `fullWidth / fullHeight`). */
+     * the window's camera (`renderer.camera`) draws with the window's
+     * aspect without a view offset, and its `projectionMatrix` follows;
+     * with one, or for any other camera's `projectionMatrix`, it is used
+     * as three.js uses it (`setViewOffset` sets it to
+     * `fullWidth / fullHeight`). */
     aspect: number;
     /** three.js's view offset (since API_MINOR 16): null until
      * `setViewOffset`; `enabled` false after `clearViewOffset`. */
@@ -4259,7 +4319,9 @@ declare module "starhermit:scene" {
    * changes them when the window does). Before it the view is centered:
    * `top - bottom` sets its height in world units and the width follows
    * the window's aspect (`left`/`right` are kept but not used for the
-   * extent, unless a view offset is set). */
+   * extent, unless a view offset is set); that is the window's camera's
+   * (`renderer.camera`) drawing and `projectionMatrix`, while any other
+   * camera's `projectionMatrix` is three.js's on every minor. */
   export class OrthographicCamera extends Camera {
     constructor(left?: number, right?: number, top?: number, bottom?: number, near?: number, far?: number);
     left: number;
@@ -4839,6 +4901,12 @@ declare module "starhermit:canvas" {
   // ("canvas work budget spent" for the work). All canvases and image
   // bitmaps of a game together hold at most 256 MiB (RangeError).
   //
+  // GPU images: a canvas takes one of the game's images (120 unless
+  // `engine.limits.images` raises it, up to 1,024 since API_MINOR 21) and
+  // its pixels' bytes of the image budget only once the overlay draws it
+  // or a CanvasTexture shows it; drawn onto other canvases it costs
+  // neither (see `engine.Budgets`).
+  //
   // Large textures: a canvas is at most 8,388,608 pixels (4096 × 2048) and
   // a game's images share 56 MiB of GPU memory unless its manifest raises
   // the budget (`engine.limits.image_mib`, up to 512 MiB since
@@ -5143,15 +5211,31 @@ declare module "starhermit:draw" {
   // The per-frame 2D overlay over the 3D scene (HUDs), drawn in call order
   // and cleared as each frame begins; call it from `onUpdate` or
   // `onRender`. Coordinates are window pixels from the top-left corner. At
-  // most 16,384 items a frame, 4,096 characters a text and 65,536
-  // characters a frame (RangeError). The runtime's own interface always
-  // draws above it. The frame's overlay draws at most 262,144 vertices
-  // (three a triangle): a frame past them draws none of its overlay (the
-  // console says so once: "2D vertex budget exceeded"). `box` is the
-  // costly item: a plain box takes a few dozen vertices, a gradient a few
-  // hundred, and a repeating radial gradient a ring at each stop of each
-  // period (about 5,200 for hard rings every 10 pixels over a 120-pixel
-  // box, so about fifty such boxes fill the budget).
+  // most 65,536 items a frame (16,384 before API_MINOR 21's runtime),
+  // 4,096 characters a text and 65,536 characters a frame (RangeError).
+  // The runtime's own interface always draws above it. The frame's
+  // overlay draws at most 524,288 vertices (three a triangle; 262,144
+  // before): a frame past them draws none of its overlay (the console says
+  // so once: "2D vertex budget exceeded"). An image, rectangle or line is
+  // six vertices, so the most items fit whole as images (393,216 vertices,
+  // about 12 MiB a frame sent to the GPU). `box` is the costly item: a
+  // plain box takes a few dozen vertices, a gradient a few hundred, and a
+  // repeating radial gradient a ring at each stop of each period (about
+  // 5,200 for hard rings every 10 pixels over a 120-pixel box, so about a
+  // hundred such boxes fill the budget).
+  //
+  // Busy views (a large isometric map, thousands of units): every item is
+  // CPU work in the game's call and on the runtime's drawing thread each
+  // frame, so draw what does not change once and reuse it. Draw static
+  // layers (terrain, roads, buildings) into an OffscreenCanvas when they
+  // change and draw that canvas each frame as one item (or several tiles
+  // of at most 4,096 pixels a side); keep sprites in a few sheets and draw
+  // each with `image`'s `source` rather than a canvas or texture apiece
+  // (each image counts against `budgets().textures`, and consecutive items
+  // from one image with one blend draw as one batch); cull what is off
+  // screen before drawing it; and move a scene of many like objects to
+  // `starhermit:scene` (InstancedMesh, Sprite), which the GPU draws
+  // without an item each.
   //
   // Fonts. Text in no family the game added draws with the operating
   // system's fonts, as browsers map the generic families: `system-ui` (the
@@ -5188,7 +5272,7 @@ declare module "starhermit:draw" {
   // Unicode gives no emoji form (`⌖ ☆ ✓ ● ⚀`), drawn in the text's
   // color, and like any face draws them wherever no face before it has
   // them (loading for them as for emoji). The font is original art,
-  // under the engine's licence, and has 711 glyphs: the common single
+  // under the engine's licence, and has 825 glyphs: the common single
   // emoji, one code point each (an emoji it lacks draws with the faces
   // before it, or as the pixel font's box), and the twelve keycaps
   // (`0`–`9`, `#` or `*`, U+FE0F, U+20E3: `2️⃣ #️⃣`, also without the
@@ -5336,7 +5420,10 @@ declare module "starhermit:draw" {
     tint?: ColorLike;
   }
   /** Draws a texture, canvas (as it is now) or bitmap; the width and height
-   * default to the source's size. */
+   * default to the source's size. A canvas or bitmap takes one of the
+   * game's images (`budgets().textures`, 120 unless raised) from the first
+   * frame it is drawn; see `Budgets` for when it goes and what a full
+   * budget does. */
   export function image(source: Texture | OffscreenCanvas | ImageBitmap, x: number, y: number, width?: number, height?: number, options?: ImageOptions): void;
 }
 
@@ -8153,8 +8240,8 @@ declare module "starhermit:script" {
   }
   /** A server script as the platform runs it: every call evaluates it in a
    * fresh isolated realm (the parse is cached) with the platform's rules
-   * (no imports, no `Date`, no `Math.random`, no timers; JSON in and out;
-   * `ctx.now` and `ctx.random` from the context, and `Intl` dates read
+   * (no imports, no `Date`, no `Math.random`, no `crypto`, no timers;
+   * JSON in and out; `ctx.now` and `ctx.random` from the context, and `Intl` dates read
    * `ctx.now` as the clock) and its own fuel (the manifest's `fuel_ms` per
    * call; running out throws a RangeError). A context is at most 256 KiB
    * of JSON and a result (or the declarations) at most 64 KB (RangeError).
@@ -8197,7 +8284,8 @@ declare module "starhermit:script" {
   // timeline: `now()` reads as the game's would at that moment, also under
   // `starhermit check`'s simulated clock, where each message starts from
   // the game's clock as its last frame began; `timeOrigin` is the game's),
-  // `TextEncoder`/`TextDecoder` and `atob`/`btoa`, plus `self`,
+  // `TextEncoder`/`TextDecoder`, `atob`/`btoa` and `crypto` (since
+  // API_MINOR 21), plus `self`,
   // `postMessage` and `onmessage`. It has nothing of the engine: no
   // imports of built-in modules and no timers (`setTimeout`,
   // `setInterval`: the game's run on its frames; a worker works as
@@ -8205,9 +8293,8 @@ declare module "starhermit:script" {
   // sandbox's rules (no `Date`, no `Math.random`, none of the globals
   // beyond ECMAScript). An authority keeps those rules, as the
   // platform runs its server script: no imports, no `Date`, no
-  // `Math.random`, no timers, and `Intl` dates read the invocation's
-  // `ctx.now`. It and the game
-  // exchange JSON only: a message is copied as JSON text (at most 1 MiB,
+  // `Math.random`, no `crypto`, no timers, and `Intl` dates read the
+  // invocation's `ctx.now`. It and the game exchange JSON only: a message is copied as JSON text (at most 1 MiB,
   // nesting at most 128 deep; functions and `undefined` are left out as
   // `JSON.stringify` leaves them, and a host object arrives as `{}`), and
   // what a worker sends reaches the game's listeners as each frame begins,
