@@ -1,4 +1,4 @@
-// Copied unchanged below this note from the StarHermit runtime 1.16.4
+// Copied unchanged below this note from the StarHermit runtime 1.17.0
 // (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -2754,9 +2754,13 @@ declare module "starhermit:scene" {
     rotateY(angle: number): this;
     rotateZ(angle: number): this;
     scale(x: number, y: number, z: number): this;
-    /** Transforms positions (and normals by the inverse transpose). */
+    /** Transforms positions (and normals by its normal matrix,
+     * normalized), then recomputes the bounds it has (three.js). */
     applyMatrix4(matrix: Matrix4): this;
     applyQuaternion(quaternion: Quaternion): this;
+    /** Moves the positions so the bounding box's center is the origin
+     * (three.js; it computes `boundingBox`). */
+    center(): this;
     /** Each triangle its own three vertices (no index). */
     toNonIndexed(): BufferGeometry;
     /** A BufferGeometry with copies of the attributes, index, groups,
@@ -4771,8 +4775,9 @@ declare module "starhermit:canvas" {
      * `monospace`, `system-ui`, `cursive`, `fantasy`), which map to the
      * operating system's fonts as browsers map them (see `starhermit:draw`;
      * the system's families have no names of their own here) with the
-     * engine's pixel font (`starhermit pixel`) last. Characters a
-     * face lacks draw with the next face that has them. Default
+     * engine's emoji font and pixel font (`starhermit pixel`) last.
+     * Characters a face lacks draw with the next face that has them; emoji
+     * draw in colour (see "Emoji" in `starhermit:draw`). Default
      * `10px sans-serif`. */
     font: string;
     textAlign: CanvasTextAlign;
@@ -4855,13 +4860,39 @@ declare module "starhermit:draw" {
   // `· × — …` and the arrows) comes last, so a machine without system fonts
   // still draws ASCII. On common systems that covers Latin-1, Latin
   // Extended-A and general punctuation (`é`, `ß`, `–`, `’`); symbols such as
-  // `★` depend on the system. The runtime ships no font file and reads
-  // fonts only from the system's font directories; games name them only
+  // `★` depend on the system. Besides its own emoji font (below), the
+  // runtime ships no font file and reads fonts only from the system's font
+  // directories; games name them only
   // by the generic families (a system family's own name, such as `Arial`,
   // is not a family here, so text cannot tell which fonts the system has).
   // Exact metrics (widths,
   // line heights) differ between systems, as on the web: measure text
   // (`measureText`) rather than assume widths.
+  //
+  // Emoji draw in colour from the engine's own emoji font, StarHermit
+  // Emoji, the same on every system and in browsers: in `text` and
+  // `measureText` here, in `starhermit:ui`, and in a canvas's `fillText`
+  // and `measureText` (`strokeText` strokes an emoji's outline in the
+  // stroke style, as browsers do). It comes after every other face, just
+  // before the pixel font, except that an emoji drawn in emoji style by
+  // default (Emoji_Presentation, such as `😀 🔴 ⭐`) takes it over a
+  // system face's black-and-white form, as browsers prefer their emoji
+  // font. U+FE0F after a character asks for emoji style (`❤️`, where `❤`
+  // alone is text style), U+FE0E for text style; neither draws anything.
+  // An emoji's own colours draw whatever the text's color (its opacity
+  // still applies), except parts the font gives the text's color (as it
+  // draws text-style symbols such as `✔ ☀`). The font is original art,
+  // under the engine's licence, and has 699 glyphs: the common single
+  // emoji, one code point each (an emoji it lacks draws with the faces
+  // before it, or as the pixel font's box); this version draws no
+  // emoji sequences: in a ZWJ sequence (`👩‍💻`) each emoji draws on its
+  // own and the joiner draws nothing, a skin-tone modifier is dropped (the
+  // emoji draws in its default tone), and a flag draws as its two
+  // regional indicator letters where a face has them. The font loads the
+  // first time text needs it, never before (a game without emoji never
+  // loads it): until it arrives, which takes a moment in a browser, emoji
+  // draw as nothing in the room they take once it is in (an em each), so
+  // text keeps its layout, and then they draw. Nothing waits or throws.
 
   export interface Clip {
     /** Only the part inside this window rectangle draws. */
@@ -5032,6 +5063,17 @@ declare module "starhermit:ui" {
   // passes back: a column as wide as its widest label is
   // `{ width: widest / ui.preferences().scale }`; a screen-filling one is
   // `frame().width / ui.preferences().scale` wide, not `/ frame().scale`.
+
+  // Fonts. Text draws with the default faces (`system-ui`), `setFont`'s
+  // family or a text option's (`TextOptions.font`), each falling back as
+  // `starhermit:draw`'s text does: the system's faces, then the engine's
+  // emoji font and pixel font. Emoji draw in colour from the engine's own
+  // emoji font, StarHermit Emoji, loaded the first time text needs it;
+  // until then they keep their room and draw nothing, and measured widths
+  // (`measureText`) are already theirs. Single emoji only in this version:
+  // ZWJ sequences draw as their emoji one by one, skin tones are dropped,
+  // flags draw as regional indicator letters (see "Emoji" in
+  // `starhermit:draw`).
 
   /** A widget's or container's rectangle (window pixels): a new frozen
    * object each call, so one the game keeps never changes. */
@@ -5282,7 +5324,11 @@ declare module "starhermit:ui" {
   export function paragraph(text: string, width?: number, options?: TextOptions & WidgetOptions): Rect;
   /** `size` (logical) is the image's own; styled as `image` (or by a
    * chained `style`), the style's padding and border go around it and the
-   * image fills what they leave (so a style's fixed size stretches it). */
+   * image fills what they leave (so a style's fixed size stretches it).
+   * `uv` (0–1 from the texture's top-left) reaching outside the texture
+   * draws what lies inside it, the box shrinking with it, as
+   * `draw.image`'s `source` does (since 1.16.5; before, a region a hair
+   * outside was clamped and one further out left out). */
   export function image(alt: string, texture: Texture, size: { width: number; height: number }, uv?: { min: [number, number]; max: [number, number] }, options?: WidgetOptions): Rect;
   /** `value` 0–1. Styled as `progress`, its parts `track` and `fill`. */
   export function progress(value: number, width?: number, options?: WidgetOptions): Rect;
@@ -5450,7 +5496,8 @@ declare module "starhermit:ui" {
    * back themselves. */
   export function capturingKeys(): boolean;
   /** Whether the pointer is over a widget (the game should not act on its
-   * clicks). */
+   * clicks). A `target` is none: it takes nothing, so the pointer over it
+   * is the game's (earlier releases read true over a button target). */
   export function pointerOver(): boolean;
   /** The focused widget's label as the last frame ended (null when
    * nothing had focus); the same all through a frame (since API_MINOR 12:
@@ -6754,7 +6801,8 @@ declare module "starhermit:platform" {
   // instead of throwing. Leaderboard scores, achievements and match
   // results are written by the game's server script, never by clients.
   // A guest (signed out, or a run with `--guest`) makes only the platform's
-  // public reads, which it answers without a sign-in: `serverTime()` and
+  // public reads, which it answers without a sign-in: `serverTime()`,
+  // `leaderboards.list()` (since API_MINOR 19's runtime) and
   // `leaderboards.entries()` by a board's id (not `friendsOnly`); every
   // other call rejects with `signed-out`.
   // Started by the StarHermit client, a game plays as the client's signed-in
@@ -6774,6 +6822,11 @@ declare module "starhermit:platform" {
     | "forbidden"
     | "not-found"
     | "conflict"
+    /** Since API_MINOR 19: a room refused because the player is connected
+     * to another room, of this game or another (the platform's `409`, code
+     * `active_room_elsewhere`; it names neither room nor game). Before 19
+     * it is `conflict`, with that code. */
+    | "active-room-elsewhere"
     | "precondition-failed"
     | "too-large"
     | "rate-limited"
@@ -6947,7 +7000,13 @@ declare module "starhermit:platform" {
   export interface Participant {
     readonly id: string;
     readonly userId: string | null;
+    /** The name taken at join (the nickname, else the username). */
     readonly username: string;
+    /** The name to show (since API_MINOR 19's runtime): `username`,
+     * except a username a sign-up generated, shown as `Player-` and 8
+     * hex digits of the account's id (never a name from the sign-in
+     * provider's profile); an AI seat's is its drawn name. */
+    readonly displayName: string;
     readonly isAi: boolean;
     readonly isHost: boolean;
     readonly team: number;
@@ -7023,7 +7082,8 @@ declare module "starhermit:platform" {
      * messages reach only the host and the host's reach everyone else,
      * so a guest hears only the host's. */
     data: (from: string, payload: Uint8Array) => void;
-    /** `ready`, `chat` or a host's `event` frame. */
+    /** `ready`, `chat` or a host's `event` frame (an addressed one without
+     * its recipients). */
     control: (from: string, kind: "ready" | "chat" | "event", frame: JsonValue) => void;
     roster: (room: Room) => void;
     result: (result: JsonValue) => void;
@@ -7034,21 +7094,43 @@ declare module "starhermit:platform" {
     #private;
     private constructor();
     readonly state: RoomSocketState;
+    /** Connected with `{ targeted: true }` (since API_MINOR 19's runtime):
+     * its host may name the recipients of `sendData` and `sendEvent`. */
+    readonly targeted: boolean;
     on<E extends keyof RoomSocketEvents>(event: E, listener: RoomSocketEvents[E]): Unsubscribe;
-    /** At most 8 KB; paced to 28 a second (burst 45): false when dropped. */
-    sendData(payload: Uint8Array | string): boolean;
+    /** At most 8 KB; paced to 28 a second (burst 45): false when dropped.
+     * `to` (a targeted socket's host only; since API_MINOR 19's runtime)
+     * names the participants it reaches, by their `id` (as `data` events
+     * name senders, either case): at most 100, an empty array reaching
+     * nobody (nothing is sent); without it the host's reach everyone else
+     * as always. Receivers hear it as any other. The platform closes a
+     * host's socket for a malformed list, so a list that is not an array
+     * of at most 100 participant ids, or `to` on a socket not connected
+     * with `{ targeted: true }`, throws a TypeError; the message with its
+     * recipients (1 byte, and 16 for each) past 8 KB a RangeError. A
+     * guest's (or a host not yet named by a roster) is dropped: false. */
+    sendData(payload: Uint8Array | string, to?: readonly string[]): boolean;
     /** Control frames: a guest may send 10 a minute. */
     sendReady(): boolean;
     sendChat(text: string): boolean;
     /** Host only: an event frame with these fields (at most 4 KB). The
      * host is the one the latest roster names, or before the first one
      * (which the platform sends on connecting) the one the game's room
-     * calls last returned. */
-    sendEvent(kind: string, fields?: { [key: string]: JsonValue }): boolean;
+     * calls last returned. `to` names its recipients on a targeted socket
+     * as `sendData`'s does (an empty array: nobody); there the fields may
+     * not have a `to` of their own (a TypeError: the platform would read
+     * it as the recipients), which a first-protocol socket relays as the
+     * game's data. */
+    sendEvent(kind: string, fields?: { [key: string]: JsonValue }, to?: readonly string[]): boolean;
     close(): void;
   }
   export const rooms: {
-    /** One active room per player (`conflict` otherwise). */
+    /** One active room per player, of any game: while the player is
+     * connected to another room's socket, creating or joining one (by
+     * code, quick join or an invite) rejects with `active-room-elsewhere`
+     * (since API_MINOR 19; `conflict` before, with the code
+     * `active_room_elsewhere`); a room they hold a seat in but no socket
+     * (a tab closed mid-match) is left first, as `leave` would. */
     create(room: NewRoom): Promise<Room>;
     /** At most 50. */
     browse(options?: { inProgress?: boolean }): Promise<RoomSummary[]>;
@@ -7074,7 +7156,13 @@ declare module "starhermit:platform" {
     invites(): Promise<RoomInvite[]>;
     acceptInvite(inviteId: string): Promise<Room>;
     declineInvite(inviteId: string): Promise<void>;
-    connect(roomId: string): RoomSocket;
+    /** The room's socket. `{ targeted: true }` (since API_MINOR 19's
+     * runtime) connects it with the platform's addressed host frames
+     * (`?proto=2`, opt-in per socket): its host's `sendData` and
+     * `sendEvent` may name their recipients; a guest's messages are
+     * unchanged. Hidden from other guests, never from the host: what no
+     * client may see belongs in a server-run match. */
+    connect(roomId: string, options?: { targeted?: boolean }): RoomSocket;
   };
 
   // -- Sessions, matchmaking and the game socket -------------------------------------
@@ -7179,14 +7267,20 @@ declare module "starhermit:platform" {
   export interface LeaderboardEntry {
     readonly userId: string;
     readonly username: string;
+    /** The name to show (since API_MINOR 19's runtime): the platform's,
+     * else `username` with a generated sign-up name shown as `Player-`
+     * and 8 hex digits of the account's id. */
+    readonly displayName: string;
     readonly score: number;
     readonly rank: number;
     readonly submittedAt: number;
   }
   export const leaderboards: {
-    /** The game's active boards (their ids and keys). A player's: a guest's
-     * call rejects with `signed-out`, so keep the ids a signed-in run
-     * listed to show a guest their entries. */
+    /** The game's active boards (their ids and keys). Anyone's, guests
+     * included (since API_MINOR 19's runtime: the platform answers it
+     * without a sign-in; before, a guest's rejected with `signed-out`).
+     * Reads only: every board is written by the game's server script,
+     * never by clients. */
     list(): Promise<Leaderboard[]>;
     /** A page of a board's entries, by its id; `pageSize` 1–100. Anyone's,
      * guests included (the platform answers it without a sign-in), except
@@ -7686,11 +7780,13 @@ declare module "starhermit:script" {
     now?: number;
     random?: number;
     sessionId: string;
-    players: { id: string; name: string; ai?: boolean }[];
+    /** `name` is the username scripts key on; `displayName` the name to
+     * show (the platform's, which a local caller may leave out). */
+    players: { id: string; name: string; displayName?: string; ai?: boolean }[];
     room?: {
       roomId: string;
       metadata: JsonValue;
-      roster: { userId: string | null; name: string; team: number; slot: number; ai: boolean }[];
+      roster: { userId: string | null; name: string; displayName?: string; team: number; slot: number; ai: boolean }[];
     };
     presence?: { [userId: string]: { online: boolean; left: boolean } };
     sessionState: JsonValue;
@@ -7729,6 +7825,12 @@ declare module "starhermit:script" {
     readonly tickRateHz: number | null;
     readonly replays: boolean;
     readonly achievements: JsonValue;
+    /** `game.rooms` as the platform reads it (since API_MINOR 19's
+     * runtime): `"host"` (in any case) keeps the game's realtime rooms
+     * host-routed, so starting one starts no session and its match writes
+     * no scores, achievements or ratings; anything else, or nothing, is
+     * `"server"`, rooms binding a session of the script. */
+    readonly rooms: "host" | "server";
     createSession(ctx: SessionContext): ScriptResult;
     onPlayerMessage(ctx: SessionContext): ScriptResult;
     onTick(ctx: SessionContext): ScriptResult;
@@ -7913,6 +8015,9 @@ declare module "starhermit:script" {
     readonly rate: number | null;
     readonly replays: boolean;
     readonly achievements: JsonValue;
+    /** `game.rooms` as `PlatformScript.rooms` reads it (null until
+     * `open`). */
+    readonly rooms: "host" | "server" | null;
     readonly stats: WorkerStats;
     on<E extends keyof AuthorityEvents>(event: E, listener: AuthorityEvents[E]): Unsubscribe;
     /** `onPlayerMessage` with `ctx.message.data` = `data` (at most 16 KB of
