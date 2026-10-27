@@ -1,4 +1,4 @@
-// Copied unchanged below this note from the StarHermit runtime 1.16.3
+// Copied unchanged below this note from the StarHermit runtime 1.16.4
 // (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -4984,7 +4984,11 @@ declare module "starhermit:draw" {
   export function measureText(text: string, options?: Pick<TextOptions, "size" | "font" | "weight" | "letterSpacing" | "maxWidth" | "direction" | "stroke">): { width: number; height: number };
   /** `blend` since API_MINOR 18 (an additive glow sprite: `"add"`). */
   export interface ImageOptions extends Clip, Rotation, Blend {
-    /** Part of the source in its own pixels (default all of it). */
+    /** Part of the source in its own pixels (default all of it). As
+     * canvas's `drawImage` takes it: a part reaching past the image is
+     * clipped to it and the destination shrinks with it (the image is
+     * never stretched past its edge), a negative width or height spans
+     * the other way, and a part with no area in the image draws nothing. */
     source?: { x: number; y: number; width: number; height: number };
     /** Multiplies the image (default white). */
     tint?: ColorLike;
@@ -7036,7 +7040,10 @@ declare module "starhermit:platform" {
     /** Control frames: a guest may send 10 a minute. */
     sendReady(): boolean;
     sendChat(text: string): boolean;
-    /** Host only: an event frame with these fields (at most 4 KB). */
+    /** Host only: an event frame with these fields (at most 4 KB). The
+     * host is the one the latest roster names, or before the first one
+     * (which the platform sends on connecting) the one the game's room
+     * calls last returned. */
     sendEvent(kind: string, fields?: { [key: string]: JsonValue }): boolean;
     close(): void;
   }
@@ -7058,6 +7065,8 @@ declare module "starhermit:platform" {
     open(roomId: string): Promise<Room>;
     /** Host only; idempotent; `unavailable` while the game server wakes. */
     start(roomId: string): Promise<Room>;
+    /** Stops this room's sockets with `ended`; a socket whose player left
+     * elsewhere stops with `ended` when it next reconnects. */
     leave(roomId: string): Promise<void>;
     /** Host only. */
     seat(roomId: string, seats: readonly { participantId: string; team: number; slot: number }[]): Promise<Room>;
