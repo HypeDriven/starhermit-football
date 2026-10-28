@@ -1,4 +1,4 @@
-// Copied unchanged below this note from the StarHermit runtime 1.19.1
+// Copied unchanged below this note from the StarHermit runtime 1.22.0
 // (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -35,10 +35,23 @@
 //   `"rgb(255 136 0 / 50%)"`, a named color), a `0xRRGGBB` number, or
 //   `[r, g, b]` / `[r, g, b, a]` with components 0–1. Scene colors are
 //   converted to linear light for lighting, as three.js does.
-// - Light intensities keep the engine's convention: a white surface facing
-//   a light of color 1 and intensity 1 shows its base color. three.js
-//   r155+ divides direct and ambient light by π, so a ported light uses
-//   `threeIntensity / Math.PI`.
+// - Light intensities. From API_MINOR 23 they are three.js r155+'s
+//   (physically correct lights, its default since; r185's WebGLRenderer):
+//   a ported light keeps three.js's `intensity`. Direct light is
+//   `color × intensity × n·l` irradiance into three.js's BRDF (a Lambert
+//   material reflects `base / π` of it), and ambient and hemisphere light
+//   are irradiance through `BRDF_Lambert` of the diffuse color,
+//   `base × (1 − metalness) / π` (none on a metal). Before API_MINOR 23
+//   they keep the engine's legacy convention: a white surface facing a
+//   light of color 1 and intensity 1 shows its base color, three.js's
+//   legacy (pre-r155) scaling of ambient, hemisphere, directional, point
+//   and spot lights by π, ambient and hemisphere light on the whole base
+//   color; a light ported from r155+ there uses `threeIntensity /
+//   Math.PI`. At every minor point and spot lights fall off as r155+'s do
+//   (the inverse `decay` power of the distance, with its windowed
+//   `distance`), so a legacy port's falloff does not carry over, and
+//   emissive light and `scene.environment` are three.js r155+'s (no
+//   factor); there are no RectAreaLights.
 // - Callbacks. Lifecycle callbacks are registered once at the top level of
 //   the entry module; input events arrive at the start of each frame,
 //   before `onFixedUpdate`. Asynchronous host work (asset loads, platform
@@ -242,6 +255,12 @@ declare module "starhermit:engine" {
     | number
     | readonly [number, number, number]
     | readonly [number, number, number, number];
+  /** A font weight as CSS's `font-weight` takes it: a number from 1 to
+   * 1000 (400 normal, 700 bold), the same number as text (`"600"`),
+   * `"normal"` or `"bold"`, and `"bolder"` (700) and `"lighter"` (300) as
+   * from normal. Anything else (a number outside 1–1000) throws a
+   * TypeError. */
+  export type FontWeight = number | `${number}` | "normal" | "bold" | "bolder" | "lighter";
   /** A JSON value: what crosses the platform and storage boundaries. */
   export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
   /** The `name` of errors thrown where a web API is the model. */
@@ -728,6 +747,29 @@ declare module "starhermit:engine" {
   export function openMenu(): void;
   /** Ends the game (runs `onQuit`, then the runtime closes). */
   export function quit(): void;
+  /** How {@link openLink} went: the player pressed Open (the runtime
+   * handed the link to their browser) or Cancel; the link is not approved
+   * (not declared, unknown to the platform, pending, rejected, revoked, or
+   * approved for another URL than the manifest's); or it could not be
+   * asked now (no press, another link showing, moments after a Cancel, no
+   * platform session, the platform did not answer). */
+  export type LinkOutcome = "opened" | "cancelled" | "unapproved" | "unavailable";
+  /** Opens an external link the manifest declares, by its id
+   * (`engine.link.<id>=<https URL>` in starhermit.txt; since API_MINOR 24,
+   * and undefined for games declaring an older `engine.minor`). The game
+   * never passes a URL: the runtime opens only the manifest's, once a
+   * StarHermit moderator approved it for the game (asked at each open,
+   * which needs `engine.capabilities=platform`) and the player pressed
+   * Open in the runtime's own confirmation, which shows the link's host
+   * and URL and which the game cannot draw over, style or dismiss; the
+   * game hears no input while it shows. Call it while handling the
+   * player's press (an action, key, pointer or gamepad press), one link a
+   * press and one at a time; otherwise it resolves "unavailable" with a
+   * warning on the console. It never rejects for the link's sake (only a
+   * non-string id is a TypeError). A development run (`--dev` natively, a
+   * loopback development page in browsers) without a launch token opens
+   * declared links unreviewed, the confirmation saying so. */
+  export function openLink(id: string): Promise<LinkOutcome>;
   /** The game is busy with a long piece of work it cannot split across
    * frames (a level generated, a world built), or no longer (null; since
    * API_MINOR 5). While it is busy a call may run up to 60 seconds, not
@@ -2316,6 +2358,20 @@ declare module "starhermit:scene" {
   export const DstColorFactor: 208;
   export const OneMinusDstColorFactor: 209;
   export const SrcAlphaSaturateFactor: 210;
+  /** Depth comparisons for `Material.depthFunc` (three.js r185's names
+   * and numbers): a fragment draws when its depth is, against the depth
+   * already stored, never, always, less (nearer), less or equal, equal,
+   * greater or equal, greater (farther), or not equal. Since engine
+   * 1.20.2 (any minor). */
+  export type DepthModes = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  export const NeverDepth: 0;
+  export const AlwaysDepth: 1;
+  export const LessDepth: 2;
+  export const LessEqualDepth: 3;
+  export const EqualDepth: 4;
+  export const GreaterEqualDepth: 5;
+  export const GreaterDepth: 6;
+  export const NotEqualDepth: 7;
   export type Wrapping = "clamp" | "repeat" | "mirror";
   export const ClampToEdgeWrapping: "clamp";
   export const RepeatWrapping: "repeat";
@@ -2334,6 +2390,16 @@ declare module "starhermit:scene" {
   export const LinearMipmapNearestFilter: "linear-mipmap-nearest";
   export const NearestMipmapLinearFilter: "nearest-mipmap-linear";
   export const LinearMipmapLinearFilter: "linear-mipmap-linear";
+  /** `renderer.shadowMap.type` (three.js's numbers; since API_MINOR 23).
+   * `PCFShadowMap` (the default) filters five lookups on a disk
+   * `shadow.radius` texels wide; `BasicShadowMap` compares one texel, a
+   * hard edge. `PCFSoftShadowMap` draws as `PCFShadowMap` (three.js r185
+   * deprecated it so) and so, for now, does `VSMShadowMap`. Before
+   * API_MINOR 23 the type is ignored. */
+  export const BasicShadowMap: 0;
+  export const PCFShadowMap: 1;
+  export const PCFSoftShadowMap: 2;
+  export const VSMShadowMap: 3;
   /** `renderer.toneMapping` operators (three.js's numbers and formulas;
    * `CustomToneMapping` draws as `NoToneMapping`). */
   export const NoToneMapping: 0;
@@ -2515,12 +2581,33 @@ declare module "starhermit:scene" {
      * three.js renders it, seen from `options.position` (the origin by
      * default) less the room's `position`, blurred by `sigma` radians (0
      * or less, or NaN, none; above 0.1, as 0.1, about where three.js
-     * truncates its blur). `near`, `far` and `options.size` are ignored.
-     * Any other scene throws a TypeError: render a scene into a
-     * `RenderTarget` instead (since API_MINOR 8). Natively and in browsers
-     * alike. */
+     * truncates its blur). For a room `near`, `far` and `options.size` are
+     * ignored.
+     *
+     * Since engine 1.21.0 (at any minor; before, a TypeError) any scene, as
+     * three.js r185 renders it: `scene` or an Object3D outside it (a
+     * `Group` holding a sky dome and a sun sprite), seen by six 90° cube
+     * cameras at `options.position` between `near` and `far` (0.1 and 100;
+     * a RangeError unless 0 < near < far) with `options.size`-pixel faces
+     * (256; a power of two, 16 to 1024), over the scene's background color,
+     * else the renderer's clear color (or `scene`'s texture or sky
+     * background), blurred by `sigma` (at most 0.1), no tone mapping. The
+     * graph is taken as it is at the call; the faces are drawn on the
+     * environment worker (the same natively and in browsers) and the
+     * environment lights the scene a few frames later. Meshes, instanced
+     * meshes and sprites draw in three.js's lists and order with their
+     * materials' color, opacity, vertex colors, `map` (package images,
+     * canvases and DataTextures; other textures as white, with a warning),
+     * alpha test, blending, sides and depth test and writes. Unlit
+     * materials (`MeshBasicMaterial`, `SpriteMaterial`) show as in
+     * three.js; lit ones show their emissive light and `emissiveMap` plus
+     * diffuse light from the scene's ambient, hemisphere, directional,
+     * point and spot lights (no specular light, environment, other maps
+     * or shadows). Points, lines, fog and custom programs draw nothing
+     * (spec: rendering-and-quality.html#scene-environments). Natively and
+     * in browsers alike. */
     fromScene(
-      scene: RoomEnvironment,
+      scene: RoomEnvironment | Object3D,
       sigma?: number,
       near?: number,
       far?: number,
@@ -2545,9 +2632,12 @@ declare module "starhermit:scene" {
    * near-black room lit by its panels, about a third as bright on what it
    * lights, as three.js r16x games constructed it). A port of three.js
    * r163 or later, where the light is always 900, passes the renderer.
-   * Before API_MINOR 18 the light is 900 either way. three.js r18x lowers the room by
-   * setting `position.y = -3.5`; here `position` is (0, 0, 0), as in r16x,
-   * and only moves the room. */
+   * Before API_MINOR 18 the light is 900 either way. three.js r183 and
+   * later lower the room by setting `position.y = -3.5`; here `position` is
+   * (0, 0, 0), as in r16x, and only moves the room, so an r183+ port sets
+   * it. An r155–r162 port keeps the constructor's argument as its page had
+   * it: adding the renderer lights what the environment lights about 1.6 to
+   * 3 times as brightly (spec: rendering-and-quality.html#environment-ports). */
   export class RoomEnvironment {
     constructor(renderer?: unknown);
     name: string;
@@ -2740,11 +2830,26 @@ declare module "starhermit:scene" {
    * only); one, or an image that fails to decode or is missing, leaves its
    * maps out. `EXT_texture_webp`, required or optional, is read as
    * three.js reads it: the texture's WebP image first, its core `source`
-   * when that fails (named in the warning). Not applied: JPEG and other
+   * when that fails (named in the warning). `KHR_lights_punctual`
+   * (since API_MINOR 22) makes lights as three.js r185's GLTFLoader does:
+   * a `DirectionalLight`, `PointLight` or `SpotLight` of the light's
+   * linear color at each node placing it (the node itself, named by the
+   * node when it has a name and else by the light or `light_N`; a node
+   * with a mesh too is a `Group` of the mesh and the light), `range` as
+   * `distance` (0 without), `decay` 2, a spot's `angle` its outer cone
+   * and `penumbra` 1 − inner / outer, and a directional or spot light
+   * aiming down the node's −Z at a `target` it holds at (0, 0, −1). Its
+   * `intensity` is the file's from API_MINOR 23 (three.js r155+'s light
+   * units), and the file's over π at API_MINOR 22, whose legacy units are
+   * π times those (spec rendering-and-quality.html#light-units): either
+   * way the model lights as three.js r185 lights it. A game
+   * declaring an older minor loads the model without its lights (named in
+   * the warning), whether the file uses or requires the extension (a
+   * required one failed to load before 1.20). Not applied: JPEG and other
    * image formats (`KHR_texture_basisu`),
    * `KHR_texture_transform`, UV sets past 0, other material extensions
-   * (clearcoat, transmission, sheen, …), cameras, lights, animations,
-   * skins and morph targets. The rest of the model loads, and one console
+   * (clearcoat, transmission, sheen, …), cameras, animations, skins and
+   * morph targets. The rest of the model loads, and one console
    * warning per model names all that was not applied (also in `ignored`),
    * never silently. A file and its buffers are at most 64 MiB, and the
    * document within the reader's limits (1,048,576 vertices and 3,145,728
@@ -3459,6 +3564,8 @@ declare module "starhermit:scene" {
     blendSrcAlpha?: number | null;
     blendDstAlpha?: number | null;
     side?: Side;
+    /** Since API_MINOR 23: see `Material.shadowSide`. */
+    shadowSide?: Side | null;
     /** Default from API_MINOR 20: true, as three.js's for every material,
      * transparent ones included. Before it: written unless blended, so a
      * port declaring an older minor that relied on a transparent mesh's
@@ -3466,10 +3573,19 @@ declare module "starhermit:scene" {
      * glass top under them stay visible only where they wrote depth, as
      * blended meshes draw farthest first). */
     depthWrite?: boolean;
-    /** Depth tests pass on nearer depth, and from API_MINOR 20 on equal
-     * depth too (three.js's default `LessEqualDepth`; `depthFunc` itself
-     * is not offered). */
+    /** Whether the depth test applies (default true); without it the
+     * material draws whatever is nearer and writes no depth, as in
+     * three.js, whatever its `depthFunc`. */
     depthTest?: boolean;
+    /** The depth test's comparison (three.js `depthFunc`; a `DepthModes`
+     * constant such as `LessDepth`). Default: `LessEqualDepth` from
+     * API_MINOR 20 (three.js's, so of two coplanar surfaces the later
+     * drawn shows), `LessDepth` before it (the earlier drawn shows). A
+     * value set is honoured at every minor: `LessDepth` keeps minor 19's
+     * coplanar result for a model whose faces were baked over each other.
+     * Shadow maps keep the nearer test. Another value is a TypeError at
+     * the frame's sync. Since engine 1.20.2 (any minor). */
+    depthFunc?: DepthModes;
     /** Whether the scene's fog applies (default true). */
     fog?: boolean;
     /** Multiply by the geometry's `color` attribute. */
@@ -3514,8 +3630,18 @@ declare module "starhermit:scene" {
     blendSrcAlpha: number | null;
     blendDstAlpha: number | null;
     side: Side;
+    /** The faces the shadow maps draw (three.js; since API_MINOR 23):
+     * null (the default) draws the side opposite `side` (back faces of a
+     * front-sided material, front faces of a back-sided one, both of a
+     * double-sided one), so a surface facing the light is not in its own
+     * map and does not shadow itself. Before API_MINOR 23 the maps draw
+     * the faces `side` draws, and this is ignored. */
+    shadowSide: Side | null;
     depthWrite: boolean;
     depthTest: boolean;
+    /** Since engine 1.20.2 (any minor): see `MaterialParameters.depthFunc`.
+     * Reads the default the game's minor takes until one is set. */
+    depthFunc: DepthModes;
     fog: boolean;
     vertexColors: boolean;
     polygonOffset: boolean;
@@ -4344,7 +4470,10 @@ declare module "starhermit:scene" {
   }
 
   // -- Lights ---------------------------------------------------------------------
-  // Intensities are in the engine's convention (top of file). At most 16
+  // Intensities (top of file) are three.js r155+'s from API_MINOR 23, so a
+  // port keeps three.js's; before it they are the engine's legacy ones, π
+  // times those, and a port from r155+ divides every light's `intensity`
+  // here by `Math.PI`. At most 16
   // lights besides ambient light draw, and four shadow-casting lights: the
   // first four directional or spot lights (in scene order) with
   // `castShadow` cast, each with its own shadow map; other lights' shadows
@@ -4353,40 +4482,92 @@ declare module "starhermit:scene" {
     color: Color;
     intensity: number;
   }
-  /** Adds to every surface's base color (ambient lights add up). */
+  /** Adds color × intensity of irradiance to every lit surface (ambient
+   * lights add up): from API_MINOR 23 through three.js's `BRDF_Lambert`,
+   * `base × (1 − metalness) / π` of it, as three.js r155+; before, the
+   * legacy units' color × intensity × the whole base color. */
   export class AmbientLight extends Light {
     constructor(color?: ColorInput, intensity?: number);
   }
-  /** Shadow settings of a casting light. */
+  /** Shadow settings of a casting light.
+   *
+   * Since API_MINOR 23 (games declaring `engine.minor=23` or later) they
+   * are three.js r185's `LightShadow`: the map sees what `camera` sees
+   * from the light's world position looking at its target's (up +Y), as
+   * three.js's `updateMatrices`. A directional light's camera is an
+   * `OrthographicCamera(-5, 5, 5, -5, 0.5, 500)`: shadows reach only what
+   * its box holds (outside it all is lit), and the box's width over
+   * `mapSize` is a texel's size, so the bias a scene needs is the one it
+   * needs in three.js. A spot's is a `PerspectiveCamera` whose `fov` is
+   * twice the light's `angle` times `focus` (degrees), its aspect `aspect`
+   * and its far plane the light's `distance` (or the camera's own `far`,
+   * default 500, without one), near 0.5. Set the camera's planes, edges
+   * and `zoom` and call its `updateProjectionMatrix()` as in three.js;
+   * the shadow follows them each frame. Shadows filter as
+   * `renderer.shadowMap.type` says (`PCFShadowMap`: five lookups on a
+   * Vogel disk `radius` texels wide, turned per pixel by interleaved
+   * gradient noise; `BasicShadowMap`: one nearest texel). Maps draw each
+   * material's `shadowSide` (by default the side opposite its `side`),
+   * clipped at the camera's near and far planes, a masked material cut
+   * out by its map's alpha alone (`alphaTest` against `map`, as three.js's
+   * `MeshDepthMaterial`; not `opacity` or vertex colors).
+   *
+   * Before API_MINOR 23 they are the engine's own: a directional light's
+   * map is fitted to the camera's view out to `distance`, `bias` acts only
+   * when negative and `normalBias` is in map texels (the members marked
+   * "before API_MINOR 23"); the camera's `near` and `far` are `near` and
+   * `distance`, and three.js's members below are ignored.
+   *
+   * Point lights cast no shadows; at most four lights cast (the first
+   * directional or spot lights with `castShadow` in scene order). */
   export interface LightShadow {
-    /** The shadow map's size, 64–4096: a number, or three.js's vector (its
-     * larger side). Since API_MINOR 14 the graphics level holds it to its
-     * `shadowMapSize` (512 at quantum, 1024 atomic and molecular, 2048
-     * cellular and terrestrial, 4096 above) for games declaring
-     * `engine.minor=14` or later. */
-    mapSize: number | Vector2;
-    /** Directional: how far along the view shadows reach (default 40 m);
-     * spot: how far from the light. */
-    distance: number;
-    /** Depth bias with three.js's sign: negative values (default −0.0005)
-     * offset depths toward the light against shadow acne; positive values
-     * act as 0. */
+    /** Since API_MINOR 23 the shadow camera (an `OrthographicCamera`, or a
+     * spot's `PerspectiveCamera`), which three.js's `copy` clones. */
+    camera: OrthographicCamera | PerspectiveCamera;
+    /** The map's size, 64–4096: a three.js vector (its larger side when
+     * not square) or a number. Since API_MINOR 23 the default is 512 × 512
+     * and the game's size is kept whatever the graphics level (sizes past
+     * 4096, or past the device's largest texture, draw at the smaller; each
+     * map takes size² × 4 bytes of the GPU's effect budget, and one that
+     * does not fit is left out, its light unshadowed, with a note in
+     * Options). Before it the default is 2048, and since API_MINOR 14 the
+     * graphics level holds it to its `shadowMapSize` (512 at quantum, 1024
+     * atomic and molecular, 2048 cellular and terrestrial, 4096 above). */
+    mapSize: Vector2 | number;
+    /** Since API_MINOR 23 added to the depth each point is compared at, in
+     * the map's 0–1 depth (default 0): negative values move it toward the
+     * light, against acne, positive ones away, as three.js's. Before it
+     * three.js's sign with only negative values acting (default −0.0005). */
     bias: number;
-    /** Normal offset in shadow-map texels (default 1.5). */
+    /** Since API_MINOR 23 how far each point moves along its vertex normal
+     * (turned for back-sided materials) before its lookup, in world units
+     * (default 0), as three.js's. Before it a normal offset in map texels
+     * (default 1.5). */
     normalBias: number;
-    /** Spot: the shadow camera's near plane (default 0.5 m). */
-    near: number;
-    /** Spot: the part of the cone the shadow map covers, 0 < focus ≤ 1
-     * (three.js `shadow.focus`, default 1). */
-    focus: number;
-    /** Since API_MINOR 9: the softness of the shadow's edge, the spacing
-     * of its filter's nine samples in shadow-map texels, 0–16 (three.js
-     * `shadow.radius` with `PCFShadowMap`; default 1, as before; 0 a hard
-     * edge). Outside 0–16 the light's sync throws. */
+    /** The filter's radius in map texels, 0–16 (since API_MINOR 9; three.js
+     * `shadow.radius`, default 1; 0 a hard edge): since API_MINOR 23 the
+     * disk `PCFShadowMap`'s five lookups spread over, before it the
+     * spacing of the engine's nine. Outside 0–16 the light's sync throws. */
     radius: number;
-    /** three.js's shadow camera: its `near` and `far` are `near` and
-     * `distance`. */
-    readonly camera: { near: number; far: number };
+    /** Since API_MINOR 23: how much the shadow darkens, 0–1 (default 1). */
+    intensity: number;
+    /** Spot: the part of the cone the map covers, 0 < focus ≤ 1 (three.js
+     * `shadow.focus`, default 1). */
+    focus: number;
+    /** Spot, since API_MINOR 23: the camera's aspect (default 1). */
+    aspect: number;
+    /** Since API_MINOR 23, three.js's (default 8): `VSMShadowMap`'s blur,
+     * which the engine does not draw (VSM draws as PCF). */
+    blurSamples: number;
+    /** Since API_MINOR 23, three.js's (default true and false). The engine
+     * draws every map each frame whatever they say. */
+    autoUpdate: boolean;
+    needsUpdate: boolean;
+    /** Before API_MINOR 23: a directional light's reach along the view
+     * (default 40 m), a spot's far plane. */
+    distance: number;
+    /** Before API_MINOR 23: a spot's near plane (default 0.5 m). */
+    near: number;
   }
   /** Light from `position` toward `target`'s position (three.js); both may
    * be anywhere in the graph. */
@@ -4415,8 +4596,9 @@ declare module "starhermit:scene" {
     readonly shadow: LightShadow;
   }
   /** Sky color from above blending to the ground color from below, by the
-   * surface normal; it multiplies the whole base color (three.js only the
-   * diffuse part). */
+   * surface normal, as irradiance: from API_MINOR 23 through three.js's
+   * `BRDF_Lambert` of the diffuse color, `base × (1 − metalness) / π`, as
+   * three.js r155+; before, times the whole base color (legacy units). */
   export class HemisphereLight extends Light {
     constructor(skyColor?: ColorInput, groundColor?: ColorInput, intensity?: number);
     groundColor: Color;
@@ -4711,7 +4893,9 @@ declare module "starhermit:scene" {
     /** The camera the scene is seen through; nothing 3D draws without one.
      * It need not be in the scene graph. */
     camera: Camera | null;
-    readonly shadowMap: { enabled: boolean };
+    /** `type` (since API_MINOR 23): `PCFShadowMap` (the default) or
+     * `BasicShadowMap` (see `LightShadow`). */
+    readonly shadowMap: { enabled: boolean; type: number };
     /** Null (the default) for none. */
     bloom: BloomSettings | null;
     /** Null (the default) for none. */
@@ -4898,8 +5082,43 @@ declare module "starhermit:canvas" {
   // gradient stops, 256 dash entries, 1,024 nested saves, 32 MiB of clip
   // masks, shadow blur at most 512, and about 0.2 s of drawing work per
   // call (each text character counts); past one a call throws a RangeError
-  // ("canvas work budget spent" for the work). All canvases and image
+  // ("drawing too complex" for the work). All canvases and image
   // bitmaps of a game together hold at most 256 MiB (RangeError).
+  //
+  // The work budget. Drawing is counted in work units, each about a
+  // nanosecond of the engine's rasterizer on a desktop core: one call
+  // does at most 200,000,000, and all of a game's canvases share
+  // 200,000,000 a frame (refilled as each frame begins, natively and in
+  // browsers alike). A call is charged its whole estimate before it
+  // changes a pixel:
+  // - Shapes (`fill`, `stroke`, `fillRect`, `strokeRect`, `clearRect`,
+  //   `drawImage`, text's glyphs): each pixel of the shape's bounding box
+  //   within the canvas and the clip costs 2 for a solid color drawn
+  //   `source-over` inside a rectangular clip, 12 for any other
+  //   `globalCompositeOperation` or under a clip path; a gradient adds 6,
+  //   an image or pattern drawn at any scale 10 (`drawImage` too) and
+  //   rotated, skewed or repeated 24. Rasterizing adds 4 units for each
+  //   edge of the outline in each pixel row it crosses (a little more where
+  //   many edges cross one row). A shadow adds 40 a pixel of its blurred
+  //   layer and 10 to 14 a pixel it covers. `clip()` costs 2 a pixel of
+  //   the clip's box plus its edges.
+  // - Text: `fillText`, `strokeText` and `measureText` cost 8,000 a
+  //   character, then the glyphs draw as shapes; a colour emoji also costs
+  //   8 a pixel of its image at the device's scale, drawn as an image.
+  // - Pixels: `getImageData`, `putImageData` and `createPattern` of a
+  //   canvas or ImageData cost 4 a pixel.
+  // A call the frame's budget cannot cover draws nothing and throws a
+  // RangeError, "canvas work budget spent"; the next frame has the whole
+  // budget again. The work also counts against the calling entry's fuel
+  // (an instruction for each 10 units). For scale: a solid fill of a
+  // whole 2048 × 2048 canvas is about 8.4 M units (about 23 a frame), a
+  // gradient over it 34 M, `drawImage` of a 2048 × 2048 image 50 M (4 a
+  // frame) and 1,000 characters of text at least 8 M. So draw what does
+  // not change once and reuse it (draw the baked canvas with `drawImage`,
+  // `draw.image` or a `CanvasTexture`) rather than drawing it again each
+  // frame; spread a large bake over several frames (a few tiles a frame,
+  // or catch that RangeError and go on with the rest next frame); keep
+  // canvases no larger than they show; and leave shadows off large shapes.
   //
   // GPU images: a canvas takes one of the game's images (120 unless
   // `engine.limits.images` raises it, up to 1,024 since API_MINOR 21) and
@@ -5192,6 +5411,30 @@ declare module "starhermit:canvas" {
     add(font: FontFace): this;
     delete(font: FontFace): boolean;
     has(font: FontFace): boolean;
+    readonly size: number;
+    /** Loads what `text` (default `" "`) drawn in `font` (a CSS font value,
+     * as `context.font`) needs, as the web's `document.fonts.load`, and
+     * resolves with the set's faces of the families `font` names. Faces
+     * the game added are read as they are added, so what it waits for is
+     * the engine's emoji font, which loads only when text first needs it:
+     * when `text` has emoji (or symbols only that font has), this asks for
+     * it and resolves once it is in (or could not be loaded). A canvas
+     * draws once, so bake emoji only after this: drawn before the font
+     * arrives they stay blank (`fillText` asks for the font too, but does
+     * not wait). Rejects with a SyntaxError for a value `context.font`
+     * ignores. Since engine 1.20.1 (any minor). */
+    load(font: string, text?: string): Promise<FontFace[]>;
+    /** Whether `text` in `font` draws now, as `document.fonts.check`: false
+     * while the emoji font it needs is on its way (asking starts loading
+     * it, where browsers' `check` loads nothing). SyntaxError for an
+     * invalid value. Since engine 1.20.1 (any minor). */
+    check(font: string, text?: string): boolean;
+    /** `"loading"` while the emoji font is on its way, else `"loaded"`.
+     * Since engine 1.20.1 (any minor). */
+    readonly status: "loading" | "loaded";
+    /** Settles once no font is on its way: once text asked for the emoji
+     * font, when it is in (or failed); at once otherwise (before
+     * engine 1.20.1 always at once). */
     readonly ready: Promise<FontFaceSet>;
   }
   export const fonts: FontFaceSet;
@@ -5204,7 +5447,7 @@ declare module "starhermit:canvas" {
 
 // ===========================================================================
 declare module "starhermit:draw" {
-  import type { ColorLike } from "starhermit:engine";
+  import type { ColorLike, FontWeight } from "starhermit:engine";
   import type { Texture } from "starhermit:scene";
   import type { OffscreenCanvas, ImageBitmap } from "starhermit:canvas";
 
@@ -5266,13 +5509,19 @@ declare module "starhermit:draw" {
   // system face's black-and-white form, as browsers prefer their emoji
   // font. U+FE0F after a character asks for emoji style (`❤️`, where `❤`
   // alone is text style), U+FE0E for text style; neither draws anything.
+  // Without either, an emoji that is text style by default (`❤ 🛤 ⚖`)
+  // draws with the first face that has it, as browsers do, so a system
+  // face's black-and-white form where one has it (Segoe UI Symbol on
+  // Windows has `🛤`): write U+FE0F (`🛤️`) to have the emoji font's
+  // colour form everywhere.
   // An emoji's own colours draw whatever the text's color (its opacity
   // still applies), except parts the font gives the text's color (as it
-  // draws text-style symbols such as `✔ ☀`). It also has symbols that
+  // draws text-style symbols such as `✔ ☀`, also after U+FE0F, except
+  // `⚖️ ✖️`, which have colour forms). It also has symbols that
   // Unicode gives no emoji form (`⌖ ☆ ✓ ● ⚀`), drawn in the text's
   // color, and like any face draws them wherever no face before it has
   // them (loading for them as for emoji). The font is original art,
-  // under the engine's licence, and has 825 glyphs: the common single
+  // under the engine's licence, and has 833 glyphs: the common single
   // emoji, one code point each (an emoji it lacks draws with the faces
   // before it, or as the pixel font's box), and the twelve keycaps
   // (`0`–`9`, `#` or `*`, U+FE0F, U+20E3: `2️⃣ #️⃣`, also without the
@@ -5288,6 +5537,11 @@ declare module "starhermit:draw" {
   // (and its symbols that no other face has) draw as nothing in the room
   // they take once it is in (an em each), so
   // text keeps its layout, and then they draw. Nothing waits or throws.
+  // A canvas keeps what it drew, so emoji a canvas's `fillText` drew
+  // before the font arrived stay blank there (natively too, where it reads
+  // the font from disk in a moment): a game that bakes emoji into a canvas
+  // once waits for `fonts.load(font, text)` from `starhermit:canvas` first
+  // (since engine 1.20.1), as on the web.
 
   export interface Clip {
     /** Only the part inside this window rectangle draws. */
@@ -5377,10 +5631,13 @@ declare module "starhermit:draw" {
     font?: string;
     /** Where `x` is: the text's start (default), center or end. */
     align?: "start" | "center" | "end";
-    /** A `FontFace` weight of the family (`"bold"`, `"700"`); the nearest
-     * face added under it (or the system's bold face) is used; a family
-     * without a bold face draws a synthesized bold at 600 and more. */
-    weight?: string;
+    /** A `FontFace` weight of the family (`"bold"`, `700`, `"700"`); the
+     * nearest face added under it (or the system's bold face) is used; a
+     * family without a bold face draws a synthesized bold at 600 and more,
+     * its glyphs emboldened as Chrome emboldens them (1/24 to 1/32 em
+     * wider) on the regular's advances, so it measures as the regular
+     * does. */
+    weight?: FontWeight;
     /** Extra pixels between characters (within ±1,024). */
     letterSpacing?: number;
     /** Drawn first under the text, offset by `x`/`y` pixels. */
@@ -5429,7 +5686,7 @@ declare module "starhermit:draw" {
 
 // ===========================================================================
 declare module "starhermit:ui" {
-  import type { ColorLike } from "starhermit:engine";
+  import type { ColorLike, FontWeight } from "starhermit:engine";
   import type { Texture } from "starhermit:scene";
 
   // The engine's immediate-mode UI for the game's own menus and HUD panels:
@@ -5558,9 +5815,10 @@ declare module "starhermit:ui" {
      * everywhere adds its own font. At most 64 families and weights a
      * game (RangeError). */
     font?: string;
-    /** `"bold"`, `"normal"` or `"100"`–`"900"` (a family without a bold
-     * face draws a synthesized bold at 600 and more). */
-    weight?: string;
+    /** A number from 1 to 1000, as text too, `"normal"` or `"bold"` (see
+     * `FontWeight`; a family without a bold face draws a synthesized bold
+     * at 600 and more). */
+    weight?: FontWeight;
   }
   /** Where the UI lays out (window pixels; default the whole window less
    * its safe area). It may change during a frame: widgets after a call lay
@@ -5771,13 +6029,28 @@ declare module "starhermit:ui" {
   export function checkbox(label: string, checked: boolean, options?: WidgetOptions & { appearance?: "box" | "switch" }): boolean;
   /** Arrows step by `step` (default a hundredth of the range); since
    * API_MINOR 12 a press or drag lands on `min + k × step` too, within the
-   * range. Styled as `slider`, its parts `track` and `thumb`. */
+   * range. Styled as `slider`, its parts `track` and `thumb`, and since
+   * API_MINOR 22 `fill`: the track from `min` to the value (from the
+   * right, right to left, as the track mirrors), as a browser fills a
+   * range in its `accent-color`. It takes the track's paint (background
+   * colors and gradients, radius, border, shadow) and draws only when a
+   * style gives it a look (`parts.fill`, or CSS `accent-color` and
+   * `::-moz-range-progress`); under high contrast it takes the focus
+   * color, as the thumb does. A game declaring an older minor draws no
+   * slider fill, whatever its styles say. */
   export function slider(label: string, value: number, options: WidgetOptions & { min: number; max: number; step?: number; width?: number }): number;
-  /** An option of a select with an icon before its text (since
-   * API_MINOR 12). */
-  export interface SelectOption {
-    text: string;
-    icon?: Texture;
+  /** An option of a select as an object (since API_MINOR 12): its text,
+   * an icon before it, whether it is disabled. It has `text`, `label` or
+   * both, as HTML's `<option>`: the `label` is what shows (and is
+   * announced) unless it is empty, else the `text` (`{ text: "Ivy", label:
+   * "" }` shows Ivy). `label` is accepted since engine 1.20.2 (any minor;
+   * earlier engines throw a TypeError). Any other shape, or a `text` or
+   * `label` that is not a string, throws a TypeError. */
+  export type SelectOption = SelectOptionFields & ({ text: string; label?: string } | { text?: string; label: string });
+  /** The fields of a `SelectOption` besides its text. */
+  export interface SelectOptionFields {
+    /** Drawn before the text; null or left out for none. */
+    icon?: Texture | null;
     /** Shown in the muted color and announced unavailable, never chosen:
      * the arrow keys and the D-pad pass over it, and clicks, taps and
      * assistive activation on it do nothing (since API_MINOR 14; a
@@ -5816,7 +6089,15 @@ declare module "starhermit:ui" {
    * UI), never from nothing focused or from a press, since API_MINOR 17
    * (older games: as any widget); `arrows: false` (since API_MINOR 17)
    * keeps them out always: Tab, a press, `setFocus` and screen readers
-   * still focus it (a chat field beside a game steered with the arrows). */
+   * still focus it (a chat field beside a game steered with the arrows).
+   * Styled (`style(...)`, the `textField` kind), since API_MINOR 23 it lays
+   * out as CSS lays out an input: its style's text size, padding and
+   * border around the line, `minWidth`, `minHeight`, `width` (or
+   * `"fill"`) and `height` (CSS `min-height` and the rest), the line
+   * centred in a taller box; `width` here is its width otherwise. Before,
+   * a style only painted it: the field stayed one theme line high and
+   * `width` wide whatever the style's sizes, padding and text size, as
+   * older games keep it. */
   export function textField(id: string, value: string, options?: WidgetOptions & { maxChars?: number; width?: number; placeholder?: string; arrows?: boolean }): string;
   /** Whether Enter was pressed in the text field `id` this frame (the field
    * keeps focus; `setFocus(null)` leaves it). */
@@ -5895,8 +6176,31 @@ declare module "starhermit:ui" {
   export function capturingKeys(): boolean;
   /** Whether the pointer is over a widget (the game should not act on its
    * clicks). A `target` is none: it takes nothing, so the pointer over it
-   * is the game's (earlier releases read true over a button target). */
+   * is the game's (earlier releases read true over a button target).
+   * It tests where the pointer is against each widget's own rectangle, as
+   * the UI last drew it (read while this frame's UI is being built, only
+   * the widgets built so far count). A finger has no hover: its pointer is
+   * where it pressed or last lifted, and the UI aims a finger's press at
+   * the nearest widget within a touch-sized target (44 logical pixels), so
+   * a tap just beside a small widget presses it while this says false. To
+   * tell whether a click or tap went to the UI, use `pointerCaptured`. */
   export function pointerOver(): boolean;
+  /** Whether this frame's press of the primary pointer (a mouse's primary
+   * button, or the first finger) went to the UI: true from the frame it
+   * came in through the frame of its release (a tap down and up within
+   * one frame reads true in that frame), else false. A press
+   * goes to the UI on a widget (a finger's within the touch-sized target
+   * the UI aims it at, so a tap beside a small button that presses it
+   * counts), on a box the UI painted (a background or style) or a scroll
+   * area, or anywhere while a modal `dialog` or an open `select` list
+   * takes all input; a `target` takes none. It is decided as the press
+   * comes, against the UI the last frame built, as the UI's own widgets
+   * decide, so it reads the same in `onPointerButton`, `onTouch`,
+   * `onUpdate` and `onRender`, before or after the frame's widgets: a
+   * game's board skips a click or tap whose frame reads true. A finger on
+   * an on-screen touch control (`setTouchControls`) is never the UI's.
+   * Since API_MINOR 23. */
+  export function pointerCaptured(): boolean;
   /** The focused widget's label as the last frame ended (null when
    * nothing had focus); the same all through a frame (since API_MINOR 12:
    * before, it was null once the frame's first widget was built). */
@@ -5933,8 +6237,15 @@ declare module "starhermit:ui" {
    * an empty or blank text says nothing. Four announcements are spoken
    * at once, then one each half second: past that only the newest waits
    * (a polite one never replaces a waiting assertive one) and the rest
-   * are dropped, so announce what changed, not every frame. Players
-   * without a screen reader hear nothing. */
+   * are dropped, so announce what changed, not every frame. A frame
+   * keeps at most four: past them each new one replaces the frame's
+   * oldest polite one (an assertive one the oldest assertive one when
+   * all are; a polite one among only assertive ones is dropped), as a
+   * live region keeps its latest text, and the console warns once.
+   * However many a frame announces, `announce` never throws for it (a
+   * runtime before 1.20 threw "RangeError: too many requests this frame"
+   * past the frame's 64 requests). Players without a screen reader hear
+   * nothing. */
   export function announce(text: string, options?: { politeness?: "polite" | "assertive" }): void;
   /** Focuses a widget from the next frame (null: none), with its focus
    * ring, as keyboard focus is: a scroll area holding it scrolls it into
@@ -6041,11 +6352,12 @@ declare module "starhermit:ui" {
   // `progress`, `meter`, `select`, `cycle`, `textField` and `tabs` (each
   // tab) take the box behind them, the text color and the focus ring, and
   // since API_MINOR 12 their parts (`parts`: the slider's `track` and
-  // `thumb`, the checkbox's `box` and `mark`, the select's `field`, `list`
-  // and `option`, progress bars' and meters' `track` and `fill`, the tabs'
-  // `strip` and `tab`, the dialog's `backdrop`, a scroll area's `track`
-  // and `bar`) take their own; a part no style gives a look keeps the
-  // theme's.
+  // `thumb`, and since API_MINOR 22 its `fill`, the track from `min` to
+  // the value, drawn only when a style names it; the checkbox's `box` and
+  // `mark`, the select's `field`, `list` and `option`, progress bars' and
+  // meters' `track` and `fill`, the tabs' `strip` and `tab`, the dialog's
+  // `backdrop`, a scroll area's `track` and `bar`) take their own; a part
+  // no style gives a look keeps the theme's.
   //
   // The focus ring shows for focus the player sees (CSS
   // `:focus-visible`, since API_MINOR 12): focus moved by the keyboard,
@@ -6197,7 +6509,9 @@ declare module "starhermit:ui" {
     size?: Length;
     /** A family added with `canvas.fonts`, a generic family or a token. */
     font?: string;
-    weight?: string;
+    /** A number from 1 to 1000 (`700`), as text too, `"normal"` or
+     * `"bold"` (see `FontWeight`), or a token. */
+    weight?: FontWeight | Token;
     /** Extra logical pixels after each character, or `"0.12em"`. */
     letterSpacing?: number | `${number}em` | Token;
     /** What draws only: screen readers hear the text as written. */
@@ -6813,7 +7127,7 @@ declare module "starhermit:ui" {
    * (`serif`, `cursive`…, see `TextOptions.font`); null returns to the
    * default faces (`system-ui`, see `starhermit:draw`). A family never
    * added throws a TypeError. */
-  export function setFont(font: { family?: string; weight?: string } | null): void;
+  export function setFont(font: { family?: string; weight?: FontWeight } | null): void;
 }
 
 // ===========================================================================
@@ -7541,8 +7855,13 @@ declare module "starhermit:platform" {
      * recipients (1 byte, and 16 for each) past 8 KB a RangeError. A
      * guest's (or a host not yet named by a roster) is dropped: false. */
     sendData(payload: Uint8Array | string, to?: readonly string[]): boolean;
-    /** Control frames: a guest may send 10 a minute. */
-    sendReady(): boolean;
+    /** Control frames: a guest may send 10 a minute. `sendReady(false)`
+     * (since API_MINOR 22's runtime; earlier ones sent ready) withdraws
+     * ready, as `{"type":"ready","ready":false}`; `sendReady()` sends
+     * `{"type":"ready"}` as always. The platform keeps no ready state and
+     * relays the frame to the room, so a `control` listener reads a
+     * `"ready"` frame's `ready` field, missing meaning true. */
+    sendReady(ready?: boolean): boolean;
     sendChat(text: string): boolean;
     /** Host only: an event frame with these fields (at most 4 KB). The
      * host is the one the latest roster names, or before the first one

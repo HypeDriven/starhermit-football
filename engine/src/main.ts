@@ -777,7 +777,7 @@ function loadingScreen(text: string): void {
   }
   draw.image(veil, 0, 0, f.width, f.height);
   const logo = 22.4 * s; // .small-logo 1.4rem
-  draw.text("STARHERMIT FOOTBALL", f.width / 2, f.height / 2 - logo * 1.2, { size: logo, color: TEXT, align: "center", letterSpacing: 0.12 * logo, weight: "800" });
+  draw.text("STARHERMIT FOOTBALL", f.width / 2, f.height / 2 - logo * 1.2, { size: logo, color: TEXT, align: "center", letterSpacing: 0.12 * logo, weight: 800 });
   draw.text(text, f.width / 2, f.height / 2 + logo * 0.4, { size: 16 * s, color: MUTED, align: "center" });
   // how far the build has got (the native loading screen's addition)
   const bw = 200 * s;

@@ -86,7 +86,7 @@ function translation(): (key: string) => string {
 /** measureText's width in one style (`spacing` em of letter spacing, if
  * any), remembered until the text or the size changes: it is a host call
  * and the HUD's text rarely changes. */
-function measurer(weight: string, spacing?: number): (text: string, size: number) => number {
+function measurer(weight: import("starhermit:engine").FontWeight, spacing?: number): (text: string, size: number) => number {
   let text: string | null = null;
   let size = NaN;
   let width = 0;
@@ -130,12 +130,12 @@ export function createHud(): Hud {
   const awayT = translation();
   const hintT = translation();
   const micT = translation();
-  const homeWidth = measurer("800", 0.05);
-  const awayWidth = measurer("800", 0.05);
-  const scoreWidth = measurer("800", 0.05);
-  const clockWidth = measurer("800");
-  const hintWidth = measurer("700", 0.06);
-  const micWidth = measurer("700");
+  const homeWidth = measurer(800, 0.05);
+  const awayWidth = measurer(800, 0.05);
+  const scoreWidth = measurer(800, 0.05);
+  const clockWidth = measurer(800);
+  const hintWidth = measurer(700, 0.06);
+  const micWidth = measurer(700);
   let clockText = "00:00";
   let clockShown = NaN;
   let clockShownHalf = NaN;
@@ -146,20 +146,20 @@ export function createHud(): Hud {
   // Text options and colors drawn every frame, kept rather than made each
   // frame (their sizes follow the window's scale, the banner's colors its
   // fade): fewer collections in play (40 instead of 44 in 8,000 frames).
-  const nameStyle = { size: 0, color: "#9fb0c0", letterSpacing: 0, weight: "800" };
-  const scoreStyle = { size: 0, color: TEXT, letterSpacing: 0, weight: "800" };
-  const clockStyle = { size: 0, color: ACCENT2, weight: "800" };
+  const nameStyle = { size: 0, color: "#9fb0c0", letterSpacing: 0, weight: 800 };
+  const scoreStyle = { size: 0, color: TEXT, letterSpacing: 0, weight: 800 };
+  const clockStyle = { size: 0, color: ACCENT2, weight: 800 };
   const arrowShadow = { color: [0, 0, 0, 0.8] as ColorLike, x: 0, y: 0 };
-  const arrowStyle = { size: 0, color: "#ffffff", align: "center" as const, weight: "700", shadow: arrowShadow };
-  const hintStyle = { size: 0, color: "#d7e1e9", letterSpacing: 0, weight: "700" };
+  const arrowStyle = { size: 0, color: "#ffffff", align: "center" as const, weight: 700, shadow: arrowShadow };
+  const hintStyle = { size: 0, color: "#d7e1e9", letterSpacing: 0, weight: 700 };
   const powerClip = { clip: { x: 0, y: 0, width: 0, height: 0 } };
   const glow: [number, number, number, number] = [39 / 255, 174 / 255, 96 / 255, 0];
   const glowNext = { color: glow, x: 0, y: 0 };
-  const glowPair = { size: 0, letterSpacing: 0, weight: "900", color: glow, align: "center" as const, shadow: glowNext };
-  const glowLast = { size: 0, letterSpacing: 0, weight: "900", color: glow, align: "center" as const };
+  const glowPair = { size: 0, letterSpacing: 0, weight: 900, color: glow, align: "center" as const, shadow: glowNext };
+  const glowLast = { size: 0, letterSpacing: 0, weight: 900, color: glow, align: "center" as const };
   const bannerWhite: [number, number, number, number] = [1, 1, 1, 0];
   const bannerDrop = { color: [0, 0, 0, 0] as [number, number, number, number], x: 0, y: 0 };
-  const bannerStyle = { size: 0, letterSpacing: 0, weight: "900", align: "center" as const, color: bannerWhite, shadow: bannerDrop };
+  const bannerStyle = { size: 0, letterSpacing: 0, weight: 900, align: "center" as const, color: bannerWhite, shadow: bannerDrop };
 
   /** The match clock's text, formatted again only when its second, the
    * half or the language changes. */
@@ -355,7 +355,7 @@ export function createHud(): Hud {
     mic.h = h;
     const color = micMuted ? "#e74c3c" : TEXT;
     panel(mic.x, mic.y, w, h, 8 * s, s, micMuted ? "#e74c3c" : BORDER);
-    draw.text(label, mic.x + w / 2, mic.y + (h - size) / 2, { size, color, align: "center", weight: "700" });
+    draw.text(label, mic.x + w / 2, mic.y + (h - size) / 2, { size, color, align: "center", weight: 700 });
   }
 
   return {
