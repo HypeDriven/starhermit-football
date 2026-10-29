@@ -1,4 +1,4 @@
-// Copied unchanged below this note from the StarHermit runtime 1.22.0
+// Copied unchanged below this note from the StarHermit runtime 1.23.0
 // (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -203,6 +203,10 @@ declare var performance: Performance;
 declare class TextEncoder {
   readonly encoding: "utf-8";
   encode(input?: string): Uint8Array;
+  /** Writes `source` as UTF-8 into `destination` as far as whole
+   * characters fit (never part of one; a lone surrogate as U+FFFD):
+   * `read` in UTF-16 code units, `written` in bytes. Also in workers. */
+  encodeInto(source: string, destination: Uint8Array): { read: number; written: number };
 }
 declare class TextDecoder {
   constructor(label?: "utf-8" | "utf8", options?: { fatal?: boolean; ignoreBOM?: boolean });
@@ -237,6 +241,80 @@ interface Crypto {
   randomUUID(): `${string}-${string}-${string}-${string}-${string}`;
 }
 declare var crypto: Crypto;
+
+/** WebAssembly (since API_MINOR 25; a game declaring an older minor has no
+ * `WebAssembly` global, natively or in browsers). Natively the engine's own
+ * sandboxed interpreter runs modules: the 2.0 core (MVP, multi-value, sign
+ * extension, non-trapping float-to-int, bulk memory, reference types,
+ * mutable globals) and fixed-width SIMD; no threads, exceptions, tail calls
+ * or GC. In browsers the page's own WebAssembly runs them (a
+ * `starhermit:script` worker there runs on the engine's interpreter, as
+ * natively).
+ *
+ * - Every module is validated whole before anything runs; memory accesses
+ *   are bounds-checked and trap.
+ * - Execution costs the calling entry's fuel (a function's entry and each
+ *   turn of a loop), so a WebAssembly loop is stopped as a script loop is.
+ * - Every memory of a realm together is at most `engine.limits.wasm_mib`
+ *   (default 256 MiB, at most 1,024): a memory past it is a `RangeError`,
+ *   and `memory.grow` past it fails (-1 in WebAssembly, a `RangeError`
+ *   from `Memory.grow`). Calls nest at most 16,384 deep.
+ * - Integer arithmetic is exact. A NaN made by float arithmetic is the
+ *   canonical NaN natively; browsers may give other NaN bits there, as the
+ *   specification allows.
+ * - A module imports only what the game passes it: no host access.
+ * - `instantiateStreaming`/`compileStreaming` exist in browsers only.
+ */
+declare namespace WebAssembly {
+  type ImportValue = Function | Global | Memory | Table | number | bigint;
+  type Imports = Record<string, Record<string, ImportValue>>;
+  type Exports = Record<string, Function | Global | Memory | Table>;
+  type BufferSource = ArrayBuffer | ArrayBufferView;
+  interface ModuleExportDescriptor { name: string; kind: "function" | "table" | "memory" | "global"; }
+  interface ModuleImportDescriptor { module: string; name: string; kind: "function" | "table" | "memory" | "global"; }
+  interface WebAssemblyInstantiatedSource { module: Module; instance: Instance; }
+  class Module {
+    constructor(bytes: BufferSource);
+    static exports(module: Module): ModuleExportDescriptor[];
+    static imports(module: Module): ModuleImportDescriptor[];
+    static customSections(module: Module, name: string): ArrayBuffer[];
+  }
+  class Instance {
+    constructor(module: Module, imports?: Imports);
+    readonly exports: Exports;
+  }
+  interface MemoryDescriptor { initial: number; maximum?: number; }
+  /** `buffer` is an `ArrayBuffer` over the linear memory; growing the
+   * memory detaches it (its `byteLength` reads 0) and makes a new one. */
+  class Memory {
+    constructor(descriptor: MemoryDescriptor);
+    readonly buffer: ArrayBuffer;
+    grow(delta: number): number;
+  }
+  type TableKind = "anyfunc" | "funcref" | "externref";
+  interface TableDescriptor { element: TableKind; initial: number; maximum?: number; }
+  class Table {
+    constructor(descriptor: TableDescriptor, value?: unknown);
+    readonly length: number;
+    get(index: number): unknown;
+    set(index: number, value?: unknown): void;
+    grow(delta: number, value?: unknown): number;
+  }
+  type ValueType = "i32" | "i64" | "f32" | "f64" | "anyfunc" | "funcref" | "externref";
+  interface GlobalDescriptor { value: ValueType; mutable?: boolean; }
+  class Global {
+    constructor(descriptor: GlobalDescriptor, value?: unknown);
+    value: any;
+    valueOf(): any;
+  }
+  class CompileError extends Error {}
+  class LinkError extends Error {}
+  class RuntimeError extends Error {}
+  function validate(bytes: BufferSource): boolean;
+  function compile(bytes: BufferSource): Promise<Module>;
+  function instantiate(bytes: BufferSource, imports?: Imports): Promise<WebAssemblyInstantiatedSource>;
+  function instantiate(module: Module, imports?: Imports): Promise<Instance>;
+}
 
 // ===========================================================================
 declare module "starhermit:engine" {
@@ -279,7 +357,10 @@ declare module "starhermit:engine" {
   // them while the entry module evaluates. Every call into the game (a
   // callback, an event, a timer, a promise job) gets the manifest's fuel
   // (`engine.limits.fuel_ms`, 32 ms of the reference machine's instructions
-  // by default; `onStart` gets eight times it). A call that spends its fuel
+  // by default; `onStart` gets eight times it). `fuel_ms` is the size of
+  // a slice, not a limit on the call: no phase, `onStart` included, fails
+  // for spending it (an `onStart` that runs 2.7 s is paused and resumed,
+  // and only the not-responding limits below end it). A call that spends its fuel
   // is paused, not ended: it continues with fresh fuel on the following
   // frames while the game draws nothing new, and once it has run too long
   // the player sees the not-responding screen, where Wait lets it go on and
@@ -327,7 +408,9 @@ declare module "starhermit:engine" {
   export function onStart(callback: () => void | Promise<void>): void;
   /** At the fixed rate (`setFixedRate`), zero or more times a frame (at most
    * five; time beyond that is dropped and counted in `stats()`), with the
-   * step in seconds. Simulation belongs here. */
+   * step in seconds. Simulation belongs here. Each of `onStart`,
+   * `onFixedUpdate`, `onUpdate` and `onRender` holds one callback: a later
+   * call replaces the earlier, so fan out from one callback. */
   export function onFixedUpdate(callback: (step: number) => void): void;
   /** Once a frame after the fixed steps, with the seconds since the last
    * frame (0 on the first). Scene changes, `draw` and `ui` calls go here or
@@ -2424,7 +2507,8 @@ declare module "starhermit:scene" {
   export const RGBAFormat: 1023;
   /** `RenderTargetOptions.format` of one and two half-float channels
    * (since API_MINOR 10) or, with `UnsignedByteType`, bytes (R8 and RG8;
-   * since API_MINOR 11). */
+   * since API_MINOR 11); since API_MINOR 25 also a `DataTexture`'s and a
+   * `DataArrayTexture`'s format. */
   export const RedFormat: 1028;
   export const RGFormat: 1030;
   /** Color spaces, kept for ports: color maps are read as sRGB, data maps
@@ -2513,15 +2597,35 @@ declare module "starhermit:scene" {
   /** Straight-alpha RGBA pixels, rows top to bottom (`width × height × 4`
    * values, else TypeError): bytes (sRGB-encoded) or linear floats
    * (`FloatType`; shown sRGB-encoded and clamped as an image, kept linear
-   * and above 1 as an environment). */
+   * and above 1 as an environment).
+   *
+   * Since API_MINOR 25 (three.js r185) a float DataTexture holds data:
+   * `FloatType` (a Float32Array) and `HalfFloatType` (a Uint16Array of
+   * half-float bits, or a Float32Array) keep their values as they are,
+   * below 0 and above 1, unclamped and unconverted, for shaders to read
+   * (bone matrices, lookup tables, positions): a ShaderMaterial's or a
+   * material hook's `textureLoad` and `textureSample` return them, with
+   * `magFilter` and `minFilter` as set (NearestFilter by default, as
+   * three.js's DataTexture; LinearFilter filters them), on every backend.
+   * The GPU holds them as half floats (RGBA16F, 8 bytes a texel against
+   * the image budget, no mipmaps): about three significant digits, whole
+   * numbers exact to 2,048, values past ±65,504 saturated and NaN read as
+   * 0. `format` may be `RGBAFormat` (default), `RGFormat` (`width × height
+   * × 2` values, read as (r, g, 0, 1)) or `RedFormat` (`width × height`
+   * values, read as (r, 0, 0, 1)), of bytes or floats. New data keeps the
+   * texture's kind (bytes, or floats and half floats; else TypeError).
+   * Games declaring an older minor keep the clamped, sRGB-encoded floats.
+   * Integer formats (`RGBAIntegerFormat` and the like) are not supported. */
   export class DataTexture extends Texture {
     /** The pixels reach the GPU here. */
-    constructor(data: Uint8Array | Uint8ClampedArray | Float32Array, width: number, height: number, format?: number, type?: number);
+    constructor(data: Uint8Array | Uint8ClampedArray | Uint16Array | Float32Array, width: number, height: number, format?: number, type?: number);
     /** The pixels the game holds, the same as `image.data` (null once
      * released). */
-    get data(): Uint8Array | Float32Array;
-    set data(value: Uint8Array | Uint8ClampedArray | Float32Array | null);
+    get data(): Uint8Array | Uint16Array | Float32Array;
+    set data(value: Uint8Array | Uint8ClampedArray | Uint16Array | Float32Array | null);
     readonly type: number;
+    /** `RGBAFormat`, or since API_MINOR 25 `RGFormat` or `RedFormat`. */
+    readonly format: number;
     /** Since API_MINOR 10 `image.data` (or `data`) may be set (three.js):
      * null releases the pixels from the game's memory once uploaded (a
      * `needsUpdate` still due is uploaded first). The GPU keeps its copy,
@@ -2536,9 +2640,44 @@ declare module "starhermit:scene" {
     readonly image: {
       readonly width: number;
       readonly height: number;
-      get data(): Uint8Array | Float32Array;
-      set data(value: Uint8Array | Uint8ClampedArray | Float32Array | null);
+      get data(): Uint8Array | Uint16Array | Float32Array;
+      set data(value: Uint8Array | Uint8ClampedArray | Uint16Array | Float32Array | null);
     };
+  }
+  /** Since API_MINOR 25: three.js's `DataArrayTexture`, `depth` layers of
+   * `width × height` texels in one texture (`width × height × depth ×
+   * channels` values, layer after layer; a TypeError before API_MINOR 25).
+   * Its data, formats and types are a DataTexture's (bytes, or float and
+   * half-float data kept unclamped), NearestFilter by default. A
+   * ShaderMaterial's or a material hook's WGSL takes a uniform holding one
+   * as a `texture_2d_array<f32>`:
+   *   textureSample(NAME, NAME_sampler, uv, layer)          (and
+   *   textureSampleBias, textureSampleLevel, textureSampleGrad with
+   *   their last arguments), textureLoad(NAME, coords, layer, 0),
+   *   textureDimensions(NAME) (a layer's size), textureNumLayers(NAME)
+   * with `layer` an i32 or u32 (clamped to the layers). The engine keeps
+   * the layers stacked in one image, so `height × depth` is at most 4,096
+   * (RangeError) and a layer's v wraps within it (`wrapT`; with linear
+   * filtering its first and last rows do not blend across a repeat);
+   * NAME is no 2D texture and may not be passed to functions of the
+   * game's. Built-in materials' maps do not take it. */
+  export class DataArrayTexture extends DataTexture {
+    constructor(data?: Uint8Array | Uint8ClampedArray | Uint16Array | Float32Array | null, width?: number, height?: number, depth?: number, format?: number, type?: number);
+    readonly isDataArrayTexture: true;
+    readonly depth: number;
+    /** `height` is a layer's. */
+    readonly image: {
+      readonly width: number;
+      readonly height: number;
+      readonly depth: number;
+      get data(): Uint8Array | Uint16Array | Float32Array;
+      set data(value: Uint8Array | Uint8ClampedArray | Uint16Array | Float32Array | null);
+    };
+    /** Layers marked as changed (three.js); the next `needsUpdate`
+     * uploads the whole texture whichever are marked. */
+    readonly layerUpdates: Set<number>;
+    addLayerUpdate(layerIndex: number): void;
+    clearLayerUpdates(): void;
   }
   /** Six images of an environment (three.js `CubeTexture`; faces +X, −X,
    * +Y, −Y, +Z, −Z, squares of one size): package paths or textures. Not
@@ -2755,13 +2894,21 @@ declare module "starhermit:scene" {
    * through the engine's decoders. Loads requested at once read their
    * files side by side, each holding its file's size of the 64 MiB the
    * engine keeps for files being read; past that they wait for the ones
-   * before them rather than fail. */
+   * before them rather than fail. Their decoded pixels count against the
+   * engine's decoded-asset budget (64 MiB unless the player changed it)
+   * until each becomes a texture: at most 8 decode at once and the rest
+   * wait their turn, and a load that finds the budget full of the others'
+   * images waits for one of them and decodes again, so loads requested
+   * together never fail the budget (until host API 1.25 they failed with
+   * an EncodingError "asset budget exceeded"). */
   export class TextureLoader {
     constructor();
     /** Rejects with a TypeError for a bad path, an Error named
      * `NotFoundError` for a missing file and `EncodingError` for an image it
-     * cannot decode; RangeError past the texture budget or with 128 loads
-     * already waiting. */
+     * cannot decode; RangeError past the texture budget, with 128 loads
+     * already waiting (thrown by `loadAsync` itself), or for one image
+     * whose decoded pixels alone pass the decoded-asset budget (the
+     * message names its size, the budget and what images in use hold). */
     loadAsync(path: string): Promise<Texture>;
     /** From API_MINOR 20 three.js's `load(url, onLoad, onProgress,
      * onError)` (`onProgress` is never called). Games declaring an older
@@ -2774,8 +2921,13 @@ declare module "starhermit:scene" {
   export interface GLTF {
     scene: Group;
     scenes: Group[];
-    /** Always empty (animations are not read). */
-    animations: never[];
+    /** The model's animations as three.js's GLTFLoader makes them (since
+     * API_MINOR 25: a clip an animation, a track a channel named by its
+     * node, CUBICSPLINE sampled as glTF's splines); empty before. From
+     * API_MINOR 25 a skinned node's meshes are SkinnedMeshes bound to a
+     * Skeleton of its joints (Bones), and node and mesh names are
+     * three.js's (sanitized for track paths and made unique). */
+    animations: AnimationClip[];
     /** What the file has that was not applied, each once (extensions,
      * texture transforms, maps on a second UV set, extra attributes,
      * animations and skins, morph targets, images that did not decode),
@@ -2992,7 +3144,7 @@ declare module "starhermit:scene" {
   export class Uint32BufferAttribute extends BufferAttribute {
     constructor(array: ArrayLike<number> | number, itemSize: number, normalized?: boolean);
   }
-  export type AttributeName = "position" | "normal" | "uv" | "color" | "custom" | "tangent";
+  export type AttributeName = "position" | "normal" | "uv" | "color" | "custom" | "tangent" | "skinIndex" | "skinWeight";
   export class BufferGeometry {
     constructor();
     /** three.js's: `"BufferGeometry"`, or the built geometry's class name
@@ -3005,7 +3157,9 @@ declare module "starhermit:scene" {
      * and `custom` (1 to 4 numbers a vertex, zeros after them; read only by
      * custom materials as `Vertex.custom`, since API_MINOR 6); `tangent`
      * (4, what `computeTangents` makes; since API_MINOR 20) is kept and not
-     * drawn; other names throw a TypeError. */
+     * drawn; `skinIndex` and `skinWeight` (4 a vertex: a SkinnedMesh's
+     * joints and weights; since API_MINOR 25); other names throw a
+     * TypeError. */
     setAttribute(name: AttributeName, attribute: BufferAttribute): this;
     getAttribute(name: AttributeName): BufferAttribute | undefined;
     /** A float `position` attribute of the points (z 0 for Vector2s), or,
@@ -3769,7 +3923,9 @@ declare module "starhermit:scene" {
   //                                      coordinates, 0..1 from the top
   //                                      left (since API_MINOR 8)
   // Textures are RGBA8 as uploaded (a Uint8Array DataTexture's bytes as
-  // they are, read as 0..1): for exact texels (data, animation frames),
+  // they are, read as 0..1; since API_MINOR 25 a float or half-float
+  // DataTexture's values as they are, below 0 and above 1, in half-float
+  // precision): for exact texels (data, animation frames),
   // use NearestFilter and sample texel centers, (i + 0.5) / size, with
   // textureSampleLevel, which vertex code also uses; or, since API_MINOR
   // 10, read one exactly, whatever the filter, with
@@ -3796,6 +3952,8 @@ declare module "starhermit:scene" {
   //     `smoothstep(e0, e1, x)` when e0 > e1.
   //   var<uniform> uniforms: Uniforms    the material's uniforms by name
   //   NAME: texture_2d<f32>, NAME_sampler: sampler   each texture uniform
+  //   (a DataArrayTexture's NAME is a texture_2d_array<f32>; since
+  //   API_MINOR 25, see DataArrayTexture)
   //   const NAME                          each define
   // The hooks, each optional:
   //   fn vertex(v: Vertex) -> Vertex     every pass: the shadows and the
@@ -4121,6 +4279,9 @@ declare module "starhermit:scene" {
   // -- The scene graph ------------------------------------------------------------
   export class Object3D {
     constructor();
+    /** three.js's (since API_MINOR 25; made when first read): the
+     * animation mixer's key, and a track may name a node by it. */
+    uuid: string;
     name: string;
     readonly position: Vector3;
     /** Linked with `quaternion` (see `Euler`); the runtime reads the
@@ -4271,6 +4432,260 @@ declare module "starhermit:scene" {
     material: TMaterial;
     /** Vertex `index`'s model-space position (since API_MINOR 18). */
     getVertexPosition(index: number, target: Vector3): Vector3;
+  }
+  // -- Skinning and keyframe animation (since API_MINOR 25; three.js r185's) --
+  export const AttachedBindMode: "attached";
+  export const DetachedBindMode: "detached";
+  /** A joint of a Skeleton (since API_MINOR 25). */
+  export class Bone extends Object3D {
+    readonly type: string;
+    readonly isBone: true;
+  }
+  /** Bones and the inverses of their bind-pose world matrices (since
+   * API_MINOR 25). The runtime computes each frame's bone matrices from
+   * the scene's world transforms (`bone.matrixWorld × boneInverses[i]`),
+   * so there is no bone count limit short of 4,096; `update` fills
+   * `boneMatrices` the same way for the script. Changing an inverse in
+   * place takes effect at the next `calculateInverses`, `init` or bind. */
+  export class Skeleton {
+    constructor(bones?: Bone[], boneInverses?: Matrix4[]);
+    uuid: string;
+    bones: Bone[];
+    boneInverses: Matrix4[];
+    boneMatrices: Float32Array;
+    /** Always null: the bone matrices live in the runtime's texture. */
+    boneTexture: null;
+    init(): void;
+    calculateInverses(): void;
+    pose(): void;
+    update(): void;
+    clone(): Skeleton;
+    /** Does nothing (three.js's makes its bone texture). */
+    computeBoneTexture(): this;
+    getBoneByName(name: string): Bone | undefined;
+    dispose(): void;
+  }
+  /** A mesh whose vertices its skeleton's bones move (since API_MINOR 25):
+   * the geometry's `skinIndex` and `skinWeight` attributes (four joints and
+   * weights a vertex) skin it in every material's vertex stage, custom
+   * materials' hooks (before the game's vertex hook) and shadows and the
+   * depth and normal prepasses included, as three.js's `skinning_vertex`
+   * does. It culls by `boundingSphere`, made from its posed vertices the
+   * first time it is drawn with `frustumCulled` (three.js), and rays hit
+   * its geometry as bound. */
+  export class SkinnedMesh<TMaterial extends Material | Material[] = Material> extends Mesh<TMaterial> {
+    constructor(geometry?: BufferGeometry, material?: TMaterial);
+    readonly isSkinnedMesh: true;
+    readonly type: string;
+    /** "attached" (the default: `bindMatrixInverse` follows the mesh's
+     * world matrix) or "detached". */
+    bindMode: string;
+    bindMatrix: Matrix4;
+    bindMatrixInverse: Matrix4;
+    boundingBox: Box3 | null;
+    boundingSphere: Sphere | null;
+    skeleton: Skeleton | undefined;
+    bind(skeleton: Skeleton, bindMatrix?: Matrix4): void;
+    pose(): void;
+    normalizeSkinWeights(): void;
+    computeBoundingBox(): void;
+    computeBoundingSphere(): void;
+    /** A vertex position (Vector3) or direction (Vector4, w 0) moved by
+     * the bones now. */
+    applyBoneTransform<T extends Vector3 | Vector4>(index: number, target: T): T;
+  }
+  export const LoopOnce: 2200;
+  export const LoopRepeat: 2201;
+  export const LoopPingPong: 2202;
+  export const InterpolateDiscrete: 2300;
+  export const InterpolateLinear: 2301;
+  export const InterpolateSmooth: 2302;
+  export const InterpolateBezier: 2303;
+  export const ZeroCurvatureEnding: 2400;
+  export const ZeroSlopeEnding: 2401;
+  export const WrapAroundEnding: 2402;
+  export const NormalAnimationBlendMode: 2500;
+  export const AdditiveAnimationBlendMode: 2501;
+  /** three.js's EventDispatcher (the mixer's events; since API_MINOR 25). */
+  export class EventDispatcher {
+    addEventListener(type: string, listener: (event: any) => void): void;
+    hasEventListener(type: string, listener: (event: any) => void): boolean;
+    removeEventListener(type: string, listener: (event: any) => void): void;
+    dispatchEvent(event: { type: string; [key: string]: unknown }): void;
+  }
+  /** Samples keyframes (three.js's interpolants; since API_MINOR 25). */
+  export class Interpolant {
+    constructor(parameterPositions: ArrayLike<number>, sampleValues: ArrayLike<number>, sampleSize: number, resultBuffer?: any);
+    parameterPositions: any;
+    sampleValues: any;
+    resultBuffer: any;
+    valueSize: number;
+    settings: { endingStart: number; endingEnd: number } | null;
+    evaluate(t: number): any;
+  }
+  export class LinearInterpolant extends Interpolant {}
+  export class DiscreteInterpolant extends Interpolant {}
+  export class CubicInterpolant extends Interpolant {}
+  export class QuaternionLinearInterpolant extends Interpolant {}
+  export class BezierInterpolant extends Interpolant {
+    inTangents: any;
+    outTangents: any;
+  }
+  /** A property's values at times (since API_MINOR 25). */
+  export class KeyframeTrack {
+    constructor(name: string, times: ArrayLike<number>, values: ArrayLike<any>, interpolation?: number);
+    name: string;
+    times: Float32Array;
+    values: any;
+    readonly ValueTypeName: string;
+    readonly DefaultInterpolation: number;
+    settings: { inTangents?: any; outTangents?: any } | undefined;
+    createInterpolant(result?: any): Interpolant;
+    static toJSON(track: KeyframeTrack): any;
+    setInterpolation(interpolation: number): this;
+    getInterpolation(): number | undefined;
+    getValueSize(): number;
+    shift(timeOffset: number): this;
+    scale(timeScale: number): this;
+    trim(startTime: number, endTime: number): this;
+    validate(): boolean;
+    optimize(): this;
+    clone(): this;
+  }
+  export class VectorKeyframeTrack extends KeyframeTrack {}
+  export class QuaternionKeyframeTrack extends KeyframeTrack {}
+  export class NumberKeyframeTrack extends KeyframeTrack {}
+  export class ColorKeyframeTrack extends KeyframeTrack {}
+  export class BooleanKeyframeTrack extends KeyframeTrack {
+    constructor(name: string, times: ArrayLike<number>, values: ArrayLike<boolean>);
+  }
+  export class StringKeyframeTrack extends KeyframeTrack {
+    constructor(name: string, times: ArrayLike<number>, values: ArrayLike<string>);
+  }
+  /** Named tracks over a duration (since API_MINOR 25). */
+  export class AnimationClip {
+    constructor(name?: string, duration?: number, tracks?: KeyframeTrack[], blendMode?: number);
+    name: string;
+    tracks: KeyframeTrack[];
+    duration: number;
+    blendMode: number;
+    uuid: string;
+    userData: Record<string, unknown>;
+    static parse(json: any): AnimationClip;
+    static toJSON(clip: AnimationClip): any;
+    static findByName(objectOrClipArray: AnimationClip[] | Object3D, name: string): AnimationClip | null;
+    static CreateFromMorphTargetSequence(name: string, morphTargetSequence: { name: string }[], fps: number, noLoop?: boolean): AnimationClip;
+    static CreateClipsFromMorphTargetSequences(morphTargets: { name: string }[], fps: number, noLoop?: boolean): AnimationClip[];
+    resetDuration(): this;
+    trim(): this;
+    validate(): boolean;
+    optimize(): this;
+    clone(): AnimationClip;
+    toJSON(): any;
+  }
+  /** three.js's AnimationUtils (since API_MINOR 25). */
+  export class AnimationUtils {
+    static convertArray(array: any, type: any): any;
+    static isTypedArray(object: unknown): boolean;
+    static getKeyframeOrder(times: ArrayLike<number>): number[];
+    static sortedArray(values: any, stride: number, order: number[]): any;
+    static flattenJSON(jsonKeys: any[], times: number[], values: any[], valuePropertyName: string): void;
+    static subclip(sourceClip: AnimationClip, name: string, startFrame: number, endFrame: number, fps?: number): AnimationClip;
+    static makeClipAdditive(targetClip: AnimationClip, referenceFrame?: number, referenceClip?: AnimationClip, fps?: number): AnimationClip;
+  }
+  /** A track's path ("node.property[index]", "node.material.opacity",
+   * ".bones[name].quaternion") resolved under a root (since API_MINOR 25). */
+  export class PropertyBinding {
+    constructor(rootNode: any, path: string, parsedPath?: any);
+    path: string;
+    parsedPath: { nodeName?: string; objectName?: string; objectIndex?: string | number; propertyName: string; propertyIndex?: string | number };
+    node: any;
+    rootNode: any;
+    getValue(buffer: ArrayLike<number>, offset: number): void;
+    setValue(buffer: ArrayLike<number>, offset: number): void;
+    bind(): void;
+    unbind(): void;
+    static create(root: any, path: string, parsedPath?: any): PropertyBinding;
+    static sanitizeNodeName(name: string): string;
+    static parseTrackName(trackName: string): PropertyBinding["parsedPath"];
+    static findNode(root: any, nodeName: string | number | undefined): any;
+  }
+  /** Buffers a binding's values and blends the actions' samples into them. */
+  export class PropertyMixer {
+    constructor(binding: PropertyBinding, typeName: string, valueSize: number);
+    binding: PropertyBinding;
+    valueSize: number;
+    buffer: any;
+    cumulativeWeight: number;
+    cumulativeWeightAdditive: number;
+    useCount: number;
+    referenceCount: number;
+    accumulate(accuIndex: number, weight: number): void;
+    accumulateAdditive(weight: number): void;
+    apply(accuIndex: number): void;
+    saveOriginalState(): void;
+    restoreOriginalState(): void;
+  }
+  /** A clip's playback on a mixer (since API_MINOR 25). */
+  export class AnimationAction {
+    constructor(mixer: AnimationMixer, clip: AnimationClip, localRoot?: Object3D | null, blendMode?: number);
+    blendMode: number;
+    loop: number;
+    time: number;
+    timeScale: number;
+    weight: number;
+    repetitions: number;
+    paused: boolean;
+    enabled: boolean;
+    clampWhenFinished: boolean;
+    zeroSlopeAtStart: boolean;
+    zeroSlopeAtEnd: boolean;
+    play(): this;
+    stop(): this;
+    reset(): this;
+    isRunning(): boolean;
+    isScheduled(): boolean;
+    startAt(time: number): this;
+    setLoop(mode: number, repetitions: number): this;
+    setEffectiveWeight(weight: number): this;
+    getEffectiveWeight(): number;
+    fadeIn(duration: number): this;
+    fadeOut(duration: number): this;
+    crossFadeFrom(fadeOutAction: AnimationAction, duration: number, warp?: boolean): this;
+    crossFadeTo(fadeInAction: AnimationAction, duration: number, warp?: boolean): this;
+    stopFading(): this;
+    setEffectiveTimeScale(timeScale: number): this;
+    getEffectiveTimeScale(): number;
+    setDuration(duration: number): this;
+    syncWith(action: AnimationAction): this;
+    halt(duration: number): this;
+    warp(startTimeScale: number, endTimeScale: number, duration: number): this;
+    stopWarping(): this;
+    getMixer(): AnimationMixer;
+    getClip(): AnimationClip;
+    getRoot(): Object3D;
+  }
+  /** Plays clips' actions on a root's objects, in script as three.js's
+   * does (since API_MINOR 25); its 'finished' and 'loop' events carry the
+   * action (and `direction` or `loopDelta`). */
+  export class AnimationMixer extends EventDispatcher {
+    constructor(root: Object3D);
+    time: number;
+    timeScale: number;
+    readonly stats: {
+      actions: { total: number; inUse: number };
+      bindings: { total: number; inUse: number };
+      controlInterpolants: { total: number; inUse: number };
+    };
+    clipAction(clip: AnimationClip | string, root?: Object3D, blendMode?: number): AnimationAction | null;
+    existingAction(clip: AnimationClip | string, root?: Object3D): AnimationAction | null;
+    stopAllAction(): this;
+    update(deltaTime: number): this;
+    setTime(time: number): this;
+    getRoot(): Object3D;
+    uncacheClip(clip: AnimationClip): void;
+    uncacheRoot(root: Object3D): void;
+    uncacheAction(clip: AnimationClip | string, root?: Object3D): void;
   }
   /** One geometry and material drawn `count` times with per-instance
    * transforms and colors. A game's instanced meshes hold at most 262,144
@@ -7578,7 +7993,10 @@ declare module "starhermit:platform" {
     readonly status?: number;
     /** The platform's error code (`"terms_version_mismatch"`). */
     readonly code?: string;
-    /** Seconds to wait (rate limits). */
+    /** Seconds to wait (rate limits, and `unavailable` with code
+     * `"server_starting"`: the platform's `503` while the game's server
+     * wakes, from `sessions.practice()`, `rooms.start()` and the calls that
+     * seat a player in a room already playing; retry after it). */
     readonly retryAfter?: number;
   }
 
@@ -7792,6 +8210,9 @@ declare module "starhermit:platform" {
     readonly name: string | null;
     readonly freeSeats: number;
     readonly joinInProgress: boolean;
+    /** The room's metadata (since API_MINOR 25's runtime; null before, and
+     * when the room has none). */
+    readonly metadata: JsonValue | null;
   }
   export interface RoomInvite {
     readonly id: string;
@@ -7886,16 +8307,25 @@ declare module "starhermit:platform" {
     browse(options?: { inProgress?: boolean }): Promise<RoomSummary[]>;
     get(roomId: string): Promise<Room | null>;
     mine(): Promise<Room | null>;
+    /** Every room of this game the player holds a seat in, newest first
+     * (since API_MINOR 25). */
+    joined(): Promise<Room[]>;
+    /** Joining a room already playing (join in progress) rejects
+     * `unavailable` with code `"server_starting"` and `retryAfter` while
+     * the game's server wakes, as `start` does. */
     joinByCode(code: string): Promise<Room>;
     /** Joins an open room of this game with a free seat, preferring the
      * given shape; without `teamCount`/`seatsPerTeam` any shape matches.
-     * Null when none is open. */
+     * Null when none is open. Joining one in progress may reject
+     * `server_starting`, as `joinByCode` does. */
     quickJoin(options?: { teamCount?: number; seatsPerTeam?: number; metadata?: JsonValue; includeInProgress?: boolean }): Promise<Room | null>;
     /** Compare-and-set on `expectedRevision` (`conflict` when stale). */
     update(roomId: string, changes: Partial<Pick<NewRoom, "name" | "isVisible" | "joinInProgress" | "metadata">>, expectedRevision: number): Promise<Room>;
     /** Host only. */
     open(roomId: string): Promise<Room>;
-    /** Host only; idempotent; `unavailable` while the game server wakes. */
+    /** Host only; idempotent; while the game server wakes it rejects
+     * `unavailable` with code `"server_starting"` and `retryAfter`
+     * (seconds): call again after it. */
     start(roomId: string): Promise<Room>;
     /** Stops this room's sockets with `ended`; a socket whose player left
      * elsewhere stops with `ended` when it next reconnects. */
@@ -7948,7 +8378,9 @@ declare module "starhermit:platform" {
     list(): Promise<Session[]>;
     get(sessionId: string): Promise<Session | null>;
     leave(sessionId: string): Promise<void>;
-    /** A session against the game's AI; resolves with its id. */
+    /** A session against the game's AI; resolves with its id. While the
+     * game's server wakes it rejects `unavailable` with `code`
+     * `"server_starting"` and `retryAfter` (seconds, 2): try again then. */
     practice(): Promise<string>;
     invite(userId: string, sessionId?: string): Promise<SessionInvite>;
     invites(): Promise<{ incoming: SessionInvite[]; outgoing: SessionInvite[] }>;
@@ -8613,11 +9045,37 @@ declare module "starhermit:script" {
   // beyond ECMAScript). An authority keeps those rules, as the
   // platform runs its server script: no imports, no `Date`, no
   // `Math.random`, no `crypto`, no timers, and `Intl` dates read the
-  // invocation's `ctx.now`. It and the game exchange JSON only: a message is copied as JSON text (at most 1 MiB,
+  // invocation's `ctx.now`. It and the game exchange JSON: a message is copied as JSON text (at most 1 MiB,
   // nesting at most 128 deep; functions and `undefined` are left out as
   // `JSON.stringify` leaves them, and a host object arrives as `{}`), and
   // what a worker sends reaches the game's listeners as each frame begins,
   // before `onFixedUpdate`, in the order it was sent.
+  //
+  // Binary messages (games declaring API_MINOR 25 or later; older ones
+  // keep JSON only, a typed array arriving as an object of its elements).
+  // An ArrayBuffer, typed array (every kind, BigInt64Array and
+  // BigUint64Array included; not Float16Array) or DataView anywhere in a
+  // message, nested in objects and arrays, arrives as the same kind over
+  // its own copy of the bytes, never through JSON, both ways. As
+  // structured cloning does: a view sends its whole buffer, views sharing a
+  // buffer share one on arrival, and the bytes are copied as the message
+  // is posted. A transfer list (`worker.post(message, [buffer])`,
+  // `postMessage(message, [buffer])` or `{ transfer: [...] }`) moves the
+  // buffers instead: each is detached in the sender (`byteLength` 0) once
+  // the message is queued. A DataCloneError (an Error named so) for a
+  // detached buffer, a transfer list naming anything but an ArrayBuffer or
+  // one twice, and the reserved key `"\u0000starhermit:binary"`. The rest
+  // of the message is JSON as above (its 1 MiB counts the JSON alone); its
+  // buffers carry at most 64 MiB (a RangeError past it), and at most
+  // 128 MiB of binary data waits each way (past that the send is refused
+  // as a full queue). A message's bytes land in the receiver's heap: a
+  // worker's `heapMiB` must hold what it is sent.
+  //
+  // Checks (`--check`, `--render-check`, play scripts) play on a simulated
+  // clock: each frame first waits (natively, up to three seconds) until
+  // every worker has run what it was sent, so a worker's answer reaches the
+  // game on the same frame in every run, however fast the frames play.
+  // Browsers play in real time.
   //
   // Limits. A game runs at most 4 workers and authorities at once (one
   // that was terminated counts until its thread has ended). Each has its
@@ -8661,8 +9119,9 @@ declare module "starhermit:script" {
   export interface WorkerEvents {
     /** The script's top level ran. */
     open: () => void;
-    /** A value the worker passed to `postMessage`. */
-    message: (data: JsonValue) => void;
+    /** A value the worker passed to `postMessage` (with its buffers and
+     * views since API_MINOR 25). */
+    message: (data: any) => void;
     /** An exception from the worker's top level or `onmessage` (with its
      * file and line; the worker goes on unless it was the top level), a
      * budget that ended it, or the not-responding report. */
@@ -8672,8 +9131,10 @@ declare module "starhermit:script" {
   /** A worker's script: a classic script (or a module importing package
    * modules) that sets `globalThis.onmessage` (also `self.onmessage`) to
    * hear `{ data }` for each message the game posts, and calls
-   * `postMessage(value)` (a RangeError past 1 MiB or when the game's queue
-   * is full, a TypeError for what is not JSON). A message's promise jobs
+   * `postMessage(value, transfer?)` (a RangeError past 1 MiB of JSON or
+   * 64 MiB of buffers, or when the game's queue is full, a TypeError for
+   * what is not JSON; buffers, views and the transfer list since
+   * API_MINOR 25). A message's promise jobs
    * run before the next message. An exception from `onmessage` is reported
    * and the worker goes on; running out of heap or call depth ends it. A
    * long entry is not cut short: its fuel is renewed, and past three
@@ -8685,9 +9146,14 @@ declare module "starhermit:script" {
     readonly stats: WorkerStats;
     on<E extends keyof WorkerEvents>(event: E, listener: WorkerEvents[E]): Unsubscribe;
     /** Queues a message for `onmessage` (a TypeError for what is not JSON,
-     * a RangeError past 1 MiB, nesting past 128, or when 256 messages or
-     * 4 MiB already wait). Ignored once the worker has stopped. */
-    post(message: JsonValue): void;
+     * a RangeError past 1 MiB of JSON, 64 MiB of buffers, nesting past
+     * 128, or when 256 messages, 4 MiB of JSON or 128 MiB of buffers
+     * already wait). Since API_MINOR 25 the message may hold ArrayBuffers,
+     * typed arrays and DataViews, copied, and `transfer` (an array of
+     * ArrayBuffers, or `{ transfer }`) moves the buffers it names: they
+     * are detached here once the message is queued. Ignored once the
+     * worker has stopped. */
+    post(message: unknown, transfer?: readonly ArrayBuffer[] | { transfer?: readonly ArrayBuffer[] }): void;
     /** Ends the worker where it stands; no more events arrive. */
     terminate(): void;
   }
