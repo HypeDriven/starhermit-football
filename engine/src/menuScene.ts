@@ -176,7 +176,7 @@ export class MenuScene {
     lt.z += (st.ball.z * 0.55 - lt.z) * Math.min(1, dt * 0.8);
     lt.y = 1;
     this.camera.lookAt(lt.x, lt.y, lt.z);
-    if (this.camera.fov !== 55) this.camera.fov = 55;
+    if (this.camera.fov !== 55) { this.camera.fov = 55; this.camera.updateProjectionMatrix(); }
     this.stadium!.update(dt, this.camera.position);
   }
 }

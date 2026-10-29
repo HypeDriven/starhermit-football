@@ -306,8 +306,8 @@ motion is listed in Known limitations.
 
 
 **Graphics.** Lighting is one shadow-casting floodlight spot, three fill spots, a
-hemisphere fill and a flat ambient term (three.js-model intensities divided by π, the host's
-light convention), rendered with ACES filmic tone mapping into sRGB. The spot's shadow frustum is
+hemisphere fill and a flat ambient term (the browser build's three.js r176 intensities; minor 28 lights follow three r155+)
+, PCF soft shadows (normalBias 0.02), rendered with ACES filmic tone mapping into sRGB. The spot's shadow frustum is
 fitted to the pitch plus a margin (focus, near and far computed from the pitch corners), so every
 texel lands on the play area. Surfaces: the match ball is a clearcoated physical material; lamp
 banks carry HDR glow sprites; LED boards and the tunnel sign are slightly over-driven so they still

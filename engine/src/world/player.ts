@@ -7,7 +7,7 @@
 // footballer (33 with a Group pivot above each part's mesh).
 import {
   BoxGeometry,
-  CanvasTexture,
+  CanvasTexture, SRGBColorSpace,
   CapsuleGeometry,
   Group,
   Mesh,
@@ -101,6 +101,7 @@ function shirtTexture(shirt: string, gk: boolean): CanvasTexture {
   ctx.fillRect(0, 120, 128, 8);
   ctx.globalAlpha = 1;
   tex = new CanvasTexture(c);
+  tex.colorSpace = SRGBColorSpace;
   tex.needsUpdate = true;
   texCache.set(key, tex);
   return tex;
@@ -122,6 +123,7 @@ function numberTexture(number: number, shirt: string): CanvasTexture {
   ctx.fillStyle = fill;
   ctx.fillText(String(number), 128, 136);
   tex = new CanvasTexture(c);
+  tex.colorSpace = SRGBColorSpace;
   tex.needsUpdate = true;
   texCache.set(key, tex);
   return tex;

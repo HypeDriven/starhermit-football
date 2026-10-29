@@ -81,14 +81,13 @@ const WALL_H = 1.1; // front wall height
 const SEAT_DX = 0.62; // seat spacing along a row
 const CROWD_FILL = 0.8; // fraction of seats occupied
 
-// three.js intensities (r155+ lights) divided by π: the host API's light
-// convention (a white surface under intensity 1 shows its base color).
-const SPOT_INTENSITY = 3.4 / Math.PI;
-const FILL_INTENSITY = 1.7 / Math.PI;
-const HEMI_NIGHT = 0.55 / Math.PI;
-const HEMI_DAY = 1.05 / Math.PI;
-const AMB_NIGHT = 0.35 / Math.PI;
-const AMB_DAY = 0.6 / Math.PI;
+// The browser build's three.js r176 intensities (minor 23+ lights follow r155+).
+const SPOT_INTENSITY = 3.4;
+const FILL_INTENSITY = 1.7;
+const HEMI_NIGHT = 0.55;
+const HEMI_DAY = 1.05;
+const AMB_NIGHT = 0.35;
+const AMB_DAY = 0.6;
 const TOWER_H = 30;
 // The post effects, in three.js r176's order: GTAO (Default output) at the
 // budget's aoRes, bloom (strength 0.55, radius 0.45, threshold 1.3) at its
@@ -1010,6 +1009,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   spot.castShadow = true;
   spot.shadow.mapSize = 2048;
   spot.shadow.bias = -0.0004;
+  spot.shadow.normalBias = 0.02;
   root.add(spot);
   root.add(spot.target);
   // Fit a spot's shadow frustum to the pitch (plus the goals and a margin) so
@@ -1050,6 +1050,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
   // floodlit double shadow under every player
   const spot2 = fillSpots[2]!;
   spot2.shadow.bias = -0.0004;
+  spot2.shadow.normalBias = 0.02;
   fitShadow(spot2);
   const hemi = new HemisphereLight(0x8fb4e8, 0x0e1a12, HEMI_NIGHT);
   const amb = new AmbientLight(0x223048, AMB_NIGHT);

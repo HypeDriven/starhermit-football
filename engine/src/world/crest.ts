@@ -4,7 +4,7 @@
 // 1px #2c3e50 rim. One canvas each (overlay) with a texture of it (UI); a
 // shield in the club's colors stands in while the image decodes or if it
 // cannot be.
-import { CanvasTexture } from "starhermit:scene";
+import { CanvasTexture, SRGBColorSpace } from "starhermit:scene";
 import { createImageBitmap } from "starhermit:canvas";
 import type { OffscreenCanvas } from "starhermit:canvas";
 import { makeCanvas } from "./resources.ts";
@@ -66,6 +66,7 @@ export function crest(team: number): Crest {
   g.fill();
   g.setTransform(1, 0, 0, 1, 0, 0);
   const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
   texture.needsUpdate = true;
   const out = { canvas, texture };
   made[i] = out;

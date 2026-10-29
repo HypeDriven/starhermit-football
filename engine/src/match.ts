@@ -759,7 +759,7 @@ export class MatchController {
     const r = this.rig;
     cam.position.set(r.pos.x, r.pos.y, r.pos.z);
     cam.lookAt(r.look.x, r.look.y, r.look.z);
-    if (Math.abs(cam.fov - r.fov) > 0.05) cam.fov = r.fov;
+    if (Math.abs(cam.fov - r.fov) > 0.05) { cam.fov = r.fov; cam.updateProjectionMatrix(); }
   }
 
   private updateBallArrow(following: boolean): void {

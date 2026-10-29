@@ -1,5 +1,3 @@
-// Copied unchanged below this note from the StarHermit runtime 1.24.0
-// (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
 // (`starhermit`) is the only trusted code; a game package is data, and every
@@ -2576,6 +2574,12 @@ declare module "starhermit:scene" {
      * `EquirectangularReflectionMapping` for latitude-longitude images;
      * any 2D texture is taken as one. */
     mapping: number;
+    /** How a color map reads it (since API_MINOR 28, as three.js r185):
+     * `SRGBColorSpace` sRGB-decoded, `LinearSRGBColorSpace` and
+     * `NoColorSpace` (the default) as stored, for a material's `map` and
+     * `emissiveMap`, `scene.background` and an environment made from it.
+     * Older games' color maps are always sRGB. Data maps (normal,
+     * roughness, metalness, ambient occlusion) are read as stored. */
     colorSpace: string;
     /** Set to re-upload a canvas or data texture's pixels this frame (the
      * upload counts against the frame's 96 MiB upload bound, past which it
@@ -7560,7 +7564,12 @@ declare module "starhermit:ui" {
   /** Converts a style sheet (at most 1 MiB, RangeError): plain objects for
    * `setStyles`, `setAnimations` and `setTokens`, which take them as they
    * are. Not a TypeError for any CSS. Needs no frame: convert once, at
-   * the start. */
+   * the start. Since API_MINOR 28 it converts what API_MINOR 26 added to
+   * styles (`starhermit css --minor 26` does so ahead of time): custom
+   * properties on any selector as `"--name"` declarations, `var()`s of them
+   * as `"var(--name)"`, percentage sizes, `max-width` and `max-height`,
+   * `font-variant: small-caps` as `text.variant`, and `flex-wrap` as a
+   * row's `wrap` with its `gap`. */
   export function stylesFromCss(css: string, options?: CssOptions): CssStyles;
   /** What the player's settings make of the UI this frame (since
    * API_MINOR 11): `scale` is window pixels per logical pixel (the
@@ -9302,8 +9311,18 @@ declare module "starhermit:script" {
   // may terminate it); the game's own frames never wait for it. Its
   // console lines go to the game's log, prefixed with its path. Stopping
   // the game stops its workers where they stand, and a restart waits for
-  // their threads. Keep a reference to a worker you use: one the game no
-  // longer holds is terminated when it is collected.
+  // their threads.
+  //
+  // Lifetime (since API_MINOR 27, as a browser's Web Worker): a worker
+  // lives on while it has any listener (`on`, until each is removed) or a
+  // message it has yet to run, even once the game holds no reference to
+  // it; it ends only with `terminate()`, its stopping on its own, or the
+  // game's end. It still counts against the 4 at once. A worker with no
+  // listener the game dropped ends once it has run what it was sent.
+  // Before API_MINOR 27, a worker the game no longer holds is terminated
+  // when it is collected, whatever it was doing; one with listeners logs a
+  // warning naming its script, once per game. Keep a reference to a worker
+  // you use there.
 
   /** A worker's `files` global (since API_MINOR 26): `PackageFiles`'s
    * reads of the game's own package, with the same rules and errors. A

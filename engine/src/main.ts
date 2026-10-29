@@ -6,7 +6,7 @@
 // i18n.ts).
 import { frame, onFixedUpdate, onRender, onStart, onUpdate, openMenu, setFixedRate } from "starhermit:engine";
 import type { JsonValue } from "starhermit:engine";
-import { ACESFilmicToneMapping, PerspectiveCamera, renderer, scene } from "starhermit:scene";
+import { ACESFilmicToneMapping, PCFSoftShadowMap, PerspectiveCamera, renderer, scene } from "starhermit:scene";
 import { createImageBitmap } from "starhermit:canvas";
 import type { ImageBitmap, OffscreenCanvas } from "starhermit:canvas";
 import type { CanvasTexture } from "starhermit:scene";
@@ -49,6 +49,7 @@ const camera = new PerspectiveCamera(55, 16 / 9, 0.1, 800);
 camera.position.set(0, 20, -30);
 renderer.camera = camera;
 renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = PCFSoftShadowMap;
 renderer.bloom = null;
 renderer.toneMapping = ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
@@ -892,6 +893,12 @@ onUpdate((delta) => {
 });
 
 onRender(() => {
+  // Minor 20+: the camera keeps its own aspect, as three's (the browser build set it on resize).
+  const fr = frame();
+  if (fr.width > 0 && fr.height > 0 && Math.abs(camera.aspect - fr.width / fr.height) > 1e-6) {
+    camera.aspect = fr.width / fr.height;
+    camera.updateProjectionMatrix();
+  }
   if (!booted && !match && !replay) {
     loadingScreen(T("Loading…"));
     return;
