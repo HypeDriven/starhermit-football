@@ -1,4 +1,4 @@
-// Copied unchanged below this note from the StarHermit runtime 1.23.0
+// Copied unchanged below this note from the StarHermit runtime 1.24.0
 // (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -830,6 +830,19 @@ declare module "starhermit:engine" {
   export function openMenu(): void;
   /** Ends the game (runs `onQuit`, then the runtime closes). */
   export function quit(): void;
+  /** Which engine runs the game's script (since API_MINOR 26, and
+   * undefined for games declaring an older `engine.minor`): `"native"` on
+   * the engine's own interpreter (the desktop runtime, `starhermit check`,
+   * render checks), `"web"` in a browser on the browser's JavaScript
+   * engine. Games use it to pick a code path (heavy plain JS on the web,
+   * WebAssembly natively). The answer never changes during a run.
+   *
+   * A `starhermit:script` worker always runs on the engine's interpreter,
+   * in browsers too, so its code is on the `"native"` path whatever the
+   * game's `runtime()` says. Workers have no built-in modules and cannot
+   * call `runtime()` themselves: a game that tells its worker which path
+   * to take should send `"native"`, not its own answer. */
+  export function runtime(): "native" | "web";
   /** How {@link openLink} went: the player pressed Open (the runtime
    * handed the link to their browser) or Cancel; the link is not approved
    * (not declared, unknown to the platform, pending, rejected, revoked, or
@@ -2511,12 +2524,27 @@ declare module "starhermit:scene" {
    * `DataArrayTexture`'s format. */
   export const RedFormat: 1028;
   export const RGFormat: 1030;
-  /** Color spaces, kept for ports: color maps are read as sRGB, data maps
-   * (normal, roughness, metalness, occlusion) as plain values, output is
-   * sRGB. */
+  /** Color spaces: color maps are read as sRGB, data maps (normal,
+   * roughness, metalness, occlusion) as plain values; the output is
+   * `renderer.outputColorSpace`. */
   export const NoColorSpace: "";
   export const SRGBColorSpace: "srgb";
   export const LinearSRGBColorSpace: "srgb-linear";
+  /** Since API_MINOR 26: three.js's `ColorManagement`. The working color
+   * space is linear sRGB. With `enabled` false (default true) colors are
+   * taken and given as they are: `Color.setHex`, `setStyle`, `getHex` and
+   * the rest no longer convert from or to sRGB, so `0x404040` is a linear
+   * 0.25. Textures are read as before, and the output follows
+   * `renderer.outputColorSpace` either way. */
+  export const ColorManagement: {
+    enabled: boolean;
+    readonly workingColorSpace: "srgb-linear";
+    /** `"srgb"` for `SRGBColorSpace`, else `"linear"`. */
+    getTransfer(colorSpace: string): "srgb" | "linear";
+    convert<C extends Color>(color: C, sourceColorSpace: string, targetColorSpace: string): C;
+    fromWorkingColorSpace<C extends Color>(color: C, targetColorSpace: string): C;
+    toWorkingColorSpace<C extends Color>(color: C, sourceColorSpace: string): C;
+  };
 
   // -- Textures ---------------------------------------------------------------
   /** An RGBA8 image on the GPU (sRGB-encoded), at most 4,096 pixels on a
@@ -3922,6 +3950,16 @@ declare module "starhermit:scene" {
   //   fn screen_uv(coord: vec4f) -> vec2f a window position as texture
   //                                      coordinates, 0..1 from the top
   //                                      left (since API_MINOR 8)
+  //   fn pass_kind() -> u32              the pass the hook runs in
+  //                                      (since API_MINOR 26): PASS_MAIN
+  //                                      (the lit pass), PASS_SHADOW (a
+  //                                      shadow map's) or PASS_PREPASS
+  //                                      (the depth or normal prepass)
+  //   fn is_shadow_pass() -> bool        pass_kind() == PASS_SHADOW: e.g.
+  //                                      a hook that dithers its surface
+  //                                      in view keeps its shadow solid
+  //                                      (since API_MINOR 26; games below
+  //                                      it may declare these names)
   // Textures are RGBA8 as uploaded (a Uint8Array DataTexture's bytes as
   // they are, read as 0..1; since API_MINOR 25 a float or half-float
   // DataTexture's values as they are, below 0 and above 1, in half-float
@@ -4290,7 +4328,12 @@ declare module "starhermit:scene" {
     readonly quaternion: Quaternion;
     readonly scale: Vector3;
     /** Local and world transforms, kept up to date as three.js's
-     * `updateMatrixWorld` would (reading them is always current). */
+     * `updateMatrixWorld` would (reading them is always current). While
+     * `matrixAutoUpdate` is false, `matrix` is the object's own (since
+     * API_MINOR 26, as three.js): set it (`matrix.fromArray`, `copy`) to
+     * place the object and what is under it; `updateMatrix()` composes it
+     * from position, quaternion and scale. It draws decomposed (a shear
+     * is lost). Older minors always compose it. */
     readonly matrix: Matrix4;
     readonly matrixWorld: Matrix4;
     visible: boolean;
@@ -4414,6 +4457,42 @@ declare module "starhermit:scene" {
    * (three.js's `groupOrder`, up to the next Group). */
   export class Group extends Object3D {
     constructor();
+  }
+  /** A level of an LOD (three.js). */
+  export interface LODLevel {
+    distance: number;
+    hysteresis: number;
+    object: Object3D;
+  }
+  /** three.js r185's `LOD` (since API_MINOR 26): of its levels (children
+   * added by `addLevel`), the one for the camera's distance shows, the
+   * rest are made invisible. The distance is from the camera's world
+   * position to the LOD's, divided by the camera's `zoom`; a level already
+   * showing keeps showing until `hysteresis` (a fraction of its distance)
+   * nearer. With `autoUpdate` the renderer updates it every frame for the
+   * camera it draws (and in `renderer.render` for that call's camera), as
+   * three.js's `WebGLRenderer` does for LODs under visible parents, before
+   * shadow maps draw: shadows cast from the level the camera sees. The
+   * engine draws whatever the objects' layers, so the update does not test
+   * them. Before API_MINOR 26 the constructor is a TypeError. */
+  export class LOD extends Object3D {
+    constructor();
+    readonly isLOD: true;
+    readonly type: "LOD";
+    /** Its levels, nearest first. */
+    readonly levels: LODLevel[];
+    /** Whether the renderer updates it each frame (default true). */
+    autoUpdate: boolean;
+    /** Adds `object` (as a child) shown from `distance` (its absolute
+     * value) on. */
+    addLevel(object: Object3D, distance?: number, hysteresis?: number): this;
+    /** Removes the level at exactly `distance` (and its object). */
+    removeLevel(distance: number): boolean;
+    /** The index of the level the last update chose. */
+    getCurrentLevel(): number;
+    getObjectForDistance(distance: number): Object3D | null;
+    /** Shows the level for `camera`'s distance (three.js's). */
+    update(camera: Camera): void;
   }
   export class Mesh<TMaterial extends Material | Material[] = Material> extends Object3D {
     constructor(geometry?: BufferGeometry, material?: TMaterial);
@@ -4744,6 +4823,35 @@ declare module "starhermit:scene" {
     boundingSphere: Sphere | null;
     computeBoundingBox(): void;
     computeBoundingSphere(): void;
+    /** ENGINE EXTENSION, not three.js (since API_MINOR 26; three.js's
+     * InstancedMesh and BatchedMesh have no levels of detail): its farther
+     * levels, nearest first. Level 0 is its own geometry and material. */
+    readonly levels: readonly InstanceLevel[];
+    /** ENGINE EXTENSION, not three.js (since API_MINOR 26): per-instance
+     * levels of detail. Every frame the runtime gives each instance the
+     * level of its world distance from the camera it draws (the last level
+     * whose `distance` it reaches; the camera's `zoom` is not applied) and
+     * draws each level as an instanced batch of its own, its instances
+     * bucketed natively; shadow maps draw the level the camera sees. The
+     * buckets are made again only when an instance changes level or the
+     * instances change, so a still camera costs a distance per instance.
+     * A level with `geometry: null` draws nothing (a draw distance beyond
+     * which instances are culled), `material` defaults to the mesh's own,
+     * and `hysteresis` keeps an instance at a level until that fraction of
+     * its distance nearer (three.js `LOD`'s rule). At most 7 levels at
+     * finite, non-decreasing distances (else a RangeError); `[]` removes
+     * them. Levels draw their whole geometry (the draw range is level
+     * 0's); culled, an instance's order within a level is the engine's.
+     * Clones and copies share the levels. */
+    setLevels(levels: readonly InstanceLevel[]): this;
+  }
+  /** ENGINE EXTENSION (`InstancedMesh.setLevels`): one farther level of
+   * detail. */
+  export interface InstanceLevel {
+    readonly geometry: BufferGeometry | null;
+    readonly material?: Material;
+    readonly distance: number;
+    readonly hysteresis?: number;
   }
   /** Points (three.js `Points`): a square per vertex of the geometry's
    * `position` in its draw range, colored by its `color` attribute when the
@@ -4983,6 +5091,25 @@ declare module "starhermit:scene" {
     distance: number;
     /** Before API_MINOR 23: a spot's near plane (default 0.5 m). */
     near: number;
+    /** ENGINE EXTENSION, not three.js (since API_MINOR 26; three.js's
+     * cascaded shadows are its `three/addons/csm` addon): a directional
+     * light's cascaded shadow maps, null (the default) for the one map of
+     * its `camera`'s box. With cascades the camera's box and planes are not
+     * used: `count` maps (1–4, default 3; each `mapSize`, together within
+     * the four maps a pass takes, so other casting lights may lose theirs)
+     * split the camera's view from its near plane to `maxDistance` (along
+     * the view; its far plane if nearer) as the CSM addon's practical split
+     * does, `splitLambda` (0–1, default 0.5, the addon's) blending its even
+     * split (0) with its logarithmic one (1). Each map is fitted to its
+     * slice, finest nearest, and a point takes the first map holding it.
+     * Past the last map (its square box covers the view to `maxDistance`
+     * and somewhat beyond, more so for wide views) the light is unshadowed, and
+     * casters out of a map's reach are not drawn into it: the cheap way to
+     * shadow a large world. `bias`, `normalBias`, `radius`, `intensity` and
+     * `renderer.shadowMap.type` apply to every map. Other values are a
+     * RangeError, and setting it before API_MINOR 26 a TypeError, as the
+     * scene syncs; spot lights ignore it. */
+    cascades?: { count?: number; maxDistance: number; splitLambda?: number } | null;
   }
   /** Light from `position` toward `target`'s position (three.js); both may
    * be anywhere in the graph. */
@@ -5339,7 +5466,17 @@ declare module "starhermit:scene" {
      * (default 1), applied to everything the scene draws. */
     toneMapping: number;
     toneMappingExposure: number;
-    /** Kept for ports; output is sRGB. */
+    /** three.js's output color space: `SRGBColorSpace` (the default) or,
+     * since API_MINOR 26, `LinearSRGBColorSpace`, which writes the scene's
+     * light after tone mapping without the sRGB transfer (three.js r185's
+     * `linearToOutputTexel`): a `MeshBasicMaterial` of linear 0.25
+     * (`setRGB(0.25, 0.25, 0.25)`, or `0x404040` with
+     * `ColorManagement.enabled` false) shows as `#404040` rather than
+     * `#898989`. The clear color, `scene.background` and fog colors are
+     * written in it too, and post effects' composite (bloom, grade) ends in
+     * it. Render-target passes are unchanged (linear light, as three.js),
+     * and so are the 2D draw layer and the UI, which are not the scene's
+     * output. Before API_MINOR 26 the output is sRGB whatever this says. */
     outputColorSpace: string;
 
     // Render targets (since API_MINOR 8). The scene draws itself every
@@ -6175,9 +6312,36 @@ declare module "starhermit:ui" {
      * down it. */
     justify?: Align | "space-between" | "space-around" | "space-evenly";
     /** The outer size, padding and border included (CSS `box-sizing:
-     * border-box`), as a style's `width` and `height`. */
-    width?: number;
-    height?: number;
+     * border-box`), as a style's `width` and `height`. Since API_MINOR 26
+     * also a percentage (`"50%"`) of the container's content box, as in
+     * CSS: where that box's size depends on its content (a column without
+     * a fixed width, a content-sized row, a scroll area's content), the
+     * percentage is `auto`. A container's box is known along an axis when
+     * it has a fixed size there, or fills, stretches or grows to one; the
+     * top level's is the area below the origin. In a grid it is the cell's
+     * width. Older minors warn and ignore a percentage. */
+    width?: number | `${number}%`;
+    height?: number | `${number}%`;
+    /** A row's children flow onto new lines when it is full (since
+     * API_MINOR 26; CSS `flex-wrap`): `true` or `"wrap"` adds lines
+     * below, `"wrap-reverse"` above (the first line at the bottom). A
+     * wrapping row without a `width` fills its container's width (as a
+     * CSS block-level flex container), so a wrapping row in a row is one
+     * line unless it has a width. Lines break on this frame's sizes;
+     * `align` places children within their line's height (`"stretch"`:
+     * as tall), and `justify` spreads each line's free space. A line's
+     * height and spread come from last frame where the frame is not past
+     * it yet, so a line whose content changes size settles on the next
+     * frame, as a grid's rows do. Tab order follows the lines as they
+     * show, top to bottom (a reversed row's last line first); arrows
+     * move by position. Columns ignore it. Older minors warn and ignore
+     * it. */
+    wrap?: boolean | "wrap" | "nowrap" | "wrap-reverse";
+    /** A row's gaps (since API_MINOR 26): one number for both, or
+     * `column` (between children in a line, as `spacing`) and `row`
+     * (between wrapped lines; default the column gap). A grid's own
+     * `gap` is as before. */
+    gap?: number | { row?: number; column?: number };
     /** The panel's color (the theme's opaque panel under high contrast). */
     background?: ColorLike;
     /** Clip children to the container. */
@@ -6246,6 +6410,16 @@ declare module "starhermit:ui" {
   /** Names the next widget or container (focus and state survive a changed
    * label). Returns the module for chaining: `ui.id("play").button(label)`. */
   export function id(id: string): typeof import("starhermit:ui");
+  /** The rectangle (as the call returned it, window pixels) of the widget
+   * or container placed last this frame (since API_MINOR 26; older minors
+   * throw a TypeError): a container's once its `build` returned, so after
+   * `ui.row(…)` it is the row's. It is this frame's layout, as the call
+   * returned it (sizes measured from this frame's content, a few things
+   * such as a wrapping line's height or a grid row from last frame). Null
+   * before anything is placed this frame. Useful for anchoring a game
+   * drawing to a widget whose call returns no rectangle. */
+  export function lastRect(): Rect | null;
+
   export function column(label: string, build: () => void, layout?: Layout): Rect;
   export function row(label: string, build: () => void, layout?: Layout): Rect;
   /** A column on a panel background. */
@@ -6791,8 +6965,10 @@ declare module "starhermit:ui" {
     | "textField" | "tabs" | "scrollArea" | "dialog"
     | "widget" | "tooltip" | "meter" | "document"
     | "grid" | "stack";
-  /** A token's name where its value goes: `"$gold"`. */
-  export type Token = `$${string}`;
+  /** A token's name where its value goes: `"$gold"`; since API_MINOR 26
+   * also a custom property's, `"var(--gold)"` or `"var(--gold, #fc0)"`
+   * (see `CustomProperties`). */
+  export type Token = `$${string}` | `var(--${string})`;
   /** A number in logical pixels, or a token for one. */
   export type Length = number | Token;
   /** The parts of compound widgets (`Style.parts`, since API_MINOR 12). */
@@ -6936,6 +7112,12 @@ declare module "starhermit:ui" {
     align?: "start" | "center" | "end";
     /** `"tabular"`: every digit takes the widest digit's advance. */
     numerals?: "proportional" | "tabular";
+    /** `"small-caps"` (since API_MINOR 26; CSS `font-variant`): lowercase
+     * letters draw as capitals at 0.7 of the size on the same baseline,
+     * synthesized whatever the font (its `smcp` glyphs are not used); the
+     * text read to assistive technology keeps its case. Single-line text
+     * only: wrapped text keeps its case. Older minors warn and ignore it. */
+    variant?: "normal" | "small-caps";
     /** Text shadows, drawn under the text, the last lowest (at most 4;
      * CSS `text-shadow`): an offset, a color and (since API_MINOR 12) a
      * `blur` up to 32 (RangeError; no `spread` or `inset`), a glow for
@@ -6996,7 +7178,7 @@ declare module "starhermit:ui" {
      * in on hover). */
     opacity?: number;
   }
-  export interface BoxStyle {
+  export interface BoxStyle extends CustomProperties {
     /** Fill layers, first on top (at most 4). */
     background?: Fill | readonly Fill[];
     /** `style: "double"` draws two lines a third of the width each. */
@@ -7016,16 +7198,24 @@ declare module "starhermit:ui" {
      * its interaction states (layout doesn't move on hover; structural
      * blocks such as `first` apply). */
     margin?: Length | Sides<Length>;
-    minWidth?: Length;
-    minHeight?: Length;
+    /** Since API_MINOR 26 `minWidth`, `minHeight`, `width`, `height`,
+     * `maxWidth` and `maxHeight` also take a percentage (`"50%"`) of the
+     * container's content box (see `Layout.width`): `auto` where that
+     * box depends on its content (a minimum then is 0, a maximum none). */
+    minWidth?: Length | `${number}%`;
+    minHeight?: Length | `${number}%`;
+    /** At most this outer size (since API_MINOR 26): pixels, a percentage
+     * or `"none"`. A minimum wins over a maximum, as in CSS. */
+    maxWidth?: Length | `${number}%` | "none";
+    maxHeight?: Length | `${number}%` | "none";
     /** The outer width (border-box), at least, or `"fill"`: the whole
      * width of the column it is in (since API_MINOR 12 also its grid
      * cell's or stack's), less its margins. A column without a width is
      * as wide as its widest child, so `"fill"` in it fills only that: give
      * the column a `width`, or `align: "stretch"` in a column that has
      * one. In a row it has no effect. */
-    width?: Length | "fill";
-    height?: Length;
+    width?: Length | `${number}%` | "fill";
+    height?: Length | `${number}%`;
     opacity?: number | Token;
     /** Moves what draws (logical pixels); the widget still lays out, hits
      * and focuses where it is (a hover lift without jitter). */
@@ -7225,6 +7415,19 @@ declare module "starhermit:ui" {
    * 256 KiB of JSON a call; a call that throws registers nothing. A style
    * naming an animation not registered adds nothing (one warning). */
   export function setAnimations(animations: { readonly [name: string]: { readonly [offset: string]: Keyframe } }): void;
+  /** Custom properties (since API_MINOR 26; CSS's `--name: value`): any
+   * style or state block may declare `"--name": value`, and any value in a
+   * style may be `"var(--name)"` or `"var(--name, fallback)"` (the
+   * fallback a number or text: a color, a percentage, a token, another
+   * `var()`). A widget's `var()` resolves to its own rules' declarations
+   * (later rules and active state blocks winning), else its containers'
+   * (a container's base declarations are inherited by everything built
+   * inside it, the innermost winning), else the token of that name
+   * (`setTokens`, CSS's `:root`), else the fallback; with none, the
+   * property is ignored with one warning. A `var()` replaces a whole
+   * value (`"var(--gap)"`, not `"calc(…)"` or `"1px var(--c)"`). Older
+   * minors warn and ignore declarations and properties using `var()`. */
+  export type CustomProperties = { readonly [name: `--${string}`]: unknown };
   export interface Style extends BoxStyle, StateStyles {
     /** Keys this one builds on, flattened when registered (they must be
      * registered before, or in the same call). */
@@ -9037,10 +9240,17 @@ declare module "starhermit:script" {
   // the game's clock as its last frame began; `timeOrigin` is the game's),
   // `TextEncoder`/`TextDecoder`, `atob`/`btoa` and `crypto` (since
   // API_MINOR 21), plus `self`,
-  // `postMessage` and `onmessage`. It has nothing of the engine: no
+  // `postMessage` and `onmessage`. It has nothing else of the engine: no
   // imports of built-in modules and no timers (`setTimeout`,
   // `setInterval`: the game's run on its frames; a worker works as
-  // messages arrive). Runtimes up to 1.17.1 gave a worker the platform
+  // messages arrive), with one exception: since API_MINOR 26 a global
+  // `files` reads the game's package files read-only, as
+  // `starhermit:engine`'s `files` does (`WorkerFiles`: the same paths,
+  // package rules, errors and 64 MiB read limit, development reads
+  // included), so a worker loads its own data or WebAssembly module
+  // (`WebAssembly.instantiate(files.readBytes("sim.wasm"))`) instead of
+  // the game sending it. Games declaring an older minor have no `files`
+  // in a worker. Runtimes up to 1.17.1 gave a worker the platform
   // sandbox's rules (no `Date`, no `Math.random`, none of the globals
   // beyond ECMAScript). An authority keeps those rules, as the
   // platform runs its server script: no imports, no `Date`, no
@@ -9095,6 +9305,18 @@ declare module "starhermit:script" {
   // their threads. Keep a reference to a worker you use: one the game no
   // longer holds is terminated when it is collected.
 
+  /** A worker's `files` global (since API_MINOR 26): `PackageFiles`'s
+   * reads of the game's own package, with the same rules and errors. A
+   * remote file reads once the game made it ready (`files.fetch`), as the
+   * game's synchronous reads take it; a worker cannot fetch, pick or save
+   * files. `readBytesAsync` reads on the worker's own thread (so the
+   * game's never waits for it) and settles with what `readBytes` gives.
+   * Declare it in a worker script with
+   * `declare const files: import("starhermit:script").WorkerFiles;`. */
+  export type WorkerFiles = Pick<
+    import("starhermit:engine").PackageFiles,
+    "exists" | "size" | "readBytes" | "readBytesAsync" | "readText" | "readJson" | "list" | "status"
+  >;
   export type WorkerState = "starting" | "running" | "not-responding" | "closed" | "failed";
   /** Why a worker ended for good: `"closed"` (terminated, or the game is
    * stopping), `"failed"` (its script did not load, or an entry ran out of
