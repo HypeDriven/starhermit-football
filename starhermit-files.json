@@ -2,7 +2,7 @@
   "files": {
     "CLAUDE.md": {"sha256": "996cafe0dc42dbb66223f1512cdc806c3bdc68f4d3aace7a60f17a09f10ae868", "size": 2844},
     "LICENSE.md": {"sha256": "13324de5e020665146bea6eafc542805d5058daacbf163d89d9434f9367f33b8", "size": 4463},
-    "README.md": {"sha256": "b773ed6f71865efead9c259d085bb69a7dd944f02dd5388b46755eab685524cb", "size": 5881},
+    "README.md": {"sha256": "198262a70e77a773584ec752027c079d198f02a9e86723d92fe356ed00e219f9", "size": 5881},
     "assets/crest-blue.webp": {"sha256": "1cee0fdb699c1a6bee2f64bf6c56fb1e212e641a9626de36bba65fc6aaa1c645", "size": 4854},
     "assets/crest-red.webp": {"sha256": "d7eddd1b7f341426e0705b792aa7dd1dd82adcaeb7714b2fc8304bb223746b08", "size": 5122},
     "assets/keyart-night-stadium.webp": {"sha256": "465bc1fdcb936a4abdc160e851e97becf71cb7003ee6a3768991a8ec90732dd5", "size": 94500},
@@ -59,7 +59,7 @@
     "engine/src/world/rigMath.ts": {"sha256": "6f6f1292664caae70c2e4358fde4e2c7d42452857a7f0b7ac36423ecc6d76698", "size": 12829},
     "engine/src/world/stadium.ts": {"sha256": "379d6d27c268a47609e781fbbbcc4af0ec7a2632fe23d3d77b60cd9ff5048eaf", "size": 62763},
     "icon.png": {"sha256": "2c8eaa4a5320ab35826f421574675909ac4c59a7be22cb83240e49038208e1a8", "size": 9579},
-    "index.html": {"sha256": "aea6e262ba302e416d2287f453e24f22faded6b9718b2a9b20ccc95e8a9dc10e", "size": 1772},
+    "index.html": {"sha256": "475dd77d64ac54028240c8ca4fec4819b5483c59f1f26329d0efbcbb72d27e3e", "size": 1772},
     "leaderboards.json": {"sha256": "7d871b691e91dbb0dd69c14f512aab836c896073cc7b614e9b2fd011942d8dd0", "size": 137},
     "server.js": {"sha256": "a95928a4a8c5f7baf7abb7faca077f87ebcca4722db029cec7fe2ea6a3254bd9", "size": 78992},
     "sfx/ball-bounce.opus": {"sha256": "23300d17f503532823ad0480808e34fa2694fc7710195bf0209af79b04303ae6", "size": 12266},
@@ -85,7 +85,7 @@
     "sfx/whistle-short.opus": {"sha256": "a6d8da0535a483f98cf9485749beed378857a70809ce3291807dcc820b4bd24c", "size": 12965},
     "sh-language.js": {"sha256": "307a2066b6df3cd7fd9b41202d32342389583059386a67436b12d07d50740b01", "size": 13930},
     "spec.md": {"sha256": "5a748dc221778a07caf150bf356f3dce9f7d329e7241d2da0605fa7267f4b1dc", "size": 47404},
-    "starhermit.txt": {"sha256": "45ce88f7dbe50fa5cf7982cdc006e850fca2c45ff6a67b6986a181c69a9b2db7", "size": 3137}
+    "starhermit.txt": {"sha256": "c02a0ff3cc839a01640f6b64a51d228475ed620181291435ee1fb7f4acac23bd", "size": 3137}
   },
   "excluded": ["engine/starhermit.d.ts", "engine/tests/", "engine/tsconfig.json", "node_modules/", "package-lock.json", "package.json", "tests/"],
   "format": 1
