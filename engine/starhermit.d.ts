@@ -1,3 +1,5 @@
+// Copied unchanged below this note from the StarHermit runtime 1.29.0
+// (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
 // (`starhermit`) is the only trusted code; a game package is data, and every
@@ -2741,7 +2743,12 @@ declare module "starhermit:scene" {
    * Gaussian blurs for each roughness, the light weighed by solid angle);
    * before, light near the zenith or nadir (a ceiling's lamp, a high sun, a
    * cube's top face) lit rough and mid-rough surfaces up to three times too
-   * brightly, which older minors keep. */
+   * brightly, which older minors keep. Since API_MINOR 30 a surface facing
+   * straight up or down (flat ground, a floor, a box's top) reads the light
+   * at the pole, as three.js's cube PMREM does; before, it read the
+   * prefiltered image's first row at whatever longitude its normal's last
+   * bits gave, on a room environment's floor up to about 20% short of
+   * three.js's diffuse light (and varying with the mesh). */
   export class PMREMGenerator {
     constructor(renderer?: Renderer);
     fromEquirectangular(texture: Texture): { readonly texture: Texture; readonly width: number; readonly height: number; dispose(): void };
@@ -3835,8 +3842,8 @@ declare module "starhermit:scene" {
     polygonOffsetUnits: number;
     visible: boolean;
     /** An environment this material reflects instead of
-     * `scene.environment` (standard, physical and Lambert materials; see
-     * `PMREMGenerator`). */
+     * `scene.environment` (standard, physical, Lambert and, since
+     * API_MINOR 29, Phong materials; see `PMREMGenerator`). */
     envMap: Texture | null;
     /** Since API_MINOR 6: whether the output is tone mapped (three.js
      * `toneMapped`, default true; without post effects only). */
@@ -3844,7 +3851,8 @@ declare module "starhermit:scene" {
     /** Since API_MINOR 7: see `MaterialParameters.premultipliedAlpha`. */
     premultipliedAlpha: boolean;
     /** Since API_MINOR 6: the game's WGSL hooked into this material's
-     * shading (standard, physical, Lambert and basic materials; see
+     * shading (standard, physical, Lambert and basic materials, and Phong,
+     * toon and matcap ones since API_MINOR 29; see
      * `MaterialHooks`), or null. Assign a new object, or change its
      * sources or uniforms' types, and the material's program follows from
      * the next frame; uniform values are read every frame. */
@@ -4233,6 +4241,174 @@ declare module "starhermit:scene" {
     wireframeLinewidth: number;
     wireframeLinecap: string;
     wireframeLinejoin: string;
+  }
+  /** How a Phong material's `envMap` combines with its light (three.js
+   * `combine`; since API_MINOR 29): the light times the reflection, mixed
+   * toward it, or with it added. */
+  export const MultiplyOperation: 0;
+  export const MixOperation: 1;
+  export const AddOperation: 2;
+  export interface MeshPhongMaterialParameters extends MeshLambertMaterialParameters {
+    /** The highlight's color (default 0x111111). */
+    specular?: ColorInput;
+    /** The highlight's sharpness (default 30; at least 1e-4 is drawn). */
+    shininess?: number;
+    /** Scales the highlight and the `envMap`'s share by its red channel. */
+    specularMap?: Texture | null;
+    /** `MultiplyOperation` (default), `MixOperation` or `AddOperation`. */
+    combine?: number;
+    /** How much of the `envMap` shows (default 1). */
+    reflectivity?: number;
+    envMapIntensity?: number;
+    /** Kept and not drawn (no refraction mapping). */
+    refractionRatio?: number;
+    /** Kept and not drawn. */
+    lightMap?: Texture | null;
+    lightMapIntensity?: number;
+    alphaMap?: Texture | null;
+    displacementMap?: Texture | null;
+    displacementScale?: number;
+    displacementBias?: number;
+  }
+  /** Shiny surfaces (three.js `MeshPhongMaterial`; since API_MINOR 29, as
+   * three.js r185 draws it): Lambert diffuse light plus a Blinn-Phong
+   * highlight of `specular` color and `shininess` from each direct light
+   * (`RE_Direct_BlinnPhong`), the highlight times the `specularMap`'s red,
+   * in the light units of the game's minor (spec
+   * rendering-and-quality.html#phong-toon-matcap). Its own `envMap`
+   * (sharp, unrotated) is combined with the whole light by `combine` at
+   * `reflectivity` (times the `specularMap`'s red); without one
+   * `scene.environment` gives diffuse light at `scene.environmentIntensity`.
+   * Casts and receives shadows; takes `hooks`. `lightMap`, `alphaMap`,
+   * `displacementMap`, `envMapRotation` and refraction are kept and not
+   * drawn. */
+  export class MeshPhongMaterial extends Material {
+    constructor(parameters?: MeshPhongMaterialParameters);
+    readonly isMeshPhongMaterial: true;
+    specular: Color;
+    shininess: number;
+    specularMap: Texture | null;
+    emissive: Color;
+    emissiveMap: Texture | null;
+    emissiveIntensity: number;
+    normalMap: Texture | null;
+    normalMapType: number;
+    normalScale: Vector2;
+    bumpMap: Texture | null;
+    bumpScale: number;
+    aoMap: Texture | null;
+    aoMapIntensity: number;
+    lightMap: Texture | null;
+    lightMapIntensity: number;
+    alphaMap: Texture | null;
+    displacementMap: Texture | null;
+    displacementScale: number;
+    displacementBias: number;
+    envMapRotation: Euler;
+    combine: number;
+    reflectivity: number;
+    envMapIntensity: number;
+    refractionRatio: number;
+    flatShading: boolean;
+    wireframe: boolean;
+    wireframeLinewidth: number;
+    wireframeLinecap: string;
+    wireframeLinejoin: string;
+  }
+  export interface MeshToonMaterialParameters extends MaterialParameters {
+    /** The light ramp: its red channel read at n·l, from -1 at the left to
+     * 1 at the right (usually a few texels with `NearestFilter`). */
+    gradientMap?: Texture | null;
+    emissive?: ColorInput;
+    emissiveMap?: Texture | null;
+    emissiveIntensity?: number;
+    normalMap?: Texture | null;
+    normalScale?: Vector2;
+    bumpMap?: Texture | null;
+    bumpScale?: number;
+    aoMap?: Texture | null;
+    aoMapIntensity?: number;
+    wireframe?: boolean;
+    wireframeLinewidth?: number;
+    /** Kept and not drawn. */
+    lightMap?: Texture | null;
+    lightMapIntensity?: number;
+    alphaMap?: Texture | null;
+    displacementMap?: Texture | null;
+    displacementScale?: number;
+    displacementBias?: number;
+  }
+  /** Cel shading (three.js `MeshToonMaterial`; since API_MINOR 29, as
+   * three.js r185 draws it): direct light through the `gradientMap`
+   * (`getGradientIrradiance`), or without one two tones, 0.7 and 1 of the
+   * light split where n·l is 0.4 (smoothed over a pixel); ambient and
+   * hemisphere light diffuse. No environment. Casts and receives shadows;
+   * takes `hooks`. `lightMap`, `alphaMap` and `displacementMap` are kept
+   * and not drawn. */
+  export class MeshToonMaterial extends Material {
+    constructor(parameters?: MeshToonMaterialParameters);
+    readonly isMeshToonMaterial: true;
+    gradientMap: Texture | null;
+    emissive: Color;
+    emissiveMap: Texture | null;
+    emissiveIntensity: number;
+    normalMap: Texture | null;
+    normalMapType: number;
+    normalScale: Vector2;
+    bumpMap: Texture | null;
+    bumpScale: number;
+    aoMap: Texture | null;
+    aoMapIntensity: number;
+    lightMap: Texture | null;
+    lightMapIntensity: number;
+    alphaMap: Texture | null;
+    displacementMap: Texture | null;
+    displacementScale: number;
+    displacementBias: number;
+    wireframe: boolean;
+    wireframeLinewidth: number;
+    wireframeLinecap: string;
+    wireframeLinejoin: string;
+  }
+  export interface MeshMatcapMaterialParameters extends MaterialParameters {
+    /** The lit sphere image, looked up by the view-space normal; sRGB
+     * decoded when its `colorSpace` is `SRGBColorSpace`. */
+    matcap?: Texture | null;
+    normalMap?: Texture | null;
+    normalScale?: Vector2;
+    bumpMap?: Texture | null;
+    bumpScale?: number;
+    flatShading?: boolean;
+    wireframe?: boolean;
+    wireframeLinewidth?: number;
+    /** Kept and not drawn. */
+    alphaMap?: Texture | null;
+    displacementMap?: Texture | null;
+    displacementScale?: number;
+    displacementBias?: number;
+  }
+  /** Baked lighting (three.js `MeshMatcapMaterial`; since API_MINOR 29, as
+   * three.js r185 draws it): no lights, `color` (and `map`) times the
+   * `matcap` at the view-space normal (normal and bump maps and flat
+   * shading applied), or without one a grey ramp from 0.2 below to 0.8
+   * above. Casts shadows and receives none; takes `hooks`. `alphaMap`
+   * and `displacementMap` are kept and not drawn. */
+  export class MeshMatcapMaterial extends Material {
+    constructor(parameters?: MeshMatcapMaterialParameters);
+    readonly isMeshMatcapMaterial: true;
+    matcap: Texture | null;
+    normalMap: Texture | null;
+    normalMapType: number;
+    normalScale: Vector2;
+    bumpMap: Texture | null;
+    bumpScale: number;
+    alphaMap: Texture | null;
+    displacementMap: Texture | null;
+    displacementScale: number;
+    displacementBias: number;
+    flatShading: boolean;
+    wireframe: boolean;
+    wireframeLinewidth: number;
   }
   export interface PointsMaterialParameters extends MaterialParameters {
     /** Pixels (default 1), times the display's pixel ratio, at most 1,024. */
@@ -5210,8 +5386,9 @@ declare module "starhermit:scene" {
      * environment). */
     readonly backgroundRotation: Euler;
     fog: Fog | FogExp2 | null;
-    /** Lights standard, physical and Lambert materials without an `envMap`
-     * (three.js): a PMREM texture, a latitude-longitude texture or a
+    /** Lights standard, physical and Lambert (since API_MINOR 29 also
+     * Phong) materials without an `envMap` (three.js): a PMREM texture,
+     * a latitude-longitude texture or a
      * CubeTexture (made into a prefiltered environment once per texture
      * version; one that cannot be lights nothing, with a warning). */
     environment: Texture | null;
@@ -5227,9 +5404,14 @@ declare module "starhermit:scene" {
    * `threshold` is taken at half of `resolution` (the fraction of the frame
    * the pass renders at, as a pass sized by its own `setSize`), blurred into
    * five halved levels and added back, weighted by `strength` and `radius`
-   * (tight 0 to wide 1). As three.js adds the sum with additive blending
-   * by its alpha, the light added is 3 × strength² times the weighted
-   * levels. Fields left out take the defaults. */
+   * (tight 0 to wide 1). Since API_MINOR 29 it is three.js r185's: kernel
+   * radii 6, 10, 14, 18 and 22 with a sigma of a third of the radius, and
+   * the light added is 3 × strength times the weighted levels. Before, it
+   * is r176's (radii 3 to 11, sigma the radius, the sum added with additive
+   * blending by its alpha): 3 × strength² times the levels, so a game
+   * authored on three.js r176 or older keeps its bloom at 1.29 with about
+   * strength² as the strength; since API_MINOR 30 `model` gives the older
+   * bloom exactly instead. Fields left out take the defaults. */
   export interface BloomSettings {
     /** 0–65504, default 1 (`intensity`, accepted too, is its earlier name). */
     strength?: number;
@@ -5242,6 +5424,17 @@ declare module "starhermit:scene" {
     resolution?: number;
     /** @deprecated The strength's earlier name. */
     intensity?: number;
+    /** Since API_MINOR 30 (a RangeError before): which three.js release's
+     * `UnrealBloomPass` to follow, default "r185". "r176" is the bloom of
+     * API_MINOR 28 and older: kernel radii 3, 5, 7, 9 and 11 with a sigma
+     * of the radius, normalized (nearly flat, so a small bright light
+     * spreads into a broad, squarish haze), the weighted sum added by its
+     * alpha (3 × strength² times the levels). "r160" is r176's with the
+     * high pass weighing light by Rec. 601 luma (0.299, 0.587, 0.114)
+     * where r176 and r185 take Rec. 709's. A port of a page on three.js
+     * r160 sets "r160" and keeps the page's strength as it is (not
+     * squared). */
+    model?: "r185" | "r176" | "r160";
   }
   /** Ground-truth ambient occlusion, three.js r176's `GTAOPass` with
    * `OUTPUT.Default` (its `updateGtaoMaterial` and `updatePdMaterial`
@@ -5302,6 +5495,17 @@ declare module "starhermit:scene" {
    * outer, d)`, `d` the length of the offset from the frame's center in
    * texture coordinates (0–1 across) with each axis times
    * `vignette.scale`. Fields left out change nothing (the clamp aside).
+   * Since API_MINOR 29 a linear grade also takes `levels` (the result
+   * times `levels[0]` plus `levels[1]` after the tints, a pass's
+   * `s = s * 0.98 + 0.015` lift) and `overRange: "keep"` (not clamped, and
+   * blended from the unclamped light with the light past 1 added back,
+   * `mix(c, s + max(c − 1, 0), amount)`, so over-bright light still
+   * reaches tone mapping), as games' grade passes often did; older games'
+   * grades ignore both. Since API_MINOR 29 too, with any effect but
+   * multisampling on, a Color background is in the scene's light as
+   * three.js's `RenderPass` clears its composer target to it: occlusion,
+   * bloom, the grade, its vignette and the output take it too (from
+   * API_MINOR 20 to 28 it shows as given, as a canvas without a composer).
    *
    * In `space` "display" (since API_MINOR 11) it works per channel on the
    * tone-mapped, sRGB-encoded color `c` (clamped to 0–1), as a web page's
@@ -5319,12 +5523,30 @@ declare module "starhermit:scene" {
    *   g ×= mix(shadows, highlights, smoothstep(split[0], split[1], l))
    *   g ×= mix(1, night.tint, n)
    *   g ×= 1 + lift.amount × smoothstep(lift.range[0], lift.range[1], l)
+   *   g = g × levels[0] + levels[1]    (since API_MINOR 30)
    *   g += flash                       (flashSpace "display" only)
    *   result = mix(c, clamp(g, 0, 1), amount) × the vignette's factor
    * (`mix(a, b, t) = a + (b − a)t`). Defaults leave each term out, so
    * "display" with defaults is the plain saturation and contrast grade.
    * The night desaturates before the split tints, so it does not grey
-   * them. `flash` is linear light added before tone mapping unless
+   * them. With `contrastCurve` "s" (since API_MINOR 30) the display grade
+   * starts from an S-curve instead of the slope, as ported pages' grade
+   * passes after `OutputPass` wrote it:
+   *   s = mix(c, c²(3 − 2c), contrast)    (contrast 0–1)
+   *   l = 0.299 s.r + 0.587 s.g + 0.114 s.b    (Rec. 601 luma of s)
+   * and everything above from `spare` on runs on s (in place of c) with
+   * this l and without the slope line; the result still blends from c. So
+   * royal-circuit's `vec3 s = mix(c, c * c * (3.0 - 2.0 * c), 0.22);
+   * float l = dot(s, vec3(0.299, 0.587, 0.114)); s = mix(vec3(l), s, 1.1);
+   * s *= mix(shadows, highlights, smoothstep(0.25, 0.85, l)); s = s * 0.98
+   * + 0.015; c = mix(c, s, 1.0);` is `{ space: "display", contrastCurve:
+   * "s", contrast: 0.22, saturation: 1.1, split: [0.25, 0.85], shadows,
+   * highlights, levels: [0.98, 0.015] }` exactly (c and the result are
+   * within 0–1 on an 8-bit canvas, so the clamp changes nothing). With
+   * `luma` "709" (since API_MINOR 31) the S-curve's l, in linear space or
+   * with `contrastCurve` "s", is Rec. 709 luma of s instead,
+   * `0.2126 s.r + 0.7152 s.g + 0.0722 s.b`, as pages such as city-fortune
+   * wrote theirs. `flash` is linear light added before tone mapping unless
    * `flashSpace` is "display". Where post effects use 8-bit color the
    * display grade still runs, without a linear flash (a display-space
    * flash stays). */
@@ -5332,8 +5554,37 @@ declare module "starhermit:scene" {
     /** Since API_MINOR 11, default "linear". */
     space?: "linear" | "display";
     /** Linear: the S-curve's weight, 0–1. Display: the slope about 0.5
-     * less one, −1–3. Default 0. */
+     * less one, −1–3, or with `contrastCurve` "s" the S-curve's weight,
+     * 0–1. Default 0. */
     contrast?: number;
+    /** Since API_MINOR 30 (a RangeError before): the contrast's form.
+     * "linear" (display space only, its default) is the slope about 0.5
+     * with Rec. 709 luma; "s" (linear space's only form, accepted there)
+     * blends in `c²(3 − 2c)` by `contrast` first and takes Rec. 601 luma of
+     * that curved color, as three.js grade passes do: it flattens near
+     * black where a slope crushes the darks. */
+    contrastCurve?: "linear" | "s";
+    /** Since API_MINOR 31 (a RangeError before): the S-curved color's luma,
+     * which saturation and the split tints use. "601" (the default) is
+     * `0.299, 0.587, 0.114`; "709" is `0.2126, 0.7152, 0.0722`, as some
+     * pages' grade passes take it: city-fortune's linear pass
+     * `float l = dot(s, vec3(0.2126, 0.7152, 0.0722));` is `luma: "709"`.
+     * Linear space, or display space with `contrastCurve` "s" only (the
+     * display slope has Rec. 709 luma already; a RangeError there). */
+    luma?: "601" | "709";
+    /** Since API_MINOR 31 (a RangeError before): a key color the grade
+     * leaves alone, as a page's grade pass keeps its backdrop. Where the
+     * grade's input, clamped to 0..1 in the grade's space, lies within
+     * `range[0]` of `color` (Euclidean RGB distance) it is kept, ungraded
+     * and unvignetted, fading to the graded color by `range[1]` (default
+     * [0.012, 0.05], ascending within 0..2):
+     * `mix(graded, input, 1 - smoothstep(range[0], range[1], distance(input, color)))`.
+     * `color` is any Color form; a display grade compares it encoded (as
+     * `convertLinearToSRGB`), a linear grade as linear light, within 0..1.
+     * fourfold's `uKeep` pass is `{ space: "display", …, keep: { color:
+     * theme.bg } }` with the background cleared to the color ACES maps onto
+     * it. */
+    keep?: { color: Color | number | string | readonly [number, number, number] | { r: number; g: number; b: number }; range?: [number, number] };
     /** 0–4, default 1. */
     saturation?: number;
     /** RGB multipliers (linear light, or encoded values in display space),
@@ -5394,6 +5645,20 @@ declare module "starhermit:scene" {
      * `1 + amount` (0–4, default 0) as luma rises through `range` (rising,
      * each 0–1, default [0.5, 1]). */
     lift?: { amount?: number; range?: readonly [number, number] };
+    /** The graded result's scale (0–4) and offset (−1–1), default
+     * [1, 0]: since API_MINOR 29 in linear space, after the tints; since
+     * API_MINOR 30 in display space too, on the encoded color after the
+     * tints and the lift, as a page's grade pass after `OutputPass` (such
+     * as `s = s * 0.98 + 0.015`) lifts it. A display grade's `levels`
+     * before API_MINOR 30 is a RangeError. */
+    levels?: readonly [number, number];
+    /** Since API_MINOR 29, linear space only (display-space color is
+     * tone mapped and encoded, within 0–1, so there is nothing past 1 to
+     * keep: a RangeError there): "clip" (the default) clamps
+     * the light and the graded result to 0–1; "keep" grades the clamped
+     * light but adds the light past 1 back and blends from the unclamped
+     * light, as a pass writing `mix(c, s + max(c − 1, 0), amount)`. */
+    overRange?: "clip" | "keep";
   }
   /** `renderer.post`'s program (since API_MINOR 9), in the custom
    * materials' WGSL and sandbox. `pixel` declares
@@ -5421,7 +5686,8 @@ declare module "starhermit:scene" {
 
   /** How the scene is drawn. The game decides the camera, lights, shadows
    * on or off, fog, tone mapping, materials and the post effects, in
-   * three.js r176's `EffectComposer` order (since API_MINOR 4): the scene
+   * three.js's `EffectComposer` order (since API_MINOR 4; r185's passes
+   * since API_MINOR 29, r176's before): the scene
    * in linear half-float color (multisampled with `antialias: "msaa"`),
    * `ao`, `bloom`, `grade`, the output (`toneMapping`, exposure, sRGB) and
    * FXAA or SMAA; the player's graphics settings decide the shadow maps'
