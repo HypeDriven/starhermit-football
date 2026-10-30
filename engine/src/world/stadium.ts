@@ -93,7 +93,8 @@ const TOWER_H = 30;
 // budget's aoRes, bloom (strength 0.55, radius 0.45, threshold 1.3) at its
 // bloomRes (only over-bright light, lamp faces, flashes and hot highlights,
 // blooms), the grade, the output, then SMAA or FXAA (MSAA on Low and Ultra).
-const BLOOM = { strength: 0.55, radius: 0.45, threshold: 1.3 };
+// three r176 page: minor 29 bloom follows r185 UnrealBloomPass, so the page strength is squared (pages on r177+ keep theirs).
+const BLOOM = { strength: 0.55 * 0.55, radius: 0.45, threshold: 1.3 };
 function gtao(high: boolean, resolution: number) {
   return {
     blendIntensity: high ? 0.85 : 0.7, radius: 1.2, distanceExponent: 1.6, thickness: 1.5, scale: 1.0,
