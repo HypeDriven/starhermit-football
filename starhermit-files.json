@@ -57,9 +57,9 @@
     "engine/src/world/resources.ts": {"sha256": "d62b05df73c6c1ca84a96ff352100cb4fbdad1c6ca180c36ebf028131ab4b542", "size": 1219},
     "engine/src/world/rig.ts": {"sha256": "dbcb6a5c4b3362ef5a9bae7383c61a06a2b4abe88a0f926022afa0575fe1fae7", "size": 7537},
     "engine/src/world/rigMath.ts": {"sha256": "6f6f1292664caae70c2e4358fde4e2c7d42452857a7f0b7ac36423ecc6d76698", "size": 12829},
-    "engine/src/world/stadium.ts": {"sha256": "73c9ba824f59aa5effc4950fb4e168996bc16f7a9c7a8827123a6325f9c3a5c4", "size": 62745},
+    "engine/src/world/stadium.ts": {"sha256": "379d6d27c268a47609e781fbbbcc4af0ec7a2632fe23d3d77b60cd9ff5048eaf", "size": 62763},
     "icon.png": {"sha256": "2c8eaa4a5320ab35826f421574675909ac4c59a7be22cb83240e49038208e1a8", "size": 9579},
-    "index.html": {"sha256": "a02bb9315eed4ac5d9fb571ba623e5f42aecd256b7a4db0d63c9ee6f117aeb80", "size": 1772},
+    "index.html": {"sha256": "3e7d11937de427b19fa57c24ec7833273b675f672f1b630485c723c48beb025d", "size": 1772},
     "leaderboards.json": {"sha256": "7d871b691e91dbb0dd69c14f512aab836c896073cc7b614e9b2fd011942d8dd0", "size": 137},
     "server.js": {"sha256": "a95928a4a8c5f7baf7abb7faca077f87ebcca4722db029cec7fe2ea6a3254bd9", "size": 78992},
     "sfx/ball-bounce.opus": {"sha256": "23300d17f503532823ad0480808e34fa2694fc7710195bf0209af79b04303ae6", "size": 12266},
@@ -85,7 +85,7 @@
     "sfx/whistle-short.opus": {"sha256": "a6d8da0535a483f98cf9485749beed378857a70809ce3291807dcc820b4bd24c", "size": 12965},
     "sh-language.js": {"sha256": "307a2066b6df3cd7fd9b41202d32342389583059386a67436b12d07d50740b01", "size": 13930},
     "spec.md": {"sha256": "5a748dc221778a07caf150bf356f3dce9f7d329e7241d2da0605fa7267f4b1dc", "size": 47404},
-    "starhermit.txt": {"sha256": "db9b8a4067f30a28f3b4f96fc4614f23bffe194dc0ac6dedb06e36531550fd90", "size": 3137}
+    "starhermit.txt": {"sha256": "4dd0beea977c18842a62182a8da13d219d6035e724b778f0b74e9b823bdd33bc", "size": 3137}
   },
   "excluded": ["engine/starhermit.d.ts", "engine/tests/", "engine/tsconfig.json", "node_modules/", "package-lock.json", "package.json", "tests/"],
   "format": 1

@@ -93,8 +93,8 @@ const TOWER_H = 30;
 // budget's aoRes, bloom (strength 0.55, radius 0.45, threshold 1.3) at its
 // bloomRes (only over-bright light, lamp faces, flashes and hot highlights,
 // blooms), the grade, the output, then SMAA or FXAA (MSAA on Low and Ultra).
-// three r176 page: minor 29 bloom follows r185 UnrealBloomPass, so the page strength is squared (pages on r177+ keep theirs).
-const BLOOM = { strength: 0.55 * 0.55, radius: 0.45, threshold: 1.3 };
+// three r176 page: the engine's r176 UnrealBloomPass model (minor 30) at the page's own strength.
+const BLOOM = { model: "r176" as const, strength: 0.55, radius: 0.45, threshold: 1.3 };
 function gtao(high: boolean, resolution: number) {
   return {
     blendIntensity: high ? 0.85 : 0.7, radius: 1.2, distanceExponent: 1.6, thickness: 1.5, scale: 1.0,
@@ -106,7 +106,7 @@ function gtao(high: boolean, resolution: number) {
 }
 // GradeShader: gentle S-curve, more saturation, cool shadows / warm highlights, vignette 0.26.
 const GRADE = {
-  contrast: 0.22, saturation: 1.12, shadows: [0.95, 0.99, 1.06] as const, highlights: [1.04, 1.01, 0.95] as const, split: [0.15, 0.8] as const,
+  contrastCurve: "s" as const, contrast: 0.22, saturation: 1.12, shadows: [0.95, 0.99, 1.06] as const, highlights: [1.04, 1.01, 0.95] as const, split: [0.15, 0.8] as const,
   amount: 1, vignette: { amount: 0.26, inner: 0.38, outer: 0.9, scale: [1.1, 1.0] as const },
 };
 /** The canvas pixel bound (8,388,608 per canvas). */
