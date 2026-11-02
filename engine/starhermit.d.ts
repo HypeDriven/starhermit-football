@@ -1,4 +1,4 @@
-// Copied unchanged below this note from the StarHermit runtime 1.29.0
+// Copied unchanged below this note from the StarHermit runtime 1.33.1
 // (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -494,11 +494,65 @@ declare module "starhermit:engine" {
    * reference machine's work, two frames' default fuel), so compress large
    * data across frames. The output is at most the input plus 0.1% and
    * 1 KiB. For text in base64: `btoa(String.fromCharCode(...bytes))` (in
-   * slices for large outputs). */
+   * slices for large outputs).
+   *
+   * Since API_MINOR 33, `level` (an integer 0–9, else a RangeError)
+   * compresses as `createCompressor` does at that level, in one piece:
+   * dynamic Huffman codes and zlib's match search, about a quarter
+   * smaller than without on text such as OBJ meshes (a 213 MB OBJ export:
+   * 58.3 MB at 1, 53.0 MB at 6, as zlib's 6, against 72.8 MB). Without `level` (and for older games, which
+   * ignore it) `compress` makes the bytes it always made. */
   export function compress(
     data: string | ArrayBuffer | ArrayBufferView,
     format: "gzip" | "deflate" | "deflate-raw",
+    options?: { level?: number },
   ): Uint8Array;
+  /** Since API_MINOR 33 (undefined before): a streaming compressor in
+   * `compress`'s formats, for input of any length in bounded pieces (a
+   * ZIP entry's data with `"deflate-raw"`, a `.gz` file). Each `write`
+   * takes at most 16 MiB (a RangeError past it) and returns the
+   * compressed bytes it completed, often none until a block of about 16K
+   * symbols fills; `finish` returns the rest with the format's trailer.
+   * The 32 KiB window carries across writes, so how the input is cut
+   * changes nothing: the same input gives the same bytes in any pieces,
+   * natively and in browsers, which zlib, Node, Python and browsers'
+   * `DecompressionStream` read. Memory stays about 1 MiB plus the
+   * current write and the open block's input (at most 4 MiB).
+   *
+   * `level` is 0 (stored, no compression) to 9 (smallest, slowest), 6 by
+   * default, as zlib's: levels 1–3 search greedily, 4–9 lazily, and each
+   * block takes the smallest of stored, fixed and dynamic Huffman codes.
+   * Fuel per input byte follows the level (1 instruction at 0, 2 at 1, 6
+   * at 6, 22 at 9: about 11, 52 and 200 ns a byte on the reference
+   * machine), so write large data across frames. At most 16 compressors
+   * are open at once (a RangeError past it): `finish` or `cancel` each
+   * one; a write or finish after either is a TypeError. */
+  export function createCompressor(
+    format: "gzip" | "deflate" | "deflate-raw",
+    options?: { level?: number },
+  ): Compressor;
+  /** A streaming compressor (since API_MINOR 33; `createCompressor`). */
+  export interface Compressor {
+    /** Compresses `data` (a string as UTF-8; at most 16 MiB): the bytes
+     * completed, possibly none. */
+    write(data: string | ArrayBuffer | ArrayBufferView): Uint8Array;
+    /** Ends the stream: the last bytes, then the compressor is let go. */
+    finish(): Uint8Array;
+    /** Lets the compressor go unfinished. */
+    cancel(): void;
+    /** Input bytes written so far. */
+    readonly bytesIn: number;
+    /** Output bytes returned so far. */
+    readonly bytesOut: number;
+    /** The CRC-32 of the input so far (unsigned): what a ZIP entry's
+     * header or data descriptor records. */
+    readonly crc32: number;
+  }
+  /** Since API_MINOR 33 (undefined before): the IEEE CRC-32 (ZIP, gzip,
+   * PNG) of `data` (a string as UTF-8; at most 256 MiB), unsigned, going
+   * on from `previous`, the CRC-32 of the bytes before (0 to begin), as
+   * zlib's `crc32(previous, data)`. */
+  export function crc32(data: string | ArrayBuffer | ArrayBufferView, previous?: number): number;
 
   // -- Frame ----------------------------------------------------------------
   /** The reference's four presets: each graphics level is one of them
@@ -659,7 +713,15 @@ declare module "starhermit:engine" {
      * game's worker and its heap limit is the browser's own, not
      * `game.limits.heapMib`; before, they read 0 and the manifest's
      * limit. Test for them (`stats().heapBytes ?? …`) rather than
-     * reading a number. */
+     * reading a number. `heapBytes` counts garbage until the collector,
+     * which works in small steps as the game allocates, reaches it, so it
+     * is an upper bound on live data that can stay high for a while after
+     * the game drops a large structure (finding the live figure exactly
+     * takes a whole collection: about 0.4 s for a full 1 GiB heap). Do not
+     * wait for it to fall before reserving a worker: a reservation that
+     * does not fit collects garbage first (`worker()`, all minors), and
+     * since API_MINOR 33 `await worker.terminate()` says when a worker's
+     * heap is back (`heapLimitBytes` then counts it). */
     readonly heapBytes?: number;
     readonly heapLimitBytes?: number;
   }
@@ -852,7 +914,8 @@ declare module "starhermit:engine" {
   export type LinkOutcome = "opened" | "cancelled" | "unapproved" | "unavailable";
   /** Opens an external link the manifest declares, by its id
    * (`engine.link.<id>=<https URL>` in starhermit.txt; since API_MINOR 24,
-   * and undefined for games declaring an older `engine.minor`). The game
+   * and undefined for games declaring an older `engine.minor`; at most 16
+   * links, 256 from API_MINOR 33, each approved for its exact URL). The game
    * never passes a URL: the runtime opens only the manifest's, once a
    * StarHermit moderator approved it for the game (asked at each open,
    * which needs `engine.capabilities=platform`) and the player pressed
@@ -891,6 +954,34 @@ declare module "starhermit:engine" {
   export interface BusyOptions {
     /** How long a call may run while busy before the runtime calls the
      * game not responding: 1 to 600 seconds, 60 by default. */
+    seconds?: number;
+  }
+  /** Readiness for checks (since API_MINOR 33; undefined for games
+   * declaring an older minor, which are ready from the start). A game
+   * whose first useful frame depends on work it does not finish in its
+   * start (a worker making the first world, a level streamed in) calls
+   * `setReady(false, { label })` before that work begins and
+   * `setReady(true)` once its result is shown; it holds across frames
+   * until changed, and calling it again while not ready changes the label
+   * and bound without restarting the wait. `starhermit check` plays on
+   * past its 120 frames, and a `--render-check` without a play script past
+   * its 5, until the game is ready; a play script waits where it has a
+   * `ready` step (natively and in browsers). Each fails once
+   * `options.seconds` (1 to 600, 60 by default; other values throw a
+   * RangeError) of wall time have passed since the game said it was not
+   * ready: "the game was not ready ("Growing the first tree"): it said so
+   * with engine.setReady(false) 61 s ago and had not said setReady(true)
+   * within the 60 s it asked for". Players see nothing of it (show your
+   * own progress, or `setBusy` for a long call), and it does not keep the
+   * not-responding screen away. */
+  export function setReady(ready: boolean, options?: ReadyOptions): void;
+  /** `setReady(false)`'s options (since API_MINOR 33). */
+  export interface ReadyOptions {
+    /** What the game waits for, named when a check gives up (at most 200
+     * characters). */
+    label?: string;
+    /** How long a check waits for the game to be ready: 1 to 600 seconds,
+     * 60 by default. Ask for what the slowest device needs. */
     seconds?: number;
   }
 
@@ -1040,6 +1131,39 @@ declare module "starhermit:engine" {
      * then keeps it. A file the runtime could not write rejects with
      * `NotReadableError`. */
     saveAs(name: string, data: string | ArrayBuffer | ArrayBufferView, options?: { type?: string }): Promise<string | null>;
+    /** Since API_MINOR 33 (undefined before): a streamed save. The player
+     * picks the file now, as for `saveAs` (in their press: call it while
+     * handling it, before preparing anything), and the game then writes
+     * it in pieces for as long as it takes and closes it: a writer once
+     * the file is open, under the name the player picked, or null when
+     * they cancelled. `name` and `type` are as `saveAs`'s (a TypeError
+     * otherwise). One save stream is open at a time (an
+     * `InvalidStateError` while another is open or being picked). Each
+     * `write` takes at most 16 MiB (a RangeError past it), at most 64 MiB
+     * of writes may wait to be written (a RangeError: await each write's
+     * promise), and a stream holds at most 2 GiB (2,048 MiB) in all (a
+     * write past it rejects with `QuotaExceededError`).
+     *
+     * Natively the runtime's picker picks the file, and the bytes go to a
+     * hidden file beside it, written on a thread of the runtime's own;
+     * `close` syncs it and renames it over the picked file, so that file
+     * is either as it was or the whole save, never part of one. `abort`,
+     * a write that failed, the game restarting or the runtime quitting
+     * removes the hidden file. In a browser with the File System Access
+     * save picker (Chrome and Edge on the desktop) the browser's picker
+     * picks it (after the press has passed, a bar of the page's asks for
+     * another) and the browser writes beside it and moves it into place
+     * at the close the same way (Chrome may leave the empty file its
+     * picker made for a new name). Other browsers, and pages in
+     * cross-origin frames, have no such picker: there the writer opens at
+     * once with the game's `name`, and `close` hands the whole file to
+     * the browser as a download, which the browser saves (or asks where).
+     * Until then the page writes it to a temporary file of the origin's
+     * private file system, so memory holds only the writes waiting, or,
+     * in a browser that cannot write one, keeps the writes as Blobs, the
+     * whole file at once (Chrome keeps large Blobs on disk, others in
+     * memory). Aborting there downloads nothing. */
+    saveStream(name: string, options?: { type?: string }): Promise<SaveWriter | null>;
     /** Reads a file the player picks: its name and bytes (at most 64 MiB:
      * the picker refuses larger files, and in a browser the promise rejects
      * with a RangeError), or null when they cancelled. `accept` lists
@@ -1086,6 +1210,27 @@ declare module "starhermit:engine" {
      * listener runs with the frame's other events; unsubscribing the last
      * listener stops the drops. */
     onDrop(listener: (files: readonly SharedFile[]) => void, options?: { accept?: readonly string[] }): Unsubscribe;
+  }
+  /** A streamed save's writer (since API_MINOR 33; `files.saveStream`).
+   * Writes go out in the order made. A write that failed (the disk full,
+   * the file gone) rejects, and so does every later write and `close`:
+   * `abort` then. Writing or closing after `close` or `abort` is an
+   * `InvalidStateError`. */
+  export interface SaveWriter {
+    /** The name the player saved under (in a browser without a save
+     * picker, the game's `name`). */
+    readonly name: string;
+    /** Bytes handed to `write` so far. */
+    readonly bytesWritten: number;
+    /** Writes `data` (a string as UTF-8, an `ArrayBuffer` or a typed
+     * array; at most 16 MiB) at the end of the file; settles once the
+     * bytes are written. */
+    write(data: string | ArrayBuffer | ArrayBufferView): Promise<void>;
+    /** After the writes, saves the file whole: the name it was saved
+     * under. */
+    close(): Promise<string>;
+    /** Drops the file: nothing of it is saved (a no-op after `close`). */
+    abort(): Promise<void>;
   }
   /** A file the player shared (since API_MINOR 20; `files.open` with
    * `multiple` or `folder`, `files.onDrop`). */
@@ -2678,6 +2823,110 @@ declare module "starhermit:scene" {
       set data(value: Uint8Array | Uint8ClampedArray | Uint16Array | Float32Array | null);
     };
   }
+  /** A volume sampled on every backend through a padded RGBA8 slice atlas.
+   * Dimensions are 1..128. One duplicated texel surrounds each slice; z slices are
+   * tiled in ceil(sqrt(depth)) columns, in increasing z. Pack data offline.
+   * R/G/B/A are application-defined linear channels (e.g. density/emission/temperature).
+   * Sampling clamps to the volume edge, with trilinear filtering and no mipmaps. */
+  export function volumeAtlasLayout(width: number, height: number, depth: number): {
+    width: number; height: number; columns: number; rows: number;
+  };
+  export class VolumeTexture extends DataTexture {
+    readonly volumeWidth: number;
+    readonly volumeHeight: number;
+    readonly volumeDepth: number;
+    constructor(packedRgba: Uint8Array, width: number, height: number, depth: number);
+    /** WGSL sampling function for a uniform bound with textureName.
+     * Explicit level reads are safe in bounded ray-march loops. */
+    samplingShader(textureName: string, functionName?: string): string;
+  }
+  /** A staged volume frame in shared GPU storage; rect is pixel x, y, packed width, packed height. */
+  export interface VolumeAtlasFrame {
+    readonly width: number; readonly height: number; readonly depth: number;
+    readonly rect: readonly [number, number, number, number];
+    readonly ready: boolean;
+  }
+  /** Raw RG density/emission storage with replicated slice gutters. Up to 512 reserved frames.
+   * Stage takes ownership of packed bytes until their copy is queued. Release unused frames to reuse space.
+   * Flush bounds uploads per game frame and waits when the host still has queued asset uploads. */
+  export class VolumeAtlas {
+    readonly width: number; readonly height: number; readonly texture: Texture; readonly byteLength: number;
+    constructor(width: number, height: number);
+    reserve(width: number, height: number, depth: number): VolumeAtlasFrame | null;
+    upload(frame: VolumeAtlasFrame, packedRgba: Uint8Array): void;
+    stage(packedRgba: Uint8Array, width: number, height: number, depth: number): VolumeAtlasFrame | null;
+    canFit(width: number, height: number, depth: number, count?: number): boolean;
+    has(frame: VolumeAtlasFrame): boolean;
+    flush(maxUploads?: number): number;
+    release(frame: VolumeAtlasFrame): void;
+    clear(): void;
+    readonly stats: {allocatedBytes: number; usedBytes: number; frames: number; pending: number; uploadBytes: number};
+    dispose(): void;
+  }
+  export interface VolumeOptions {
+    steps?: number; shadowSteps?: number; extinction?: number; emission?: number; density?: number;
+  }
+  /** Lit ray-marched volume with scene-depth clipping, emission, self-shadowing,
+   * and interpolation between shared animation frames. Unit box centred at the origin.
+   * Call updateVolume after changing its transform/camera, before rendering.
+   * Per-volume transparency follows the scene's back-to-front mesh ordering. */
+  export class VolumeMesh extends Mesh {
+    readonly volumeMaterial: ShaderMaterial;
+    /** Optional red-channel coverage over world XZ. Bounds are minX, minZ, inverseWidth, inverseDepth. */
+    worldMask: Texture | null;
+    readonly maskBounds: Vector4;
+    maskCutoff: number;
+    readonly sunDirection: Vector3;
+    readonly sunColor: Color;
+    readonly ambientColor: Color;
+    readonly smokeColor: Color;
+    readonly emissionColor: Color;
+    steps: number; shadowSteps: number; extinction: number; density: number; emission: number;
+    blend: number; opacity: number;
+    constructor(first: VolumeTexture, second?: VolumeTexture, options?: VolumeOptions);
+    setFrames(first: VolumeTexture, second?: VolumeTexture): void;
+    updateVolume(camera?: Camera | null): void;
+    /** Releases geometry/material; shared textures remain owned by the asset cache. */
+    dispose(): void;
+  }
+  /** A world-space field in a VolumeBatch. Its frames belong to that batch's atlas. */
+  export class VolumeInstance extends Object3D {
+    first: VolumeAtlasFrame; second: VolumeAtlasFrame;
+    readonly smokeColor: Color; readonly emissionColor: Color;
+    extinction: number; density: number; emission: number; blend: number; opacity: number;
+    readonly disposed: boolean;
+    constructor(first: VolumeAtlasFrame, second?: VolumeAtlasFrame, options?: VolumeOptions);
+    setFrames(first: VolumeAtlasFrame, second?: VolumeAtlasFrame): void;
+    dispose(): void;
+  }
+  /** Integrates up to 16 overlapping fields in one ray, with mutual directional shadows.
+   * Empty gaps between fields consume no ray samples. Supports perspective and orthographic cameras.
+   * The batch owns its bounding transform; keep instances outside its descendant tree.
+   * Shared frame storage remains owned by its VolumeAtlas. */
+  export class VolumeBatch extends Mesh {
+    readonly volumeMaterial: ShaderMaterial; readonly atlas: VolumeAtlas;
+    readonly sunDirection: Vector3; readonly sunColor: Color; readonly ambientColor: Color;
+    worldMask: Texture | null; readonly maskBounds: Vector4; maskCutoff: number;
+    steps: number; shadowSteps: number; readonly count: number;
+    /** Run volumeMaterial.fogShader at the opacity-weighted ray depth; keep material.fog false. */
+    fogAtDepth: boolean;
+    sampleJitter: number; depthOutput: boolean;
+    constructor(atlas: VolumeAtlas, options?: VolumeOptions);
+    setInstances(instances: readonly VolumeInstance[]): void;
+    updateVolume(camera?: Camera | null): void;
+    dispose(): void;
+  }
+  /** Half-float volume history and bilateral upsampling. Six targets use 30 bytes per pixel.
+   * Add beside its batch and call render after batch.updateVolume. Moving cameras use the direct batch.
+   * Owns its targets, geometry and materials; does not own batch/atlas. */
+  export class VolumeLayer extends Mesh {
+    readonly batch: VolumeBatch; readonly width: number; readonly height: number; readonly allocatedBytes: number;
+    historyWeight: number; readonly historyFrames: number; readonly shaderError: string | null;
+    constructor(batch: VolumeBatch, width: number, height: number);
+    render(camera?: Camera | null): boolean;
+    reset(): void;
+    dispose(): void;
+  }
   /** Since API_MINOR 25: three.js's `DataArrayTexture`, `depth` layers of
    * `width × height` texels in one texture (`width × height × depth ×
    * channels` values, layer after layer; a TypeError before API_MINOR 25).
@@ -2811,9 +3060,10 @@ declare module "starhermit:scene" {
    * lights, as three.js r16x games constructed it). A port of three.js
    * r163 or later, where the light is always 900, passes the renderer.
    * Before API_MINOR 18 the light is 900 either way. three.js r183 and
-   * later lower the room by setting `position.y = -3.5`; here `position` is
-   * (0, 0, 0), as in r16x, and only moves the room, so an r183+ port sets
-   * it. An r155–r162 port keeps the constructor's argument as its page had
+   * later lower the room by setting `position.y = -3.5`; since API_MINOR
+   * 32 `position` starts there too (and environments light materials as
+   * three.js r185's PMREM does: spec rendering-and-quality.html#env-specular-1-32);
+   * before, it is (0, 0, 0), as in r16x, and an r183+ port sets it. An r155–r162 port keeps the constructor's argument as its page had
    * it: adding the renderer lights what the environment lights about 1.6 to
    * 3 times as brightly (spec: rendering-and-quality.html#environment-ports). */
   export class RoomEnvironment {
@@ -3183,6 +3433,97 @@ declare module "starhermit:scene" {
   export class Uint32BufferAttribute extends BufferAttribute {
     constructor(array: ArrayLike<number> | number, itemSize: number, normalized?: boolean);
   }
+  /** Items of `stride` floats sharing one Float32Array (three.js r185's
+   * InterleavedBuffer; since API_MINOR 33, a TypeError before): each of its
+   * InterleavedBufferAttributes reads `itemSize` floats at its `offset`
+   * within every item. A geometry whose attributes all share one buffer
+   * crosses into the runtime as that one array, read there where its
+   * attributes lie: the GPU holds the same mesh, byte for byte and in the
+   * same mesh bytes, as separate Float32 BufferAttributes of those values
+   * would make (positions 12 bytes a vertex, normals 12, uv 8, color and
+   * custom 16), so the game never splits its vertices into arrays of their
+   * own. Float32Array only; at most 4,096 floats an item. */
+  export class InterleavedBuffer {
+    constructor(array: Float32Array, stride: number);
+    readonly isInterleavedBuffer: true;
+    /** The values. Setting null releases them (in `onUpload`, as a
+     * BufferAttribute's): the GPU keeps its copy, which draws on, and
+     * reading them, or uploading the geometry again, is a TypeError.
+     * Setting a Float32Array of the same length replaces them. */
+    get array(): Float32Array;
+    set array(value: Float32Array | null);
+    stride: number;
+    /** Its items: the array's length over the stride. */
+    readonly count: number;
+    version: number;
+    readonly uuid: string;
+    usage: number;
+    /** Set after changing the values to upload the geometry again. */
+    needsUpdate: boolean;
+    setUsage(usage: number): this;
+    /** three.js's partial-update hint, kept and cleared as three.js does:
+     * a changed buffer uploads whole. For bounded uploads of a large
+     * geometry use a StreamingGeometry's pages. */
+    readonly updateRanges: { start: number; count: number }[];
+    addUpdateRange(start: number, count: number): void;
+    clearUpdateRanges(): void;
+    /** Called, with the buffer as `this`, once per upload of a geometry
+     * using it (three.js calls the buffer's, not its attributes'):
+     * `buffer.onUpload(function () { this.array = null; })` lets the
+     * values go from the game's heap. */
+    onUpload(callback: (this: InterleavedBuffer) => void): this;
+    copy(source: InterleavedBuffer): this;
+    copyAt(index1: number, interleavedBuffer: InterleavedBuffer, index2: number): this;
+    set(value: ArrayLike<number>, offset?: number): this;
+    /** A buffer over a copy of the values; buffers of one ArrayBuffer
+     * cloned with the same `data` share one copy (three.js). */
+    clone(data?: object): InterleavedBuffer;
+    toJSON(data?: object): { uuid: string; buffer: string; type: string; stride: number };
+  }
+  /** `itemSize` floats an item of an InterleavedBuffer at `offset` within
+   * each item (three.js r185's InterleavedBufferAttribute; since API_MINOR
+   * 33): a geometry's attribute, as a BufferAttribute is (not an index).
+   * `offset + itemSize` lies within the stride (TypeError). Its values are
+   * its buffer's: `array`, `count`, `needsUpdate` and `onUpload` are the
+   * buffer's. */
+  export class InterleavedBufferAttribute {
+    constructor(interleavedBuffer: InterleavedBuffer, itemSize: number, offset: number, normalized?: boolean);
+    readonly isInterleavedBufferAttribute: true;
+    name: string;
+    readonly data: InterleavedBuffer;
+    itemSize: number;
+    offset: number;
+    normalized: boolean;
+    readonly count: number;
+    readonly array: Float32Array;
+    needsUpdate: boolean;
+    onUpload(callback: (this: InterleavedBuffer) => void): this;
+    getX(index: number): number;
+    getY(index: number): number;
+    getZ(index: number): number;
+    getW(index: number): number;
+    setX(index: number, x: number): this;
+    setY(index: number, y: number): this;
+    setZ(index: number, z: number): this;
+    setW(index: number, w: number): this;
+    setXY(index: number, x: number, y: number): this;
+    setXYZ(index: number, x: number, y: number, z: number): this;
+    setXYZW(index: number, x: number, y: number, z: number, w: number): this;
+    getComponent(index: number, component: number): number;
+    setComponent(index: number, component: number, value: number): this;
+    applyMatrix4(m: Matrix4): this;
+    applyNormalMatrix(m: Matrix3): this;
+    transformDirection(m: Matrix4): this;
+    /** Without `data`, a BufferAttribute of its values on their own (it
+     * logs that it de-interleaves, as three.js); with it, an attribute of
+     * a clone of its buffer that attributes cloned with the same `data`
+     * share. */
+    clone(data?: object): BufferAttribute | InterleavedBufferAttribute;
+    toJSON(data?: object): unknown;
+  }
+  /** A geometry's attribute: an array of its own or a share of an
+   * interleaved one (since API_MINOR 33). */
+  export type GeometryAttribute = BufferAttribute | InterleavedBufferAttribute;
   export type AttributeName = "position" | "normal" | "uv" | "color" | "custom" | "tangent" | "skinIndex" | "skinWeight";
   export class BufferGeometry {
     constructor();
@@ -3198,9 +3539,9 @@ declare module "starhermit:scene" {
      * (4, what `computeTangents` makes; since API_MINOR 20) is kept and not
      * drawn; `skinIndex` and `skinWeight` (4 a vertex: a SkinnedMesh's
      * joints and weights; since API_MINOR 25); other names throw a
-     * TypeError. */
-    setAttribute(name: AttributeName, attribute: BufferAttribute): this;
-    getAttribute(name: AttributeName): BufferAttribute | undefined;
+     * TypeError. Since API_MINOR 33 an InterleavedBufferAttribute too. */
+    setAttribute(name: AttributeName, attribute: GeometryAttribute): this;
+    getAttribute(name: AttributeName): GeometryAttribute | undefined;
     /** A float `position` attribute of the points (z 0 for Vector2s), or,
      * when there is one, its first vertices set to them (as many as it
      * holds; a warning past it), as three.js (since API_MINOR 20):
@@ -3225,7 +3566,7 @@ declare module "starhermit:scene" {
     /** The index (`getIndex()`) and the attributes by name, as three.js
      * has them. */
     readonly index: BufferAttribute | null;
-    readonly attributes: Readonly<Record<string, BufferAttribute>>;
+    readonly attributes: Readonly<Record<string, GeometryAttribute>>;
     computeVertexNormals(): void;
     /** Model-space bounding sphere (for culling, picking and shadows): a
      * Sphere since API_MINOR 18. */
@@ -3240,7 +3581,9 @@ declare module "starhermit:scene" {
      * Null (the default) culls by the vertices. One with NaN or infinite
      * values, or an empty one (a negative radius), culls nothing, as
      * three.js draws such meshes (earlier engines threw). Changing it
-     * uploads the geometry again. A geometry without attributes (see
+     * changes how the meshes cull, without uploading the geometry again
+     * (since 1.33's fix, every minor; before, it uploaded it again from
+     * its values, a TypeError once `onUpload` had released them). A geometry without attributes (see
      * `drawRange`) culls by it alone: without it, it is never culled. */
     boundingSphere: Sphere | { center: Vector3; radius: number } | null;
     translate(x: number, y: number, z: number): this;
@@ -3297,10 +3640,74 @@ declare module "starhermit:scene" {
      * the `materialIndex`th material of a mesh's material array (three.js;
      * since API_MINOR 17). A mesh with one material draws the whole
      * geometry whatever its groups. Copied by `clone`, `copy` and
-     * `toNonIndexed`. */
+     * `toNonIndexed`. Each group draws a range of the geometry's one
+     * uploaded mesh (since 1.33's fix, at every minor from 18: before,
+     * each group was a mesh of its own made from the CPU values, so
+     * groups or a material array set after `onUpload` released them threw
+     * a TypeError, and each group held another copy of the vertices on the
+     * GPU); an indexed geometry without normals in a game before
+     * API_MINOR 33 keeps a mesh a group, its normals made from the group's
+     * triangles as before. */
     groups: { start: number; count: number; materialIndex: number }[];
     addGroup(start: number, count: number, materialIndex?: number): void;
     clearGroups(): void;
+  }
+  /** A geometry the engine holds in pages (StarHermit's; since API_MINOR
+   * 33, a TypeError before; three.js has none): each page's interleaved
+   * vertices, and with an index capacity its own indices numbering them (0
+   * its first vertex), go to the GPU when `addPage` takes them, a mesh of
+   * their own read once from the page (no copy kept in the game's heap,
+   * none made there), and the geometry draws its pages in order as one,
+   * up to the capacity it declares. A page is one upload of at most
+   * 1,048,576 vertices and 3,145,728 indices (and the frame's 96 MiB
+   * upload bound; pages made past it wait for the next frames, drawn once
+   * sent), so a model of any size within the mesh budget streams in over
+   * as many frames as its pages, and `setPage` replaces one page alone
+   * (a bounded update). With `transfer` the engine takes the page's
+   * ArrayBuffers (the vertices', and the indices' if they have one of
+   * their own): detached once read, their memory let go at once, as a
+   * worker message's transfer list does; they must be ArrayBuffers of
+   * their own (TypeError before anything is read).
+   *
+   * Its attributes are InterleavedBufferAttributes of `buffer` (stride
+   * floats a vertex, holding no values), set before the first page;
+   * `position` (3 floats) is required. `drawRange` and `groups` count the
+   * pages' elements (indices, or vertices without them) one page after
+   * another; a material array draws them, as a BufferGeometry's. Each page
+   * counts as a mesh against the mesh budget and its bytes as any
+   * geometry's (the same as separate Float32 attributes); at most 256
+   * pages (RangeError), and a mesh draws at most 256 parts (a group
+   * spanning pages takes one a page). Rays hit its pages; frustum culling
+   * takes each page's own bounds. Its values are the engine's: `copy`,
+   * `clone`, `applyMatrix4` (and `translate` & co.), `computeVertexNormals`
+   * and `toNonIndexed` throw a TypeError; it draws on a Mesh (not as
+   * points, lines, an instanced or a skinned mesh, nor as a wireframe:
+   * TypeError). */
+  export class StreamingGeometry extends BufferGeometry {
+    /** `stride` floats a vertex; `capacity.vertices` 1 to 268,435,456 and
+     * `capacity.indices` 0 (pages without indices, the default) to
+     * 805,306,368 (RangeError). */
+    constructor(stride: number, capacity: { vertices: number; indices?: number });
+    readonly isStreamingGeometry: true;
+    readonly buffer: InterleavedBuffer;
+    readonly capacity: Readonly<{ vertices: number; indices: number }>;
+    readonly vertexCount: number;
+    readonly indexCount: number;
+    readonly pageCount: number;
+    /** Adds and uploads a page (whole vertices of the stride; indices,
+     * Uint16Array or Uint32Array, exactly when the capacity has some):
+     * a RangeError past the capacity or the page bounds, a TypeError for
+     * a bad page, nothing taken either way. Returns its number. */
+    addPage(vertices: Float32Array, indices?: Uint16Array | Uint32Array | null, transfer?: boolean): number;
+    /** Replaces page `page` (its old mesh let go), as `addPage` takes one. */
+    setPage(page: number, vertices: Float32Array, indices?: Uint16Array | Uint32Array | null, transfer?: boolean): this;
+    /** The box around the pages' positions as the engine read them (exact). */
+    computeBoundingBox(): void;
+    /** The sphere about that box (its center, half its diagonal), which
+     * holds every position; null without pages. */
+    computeBoundingSphere(): void;
+    /** Lets its pages go: it holds none afterwards. */
+    dispose(): void;
   }
   /** One geometry from several (three.js's `BufferGeometryUtils.
    * mergeGeometries`): they must share their attributes (all indexed or
@@ -5221,6 +5628,9 @@ declare module "starhermit:scene" {
    * "before API_MINOR 23"); the camera's `near` and `far` are `near` and
    * `distance`, and three.js's members below are ignored.
    *
+   * Since API_MINOR 33 a light may take the engine's receiver-plane
+   * filter in place of three.js's (`receiverPlane`, not three.js).
+   *
    * Point lights cast no shadows; at most four lights cast (the first
    * directional or spot lights with `castShadow` in scene order). */
   export interface LightShadow {
@@ -5290,6 +5700,26 @@ declare module "starhermit:scene" {
      * RangeError, and setting it before API_MINOR 26 a TypeError, as the
      * scene syncs; spot lights ignore it. */
     cascades?: { count?: number; maxDistance: number; splitLambda?: number } | null;
+    /** ENGINE EXTENSION, not three.js (since API_MINOR 33; three.js r185
+     * has no receiver-plane bias): a directional or spot light's
+     * receiver-plane filter, false (the default) for the filter
+     * `renderer.shadowMap.type` gives (three.js's, which shadows a sloped
+     * surface at a near-zero `bias`). With true the map is filtered over
+     * nine lookups on a square grid `radius` texels apart (one at radius
+     * 0), each blending the four texels around it as a linear filter does
+     * but comparing each texel at the receiver's plane extended to that
+     * texel's centre (its slope from the screen derivatives of the world
+     * position), less half a texel's change of that plane on each axis;
+     * taps and texels past the map's edge are lit, as is all outside the
+     * shadow camera's volume. A sloped surface no longer shadows itself
+     * while a true occluder still shadows it fully, so `bias` need only
+     * cover depth precision and curvature. `bias`, `normalBias`,
+     * `intensity` and cascades apply as before; `renderer.shadowMap.type`
+     * does not. It costs 36 depth comparisons a lookup (4 at radius 0;
+     * three.js's PCF: five filtered). Other values are a TypeError, as
+     * is setting it true before API_MINOR 33, as the scene syncs. See
+     * spec rendering-and-quality.html#receiver-plane. */
+    receiverPlane?: boolean;
   }
   /** Light from `position` toward `target`'s position (three.js); both may
    * be anywhere in the graph. */
@@ -6923,7 +7353,15 @@ declare module "starhermit:ui" {
   /** A dropdown; returns the chosen index. Styled as `select`, its parts
    * `field` (the closed control), `list` (the open list) and `option`
    * (each option: `hovered` under the highlight, `selected` the current
-   * choice). */
+   * choice). Since API_MINOR 33 a styled select lays out by its style as
+   * CSS sizes a `select`: `width` (or `"fill"`, or a percentage of its
+   * container), `minWidth`, `maxWidth`, `height` and `minHeight` (CSS
+   * `width`, `max-width` and the rest); narrower than its widest option,
+   * the shown option is cut at its content box and the open list stays as
+   * wide as that option (within the window). Before, it was always as wide
+   * as its widest option whatever its style said, as older games keep it.
+   * The open list's options scrolled out of it are offscreen to assistive
+   * technology, not part of a scroll area the select is in. */
   export function select(label: string, index: number, options: readonly (string | SelectOption)[], extra?: WidgetOptions): number;
   /** Left/right arrows through the options; returns the index. */
   export function cycle(label: string, index: number, options: readonly string[], extra?: WidgetOptions): number;
@@ -6956,7 +7394,18 @@ declare module "starhermit:ui" {
    * centred in a taller box; `width` here is its width otherwise. Before,
    * a style only painted it: the field stayed one theme line high and
    * `width` wide whatever the style's sizes, padding and text size, as
-   * older games keep it. */
+   * older games keep it. The player selects as in a browser's input
+   * (every API minor): a double click selects the word under the pointer,
+   * a triple click the whole text, dragging a press selects a range,
+   * Control+A (Command+A on macOS) selects everything, and Shift with the
+   * arrows, Home and End extends the selection; Control with the arrows
+   * (Option on macOS) moves by words, and Command with them to the ends on
+   * macOS. The selection draws highlighted: typing, pasting, an IME
+   * composition, Backspace and Delete replace it, and a move or click
+   * collapses it. Control+C or Control+Insert copies it and Control+X or
+   * Shift+Delete cuts it (Command on macOS): the runtime puts the text on
+   * the clipboard (no `clipboard` capability needed; the game cannot read
+   * it), and the game hears the keys and a cut's change to the value. */
   export function textField(id: string, value: string, options?: WidgetOptions & { maxChars?: number; width?: number; placeholder?: string; arrows?: boolean }): string;
   /** Whether Enter was pressed in the text field `id` this frame (the field
    * keeps focus; `setFocus(null)` leaves it). */
@@ -7224,9 +7673,11 @@ declare module "starhermit:ui" {
   // widget without it. `focused` matches any focus, `focusVisible` only
   // the former.
   //
-  // Boxes past a frame's budget (131,072 vertices of styled boxes) draw
-  // without shadows from the next frame, then without gradients (their
-  // first color), never without content.
+  // Boxes past a frame's budget (131,072 mesh vertices of styled boxes;
+  // repeating gradients take the most) draw without unblurred outer
+  // shadows from the next frame, then without gradients (their first
+  // color), never without content or inset and blurred shadows (baked as
+  // images, they take no vertices). The log warns the first time.
 
   /** The widget kinds a style key names. */
   export type WidgetKind =
@@ -8497,16 +8948,42 @@ declare module "starhermit:platform" {
      * notification. A GUID in lower case (`sessions.get` it, or
      * `connectGame` it, rather than landing in the game's lobby). */
     readonly sessionId?: string;
+    /** Since API_MINOR 33, for a game that declares launch parameters
+     * (`engine.param.<key>=` in starhermit.txt, at most 8, keys of 1 to 32
+     * of `a`–`z`, `0`–`9` and `-`): the declared parameters the player's
+     * launch link brought, such as `{ species: "oak" }` (often none: `{}`),
+     * frozen. Each value is 1 to 64 of `A`–`Z`, `a`–`z`, `0`–`9`, `.`,
+     * `_`, `~` and `-`; an undeclared key, a malformed key or value, every
+     * copy of a key given twice and anything past 8 are dropped silently.
+     *
+     * Parameters are untrusted input: whoever wrote the link the player
+     * clicked chose them. They carry no sign-in, purchase, invite or join
+     * meaning and prove nothing (use join codes or the sessions API for
+     * that); look a value up in the game's own table rather than build a
+     * URL, path or markup from it. The runtime never logs their values.
+     * In browsers they come from the page's fragment, `#p.<key>=<value>`
+     * (percent-decoded once, taken out of the page's address before the
+     * game starts; never the query string); from the StarHermit client
+     * from its hello's `params` (a `starhermit://play/<slug>?key=value`
+     * link); in development from `starhermit <game> --param key=value`. */
+    readonly params?: Readonly<Record<string, string>>;
   }
-  /** What the platform launched this run for, or null (a launch from the
-   * library, a guest, or no `platform` capability), since API_MINOR 9. Read
-   * as the game starts and the same (frozen) object every call; a game
-   * restarted in the same run sees it again, so check the session is still
-   * on (`sessions.get`) before joining. It comes with the launch's player:
-   * in browsers the page's `#session_id=` beside its `#game_token=`
-   * (the runtime takes both out of the page's address before the game
-   * starts), from the StarHermit client the `sessionId` of its hello; an
-   * id that is not a GUID is dropped. */
+  /** What the platform launched this run for, or null, since API_MINOR 9.
+   * Read as the game starts and the same (frozen) object every call; a
+   * game restarted in the same run sees it again, so check the session is
+   * still on (`sessions.get`) before joining.
+   *
+   * A game that declares launch parameters (API_MINOR 33) always gets an
+   * object, with `params` (perhaps `{}`), with or without the `platform`
+   * capability. `sessionId` keeps its own rules: it comes with the
+   * launch's player and the `platform` capability, so it is absent for a
+   * guest, without the capability, or for a launch that names no session.
+   * Any other game gets null for a launch from the library, a guest, or no
+   * `platform` capability. The session id comes in browsers from the
+   * page's `#session_id=` beside its `#game_token=` (the runtime takes both
+   * out of the page's address before the game starts), from the StarHermit
+   * client from the `sessionId` of its hello; an id that is not a GUID is
+   * dropped. */
   export function launchContext(): LaunchContext | null;
   /** Why the player's session ended: they signed out (in the Options
    * menu), another device took over the game, the platform needs the terms
@@ -9087,6 +9564,104 @@ declare module "starhermit:platform" {
      * RangeError past it). */
     context?: JsonValue;
   }): Promise<{ id: string; status: string }>;
+
+  // -- Pluck orders (since API_MINOR 33) -------------------------------------------------
+  /** An item of the game's catalog for sale, priced in Plucks. */
+  export interface PluckItem {
+    readonly key: string;
+    readonly name: string;
+    /** In Plucks. */
+    readonly price: number;
+    readonly currency: "PLK";
+  }
+  /** An order the game asked its player to pay for. Only these fields: no
+   * buyer, transaction or balance. Times are milliseconds since the Unix
+   * epoch. */
+  export interface PluckOrder {
+    /** A GUID, lower case. */
+    readonly id: string;
+    readonly itemKey: string;
+    readonly itemName: string;
+    readonly price: number;
+    /** `pending` until the player confirms (`paid`) or declines
+     * (`cancelled`) on StarHermit, or 15 minutes pass (`expired`). */
+    readonly status: "pending" | "paid" | "cancelled" | "expired";
+    readonly createdAt: number;
+    readonly expiresAt: number;
+    /** When it was paid or cancelled. */
+    readonly completedAt?: number;
+    /** The game's note, as the platform keeps it. */
+    readonly note?: string;
+  }
+  /** Pluck orders (since API_MINOR 33, with `engine.capabilities=platform,plucks`;
+   * a manifest declaring `plucks` below `engine.minor=33`, or without
+   * `platform`, is refused; undefined without the capability). The game may
+   * only **ask**: it creates an order for its signed-in player and reads the
+   * outcome. It never confirms and never pays: the player does both on
+   * StarHermit's own page, outside the game, which the runtime opens only
+   * from the player's press (`openConfirmation`). The game never learns the
+   * player's balance. Ownership and stock are the game's concern: a paid
+   * order reaches the game's server script (`ctx.pluckOrders`, see
+   * `game.pluckOrders` in the authority's types) and the game's own state
+   * records what the player owns. Apply delivered orders idempotently by
+   * id: delivery is at least once.
+   *
+   * A failure rejects with a {@link PlatformError}: `signed-out` without a
+   * player (`order`, `getOrder`), `unavailable` without the platform,
+   * `not-found` for an unknown, inactive or sold-out item (or another
+   * player's order), `conflict` when the game's owner orders from their own
+   * game, `rate-limited` with `code` `too_many_pending_orders` (too many
+   * orders await the player's confirmation) or `rate_limited` (orders a
+   * minute) and `retryAfter`, `invalid` with `code` `invalid_note`, and
+   * `forbidden`. */
+  export const plucks:
+    | {
+        /** The game's active items. Anyone's: a signed-out player reads it too. */
+        items(): Promise<readonly PluckItem[]>;
+        /** Asks the signed-in player to buy `itemKey`. Nothing is charged:
+         * the order waits for the player's confirmation on StarHermit
+         * (`openConfirmation`). `note` is shown to the player on the
+         * confirmation page as "Note from <game>". It is checked here as the
+         * platform checks it, before any request: trimmed of white space,
+         * NFC-normalized, at most 140 characters (text elements: a letter
+         * and its marks, a flag, are one; and at most 280 UTF-16 units), one
+         * line of plain text (no control, format, line or paragraph
+         * separator, private-use or unassigned character) and no link
+         * (`://`, `www.`); otherwise `invalid` with code `invalid_note`. An
+         * empty note is none. */
+        order(itemKey: string, options?: { note?: string }): Promise<PluckOrder>;
+        /** The player's order `id` (a GUID; a RangeError otherwise). */
+        getOrder(id: string): Promise<PluckOrder>;
+        /** Watches order `id` (there is no push): reads it at once, then
+         * again after 2 s, 4 s, 8 s and every 10 s, calling `callback` with
+         * the order each time its status changes (the first read too). It
+         * ends at `paid`, `cancelled` or `expired`, after one more read
+         * once `expiresAt` passed, on an error asking again cannot mend
+         * (`not-found`, `forbidden`, `signed-out`…), or when the returned
+         * function is called. At most 8 watches at once (a RangeError past
+         * that). */
+        watch(id: string, callback: (order: PluckOrder) => void): Unsubscribe;
+        /** Opens order `id`'s confirmation on StarHermit's dashboard
+         * (`https://dashboard.starhermit.com/plucks/orders/{id}`, another
+         * deployment's own dashboard in development), outside the game:
+         * natively in the player's browser, in browsers in a new tab
+         * (`noopener,noreferrer`), never in a frame the game can reach,
+         * after the player pressed Open in the runtime's own confirmation
+         * (as {@link openLink}'s). The runtime builds the URL from the id;
+         * the game never passes one. Call it while handling the player's
+         * press, one page a press: otherwise it rejects `not-allowed` and
+         * nothing opens; it never opens by itself. It resolves once the page
+         * opened and the game learns nothing else (the order's outcome is
+         * `getOrder`'s or `watch`'s); the player's Cancel rejects
+         * `cancelled`, another page or link showing (or no platform)
+         * `unavailable`. On the local platform, which has no dashboard, the
+         * runtime prints how to settle the order instead. */
+        openConfirmation(id: string): Promise<void>;
+        /** Opens the player's Plucks on StarHermit's dashboard
+         * (`/me/plucks`), under exactly `openConfirmation`'s rules. */
+        openWallet(): Promise<void>;
+      }
+    | undefined;
 }
 
 // ===========================================================================
@@ -9455,6 +10030,30 @@ declare module "starhermit:script" {
     message?: { from: string; data: JsonValue };
     /** `onTick` only: the realtime inputs since the last tick. */
     inputs?: { from: string; data: JsonValue }[];
+    /** Paid Pluck orders to deliver (since API_MINOR 33's runtime), only
+     * for a script that declares `game.pluckOrders = true` (absent
+     * otherwise): on every invocation, the paid orders of this game whose
+     * buyer is a human player of this session that no invocation has
+     * acknowledged yet, oldest paid first, at most 20, `[]` when none
+     * (`onTick` reads them at most once a second). An order is claimed by
+     * one session at a time; the claim lapses after 2 minutes without an
+     * acknowledgement, or when that session ends, and the order is offered
+     * again, so delivery is at least once: apply them idempotently by `id`
+     * (the game's own state records what the player owns; ownership and
+     * stock are the game's). The platform fills it from its own order rows;
+     * nothing a client sends adds to it. An authority (`authority()`) passes
+     * the local platform's (`--dev --local-platform`), and `[]` in local
+     * practice. */
+    pluckOrders?: {
+      id: string;
+      userId: string;
+      itemKey: string;
+      itemName: string;
+      price: number;
+      note: string | null;
+      /** Milliseconds since the Unix epoch. */
+      paidAt: number;
+    }[];
     [key: string]: unknown;
   }
   export interface ScriptResult {
@@ -9464,6 +10063,13 @@ declare module "starhermit:script" {
     readonly broadcast?: readonly { readonly to: "all" | readonly string[]; readonly data: JsonValue }[];
     /** Ends the session. */
     readonly result?: JsonValue;
+    /** The ids of the `ctx.pluckOrders` this invocation applied (since
+     * API_MINOR 33's runtime; at most 100). They are acknowledged with
+     * this invocation's `sessionState` and `playerStates`, atomically, and
+     * never offered again; an invocation that throws or refuses (`ok:
+     * false`) acknowledges nothing, and ids not offered to this session are
+     * ignored. */
+    readonly pluckOrdersDelivered?: readonly string[];
     /** The script's other fields (`playerStates`, `eloUpdates`, …). */
     readonly [key: string]: unknown;
   }
@@ -9574,10 +10180,25 @@ declare module "starhermit:script" {
   // (8 MiB) for the game; past that a send is refused and counted in
   // `stats.overflows`. A worker whose one entry has run three seconds is
   // reported with an `error` and the state `"not-responding"` (the game
-  // may terminate it); the game's own frames never wait for it. Its
+  // may terminate it); the game's own frames never wait for it. Since
+  // API_MINOR 33 a long entry that calls `reportProgress(value)` with a
+  // value above its highest so far at least every three seconds is not
+  // reported: the three seconds count from its last such report, so one
+  // that stops reporting (a hang, a loop that reports the same value) is
+  // reported three seconds later ("one entry has run for 41 seconds, 3
+  // since it last reported progress"), and it is `"running"` again at its
+  // next report. Its
   // console lines go to the game's log, prefixed with its path. Stopping
   // the game stops its workers where they stand, and a restart waits for
   // their threads.
+  //
+  // Reservations. A reservation that does not fit (the heap or the four
+  // at once) first collects the game's garbage, so a heap `stats()` shows
+  // full of dropped data does not refuse it (a fix for every minor), and
+  // since API_MINOR 33 waits up to a quarter of a second for the workers
+  // the game terminated to end, so a replacement reserved right after
+  // `terminate()` fits. `await worker.terminate()` (API_MINOR 33) settles
+  // once the worker's heap is the game's again.
   //
   // Lifetime (since API_MINOR 27, as a browser's Web Worker): a worker
   // lives on while it has any listener (`on`, until each is removed) or a
@@ -9602,6 +10223,17 @@ declare module "starhermit:script" {
     import("starhermit:engine").PackageFiles,
     "exists" | "size" | "readBytes" | "readBytesAsync" | "readText" | "readJson" | "list" | "status"
   >;
+  /** A worker's `reportProgress` (since API_MINOR 33): the entry is
+   * making progress, `value` (a finite number, a TypeError otherwise)
+   * growing as it does (a fraction done, items made). A value above the
+   * entry's highest so far restarts its three seconds before it is
+   * reported not responding; every value reaches the game as
+   * `worker.progress` and the `progress` event (in order with what the
+   * worker posts; reports in a row arrive as the latest). It costs about a
+   * native call: report as often as is convenient, at least every three
+   * seconds of work. Declare it in a worker script with
+   * `declare const reportProgress: import("starhermit:script").ReportProgress;`. */
+  export type ReportProgress = (value: number) => void;
   export type WorkerState = "starting" | "running" | "not-responding" | "closed" | "failed";
   /** Why a worker ended for good: `"closed"` (terminated, or the game is
    * stopping), `"failed"` (its script did not load, or an entry ran out of
@@ -9634,6 +10266,9 @@ declare module "starhermit:script" {
      * budget that ended it, or the not-responding report. */
     error: (message: string) => void;
     stopped: (reason: WorkerStop) => void;
+    /** The value the worker last reported with `reportProgress` (since
+     * API_MINOR 33; before, `on("progress")` is a TypeError). */
+    progress: (value: number) => void;
   }
   /** A worker's script: a classic script (or a module importing package
    * modules) that sets `globalThis.onmessage` (also `self.onmessage`) to
@@ -9645,12 +10280,16 @@ declare module "starhermit:script" {
    * run before the next message. An exception from `onmessage` is reported
    * and the worker goes on; running out of heap or call depth ends it. A
    * long entry is not cut short: its fuel is renewed, and past three
-   * seconds the game hears it is not responding. */
+   * seconds (since API_MINOR 33, three seconds after its last
+   * `reportProgress` that advanced) the game hears it is not responding. */
   export class Worker {
     #private;
     private constructor();
     readonly state: WorkerState;
     readonly stats: WorkerStats;
+    /** The value the worker last reported with `reportProgress`, or null
+     * before it has (since API_MINOR 33; undefined before). */
+    readonly progress: number | null;
     on<E extends keyof WorkerEvents>(event: E, listener: WorkerEvents[E]): Unsubscribe;
     /** Queues a message for `onmessage` (a TypeError for what is not JSON,
      * a RangeError past 1 MiB of JSON, 64 MiB of buffers, nesting past
@@ -9661,8 +10300,14 @@ declare module "starhermit:script" {
      * are detached here once the message is queued. Ignored once the
      * worker has stopped. */
     post(message: unknown, transfer?: readonly ArrayBuffer[] | { transfer?: readonly ArrayBuffer[] }): void;
-    /** Ends the worker where it stands; no more events arrive. */
-    terminate(): void;
+    /** Ends the worker where it stands; no more events arrive. Since
+     * API_MINOR 33 it returns a promise (the same one each call, also for a
+     * worker that stopped on its own) that settles once the worker's thread
+     * has ended: its heap is back in the game's budget (`stats()`'s
+     * `heapLimitBytes` counts it) and it no longer counts against the four
+     * at once, so a replacement reserved then fits; it never rejects.
+     * Before API_MINOR 33 it returns undefined. */
+    terminate(): Promise<void>;
   }
   export interface WorkerOptions {
     /** `"classic"` (the default) or `"module"`: a module and the package
