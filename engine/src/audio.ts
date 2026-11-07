@@ -117,7 +117,7 @@ export function createAudio(): Audio {
 
   // One channel of the noise, rendered natively: white noise with a mild
   // tilt so raw loops feel less harsh, dry plus a gentle lowpass (fitted within
-  // about 1 dB per band to the old script's white * 0.275 + one-pole * 1.6).
+  // about 1 dB per band to the old script's white * 0.275 + one-pole * 1.6, rms measured).
   async function renderNoiseChannel(seed: number, len: number): Promise<Float32Array> {
     const settle = Math.round(0.05 * ctx.sampleRate);
     const off = new OfflineAudioContext(1, settle + len, ctx.sampleRate);
@@ -127,7 +127,7 @@ export function createAudio(): Audio {
     const lp = off.createBiquadFilter();
     lp.type = "lowpass";
     lp.frequency.value = 2128;
-    lp.Q.value = 0.3;
+    lp.Q.value = -10.46; // dB, as in Web Audio: a linear Q of 0.3
     const wet = off.createGain();
     wet.gain.value = NOISE_WET;
     noise.connect(dry).connect(off.destination);

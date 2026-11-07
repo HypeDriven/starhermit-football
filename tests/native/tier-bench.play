@@ -1,0 +1,12 @@
+# Tier bench: a practice match against the AI from just after kick-off, the player running up the pitch.
+# In --smoke, steps follow wall time, so the match moment varies with the level's speed.
+# viewport 1280x800@1
+until 1200 PRACTICE vs AI
+frames 5
+click PRACTICE vs AI
+until 1200 BLUE
+until 3000 00:01
+hold KeyW
+measure start
+frames 600
+measure stop

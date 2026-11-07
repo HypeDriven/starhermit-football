@@ -10,7 +10,7 @@
     "cover.jpg": {"sha256": "fd950a201665c0bd4f2961367e79defa36e01e8b5cce1ef4c4476c008c094451", "size": 253349},
     "coverart.png": {"sha256": "1841b4c9aaadb6712eab461619837f59a60ecccf63ea490e12fcb6aefdf10bd6", "size": 358555},
     "engine/HOST-API-GAPS.md": {"sha256": "c0929a2da59c8d5f215e96714028db627fbb8012619656c5b5302cc6a33d80da", "size": 3063},
-    "engine/src/audio.ts": {"sha256": "6ccafe1117ab0e4f5c21c95595d243fd3d5f9fccd8e3b035d8ac9ac1859f2e74", "size": 29790},
+    "engine/src/audio.ts": {"sha256": "27ef12faed62187c60098d71449543c63fb4538d423adc389b36fa67444de292", "size": 29849},
     "engine/src/chat.ts": {"sha256": "6f09771faac76bbe3f062e55cfe55b23c05d1f6d59eaaa56637bae404c7f2a52", "size": 7416},
     "engine/src/hud.ts": {"sha256": "6b101fe84356436ca664de4a686ff40d089703353a64010d53deedbfd4bc72a9", "size": 16531},
     "engine/src/i18n.ts": {"sha256": "b777a068923aa5bf42d3fdde2a4fe77d96436a9d060ccfb74069738dd76e7891", "size": 7038},
