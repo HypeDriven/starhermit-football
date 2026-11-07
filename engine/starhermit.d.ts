@@ -1,4 +1,4 @@
-// Copied unchanged below this note from the StarHermit runtime 1.36.0
+// Copied unchanged below this note from the StarHermit runtime 1.38.0
 // (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
@@ -480,7 +480,7 @@ declare module "starhermit:engine" {
    * either, or past 65,536 DEFLATE blocks, a RangeError (a small "bomb"
    * stops at its bound). Malformed or truncated data, a bad checksum or
    * another format (or a string) is a TypeError. It costs about one
-   * instruction of fuel a byte in and out. Text, exact: `new
+   * instruction of fuel for every 4 bytes in and out. Text, exact: `new
    * TextDecoder().decode(decompress(bytes, "gzip"))`. */
   export function decompress(
     data: ArrayBuffer | ArrayBufferView,
@@ -597,10 +597,12 @@ declare module "starhermit:engine" {
      * takes (4; 8 from cosmic, lowered to what the device supports). */
     readonly antialias: AntialiasMode;
     readonly msaaSamples: number;
-    /** Whether the level draws shadows; the largest map a light's shadow
-     * uses (512 at quantum to 4096; the engine holds `shadow.mapSize` to
-     * it); cascades a game splitting its view may use; the distance
-     * shadows reach relative to the game's own. */
+    /** Whether the level draws shadows; the level's shadow map size (512
+     * at quantum to 4096: since API_MINOR 23 a suggestion, as the game's
+     * `shadow.mapSize` is kept whatever the level; from API_MINOR 14 to 22
+     * the engine holds `shadow.mapSize` to it); cascades a game splitting
+     * its view may use; the distance shadows reach relative to the game's
+     * own. */
     readonly shadows: boolean;
     readonly shadowMapSize: number;
     readonly shadowCascades: number;
@@ -982,6 +984,358 @@ declare module "starhermit:engine" {
    * loopback development page in browsers) without a launch token opens
    * declared links unreviewed, the confirmation saying so. */
   export function openLink(id: string): Promise<LinkOutcome>;
+
+  // -- Seeded random generators -----------------------------------------------
+  /** A random generator of the game's own (since API_MINOR 37,
+   * `SEEDED_RANDOM_MINOR`; `createRandom` is undefined for games declaring
+   * an older `engine.minor`): independent of `Math.random`, of
+   * `MathUtils.seededRandom` (one global stream) and of every other
+   * generator, so a level, a deal or an AI each draws from its own stream
+   * and the same seed gives the same numbers on every runtime, natively and
+   * in browsers.
+   *
+   * The algorithm, exactly (so a server script or a tool can reproduce it):
+   * xoshiro128** 1.1 (Blackman and Vigna, https://prng.di.unimi.it/
+   * xoshiro128starstar.c) over four 32-bit words `s0..s3`. `next()` returns
+   * `rotl(s1 * 5, 7) * 9` (32-bit wrapping) and then advances: `t = s1 <<
+   * 9; s2 ^= s0; s3 ^= s1; s1 ^= s2; s0 ^= s3; s2 ^= t; s3 = rotl(s3,
+   * 11)`. A seed is a 64-bit integer: a safe integer as its 64-bit two's
+   * complement (−1 is 2⁶⁴ − 1), or a string as the FNV-1a 64-bit hash of
+   * its UTF-8 bytes (offset basis 0xcbf29ce484222325, prime 0x100000001b3).
+   * The state is SplitMix64's (https://prng.di.unimi.it/splitmix64.c)
+   * first two outputs `a`, `b` from the seed: `s0 = low32(a)`, `s1 =
+   * high32(a)`, `s2 = low32(b)`, `s3 = high32(b)`. Seed 42 gives the state
+   * `[803958421, 3184996902, 2993090819, 686809907]` and first outputs
+   * 1776835114, 4165204688, 17111135, 2317295270.
+   *
+   * A draw allocates nothing: natively it is one host call (cheaper than a
+   * Mulberry32 in script), in browsers the same 32-bit arithmetic in
+   * script; `fill` draws natively. No seed seeds from `Math.random`
+   * (different every run). */
+  export interface Random {
+    /** The next 32-bit output, an integer from 0 to 2³² − 1. */
+    next(): number;
+    /** A number in [0, 1): `next() / 2³²` (32 random bits). */
+    float(): number;
+    /** A whole number in [0, n), n a whole number from 1 to 2³² (else a
+     * RangeError), every result equally likely: a draw `x` at or past
+     * `2³² − (2³² mod n)` is drawn again, else the result is `x mod n`. */
+    int(n: number): number;
+    /** `items[int(items.length)]` (a RangeError for an empty list). */
+    pick<T>(items: ArrayLike<T>): T;
+    /** Shuffles an array or typed array in place and returns it:
+     * Fisher–Yates from the end, index `i` (length − 1 down to 1)
+     * swapping with `int(i + 1)`. */
+    shuffle<T extends unknown[] | Float64Array | Float32Array | Int32Array | Uint32Array | Int16Array | Uint16Array | Int8Array | Uint8Array>(items: T): T;
+    /** A new, independent generator seeded with this one's next two
+     * outputs (`high · 2³² + low`, high first), as `createRandom` seeds:
+     * this one advances by two. */
+    fork(): Random;
+    /** A generator in this one's state: it draws what this one would. */
+    clone(): Random;
+    /** The state, four 32-bit unsigned integers (`[s0, s1, s2, s3]`), to
+     * save as JSON and give to `setState` to draw on from here. */
+    getState(): [number, number, number, number];
+    /** Restores a state `getState` gave (a TypeError for anything but four
+     * whole numbers from 0 to 2³² − 1, a RangeError for all zeros). */
+    setState(state: ArrayLike<number>): void;
+    /** Fills an array natively with the next outputs, one an element, as
+     * the methods draw them: a Float64Array with `float()`s, a
+     * Float32Array with `(next() >>> 8) / 2²⁴` (24 bits, exact in a float,
+     * never 1), a Uint32Array with `next()`s and an Int32Array with
+     * `next() | 0`. At most 2²⁶ elements a call (RangeError); other
+     * arrays are a TypeError. Returns the array. */
+    fill<T extends Float64Array | Float32Array | Uint32Array | Int32Array>(array: T): T;
+  }
+  /** A mulberry32 generator (since API_MINOR 38, `MULBERRY32_MINOR`):
+   * `createRandom(seed, { algorithm: "mulberry32" })`. Tommy Ettinger's
+   * mulberry32 over one 32-bit word `a`, exactly as games carry it, so a
+   * port draws what its own copy drew: `next()` sets `a = (a + 0x6D2B79F5)
+   * >>> 0`, `t = imul(a ^ a >>> 15, a | 1)`, `t ^= t + imul(t ^ t >>> 7,
+   * t | 61)` and returns `(t ^ t >>> 14) >>> 0`; `float()` is `next() /
+   * 2³²`, the usual copy's return. A seed is a safe integer (its low 32
+   * bits, as `seed | 0`: −1 is 2³² − 1; a string is a TypeError); seed 42
+   * draws 2581720956, 1925393290, 3661312704 first. The methods are
+   * {@link Random}'s, drawn from it the same way (`fill` too, in script),
+   * except: the state is one word, any value (zero too); `fork()` is a
+   * mulberry32 seeded with this one's next output. Its draws are script
+   * everywhere and it has 32 bits of state (it repeats after 2³² draws and
+   * misses some outputs): use the default for new code. */
+  export interface Mulberry32Random extends Omit<Random, "getState" | "setState" | "fork" | "clone"> {
+    /** A new generator seeded with this one's next output. */
+    fork(): Mulberry32Random;
+    /** A generator in this one's state. */
+    clone(): Mulberry32Random;
+    /** The state, `[a]`, to save and give to `setState`. */
+    getState(): [number];
+    /** Restores a state `getState` gave (a TypeError for anything but
+     * one whole number from 0 to 2³² − 1). */
+    setState(state: ArrayLike<number>): void;
+  }
+  /** A generator from a seed: a safe integer (a RangeError for others) or
+   * a string; none seeds it from `Math.random`. See {@link Random}. From
+   * API_MINOR 38, `options.algorithm` may be `"xoshiro128**"` (the
+   * default) or `"mulberry32"` ({@link Mulberry32Random}; anything else is
+   * a TypeError; before 38 options are not read). */
+  export function createRandom(seed?: number | string, options?: { algorithm?: "xoshiro128**" }): Random;
+  export function createRandom(seed: number | undefined, options: { algorithm: "mulberry32" }): Mulberry32Random;
+
+  // -- Frame callbacks ---------------------------------------------------------
+  //
+  // A frame runs, in order: the frame's settled promises and worker
+  // messages, its events (input, platform replies), `onFixedUpdate` for
+  // each fixed step, the timers that fell due, starhermit:scene's tweens
+  // (since API_MINOR 37), `nextFrame` callbacks, `onUpdate`, `onRender`,
+  // `afterRender` callbacks, then the scene is synced and drawn. After each of these calls (each lifecycle callback,
+  // event listener, timer and frame callback) its microtasks run
+  // (`queueMicrotask`, promise reactions), natively and in browsers, before
+  // the next call begins: a microtask queued in a widget's handler runs
+  // once that `onUpdate` or `onRender` returns, not after the frame's UI.
+  /** Runs `callback` once after this frame's `onRender` returns (since
+   * API_MINOR 37, `FRAME_CALLBACKS_MINOR`; undefined for games declaring
+   * an older `engine.minor`): after the frame's `starhermit:ui` widgets are
+   * built, whether `onUpdate` or `onRender` builds them, and before the
+   * scene is synced, so what it changes shows this frame. This is where a
+   * widget's press acts on state the rest of the frame's UI still reads
+   * (`if (ui.button("New game")) afterRender(() => newGame())`). Callbacks
+   * run in the order they were added; one added while they run (by one of
+   * them) runs in the same pass, and one added after this frame's pass
+   * (in a microtask of it, say) runs after the next frame's `onRender`.
+   * The returned function cancels it if it has not run. At most 4,096 wait
+   * at once (not counting those cancelled or run; RangeError), and at most
+   * 4,096 run in one pass: as those added during the pass run in it, one
+   * that adds itself again runs again at once, until that RangeError (use
+   * `nextFrame` for every frame). A callback's throw or rejected promise
+   * ends the game as `onRender`'s would. */
+  export function afterRender(callback: () => void): Unsubscribe;
+  /** Runs `callback` once in the next frame, just before its `onUpdate`
+   * (after its fixed steps, events and timers), with that frame's delta in
+   * seconds (since API_MINOR 37, `FRAME_CALLBACKS_MINOR`; undefined for
+   * games declaring an older `engine.minor`): the engine's
+   * `requestAnimationFrame`. A callback added in frame N runs in frame
+   * N + 1 wherever it was added (a fixed step, `onUpdate`, `onRender`, an
+   * event, another `nextFrame` callback), in the order added. The returned
+   * function cancels it if it has not run. At most 4,096 wait at once
+   * (not counting those cancelled or run; RangeError). Frames do not run while the game is suspended, so
+   * neither do these. */
+  export function nextFrame(callback: (delta: number) => void): Unsubscribe;
+
+  // -- Timer sets and fixed steps ------------------------------------------------
+  /** Timers on a clock of their own that the game advances (since
+   * API_MINOR 37, `TIMERS_MINOR`; `createTimers` is undefined for games
+   * declaring an older `engine.minor`). Advanced from `onFixedUpdate(step)`
+   * they run on the fixed clock, so a replay of the same steps runs the
+   * same callbacks at the same steps whatever the frame rate (the global
+   * `setTimeout` runs on the frame clock); from `onUpdate(delta)`, on game
+   * time; paused, not at all. Seconds throughout.
+   *
+   * Order: `advance(seconds)` moves the clock to `time + seconds` and runs
+   * every timer due by then (within 1e-9 s, so sixty 1/60 s steps reach
+   * 1 s), earliest due first and, at the same due time, in the order the
+   * timers were made (an `every` keeps its place from when it was made).
+   * While a callback runs, `time` is its due time, so `after(d)` from it
+   * falls due at that time + d: one due by the end of this advance runs in
+   * this same advance, in order (`after(0)` runs once the callbacks
+   * already due at this time ran), one due later waits. A timer cancelled
+   * before its turn, even by a callback earlier in the same advance, does
+   * not run. An `every(p)` runs once per period that ends in the advance,
+   * in order with the others (a 0.25 s advance runs `every(0.1)` twice and
+   * keeps its phase), at most 64 times in one advance: periods past that
+   * are skipped, its phase kept (where the clock's precision has outgrown
+   * the period, the timer skips to just past the advance). One advance
+   * runs at most 65,536 callbacks: the timers still due then wait for the
+   * next advance (so an `after(0)` that makes itself again runs 65,536
+   * times an advance, not forever). A callback that pauses the set ends the
+   * advance there (`time` stays at its due time); one that throws ends it
+   * there too and the error propagates from `advance` (its timer is
+   * already taken off, or rescheduled for an `every`). A callback's
+   * rejected promise ends the game as a lifecycle callback's would. */
+  export interface Timers {
+    /** Seconds this set has advanced (not counting advances while paused). */
+    readonly time: number;
+    readonly paused: boolean;
+    /** Timers waiting to run. */
+    readonly pending: number;
+    /** Runs `callback` once when the clock reaches `time + delay` (delay
+     * 0 or more; RangeError otherwise); its id (1, 2, 3… in the order
+     * made, never reused in this set). At most 65,536 wait (RangeError). */
+    after(delay: number, callback: () => void): number;
+    /** Runs `callback` each `period` seconds (more than 0), first at
+     * `time + period`; its id. A period too small to move the clock on
+     * from `time + period` (below its precision there) is a RangeError. */
+    every(period: number, callback: () => void): number;
+    /** Takes a timer off; whether it was waiting (an id run or unknown is
+     * false). From inside its own `every` callback it stops it. */
+    cancel(id: number): boolean;
+    /** Whether a timer is waiting. */
+    has(id: number): boolean;
+    /** Stops the clock: `advance` does nothing until `resume`. */
+    pause(): void;
+    resume(): void;
+    /** Takes every timer off (the clock stays). */
+    clear(): void;
+    /** Moves the clock on by `seconds` (finite, 0 or more; RangeError)
+     * and runs the timers due, as above. Calling it from one of its own
+     * callbacks throws an `InvalidStateError`. */
+    advance(seconds: number): void;
+  }
+  /** A new timer set at time 0 (since API_MINOR 37, `TIMERS_MINOR`):
+   * `const timers = createTimers(); onFixedUpdate((step) => timers.advance(step));
+   * timers.after(1.5, () => serve());`. Each set is independent: one for
+   * the match (paused with it), one for the menus. */
+  export function createTimers(): Timers;
+
+  export interface FixedStepOptions {
+    /** Steps a second, 1–1000 (60 when neither this nor `step` is given). */
+    rate?: number;
+    /** Or the step in seconds, 0.001–1. Not both (TypeError). */
+    step?: number;
+    /** The most steps one `advance` runs, 1–1000 (5): time past them is
+     * dropped and counted in `droppedSteps`, as the engine's own fixed
+     * loop drops it, so a long frame does not spiral. */
+    maxSteps?: number;
+    /** Runs once a step with the step in seconds. */
+    update: (step: number) => void;
+  }
+  /** A fixed-timestep loop of the game's own (since API_MINOR 37,
+   * `FIXED_STEP_MINOR`; undefined for games declaring an older
+   * `engine.minor`), for a simulation at a rate other than
+   * `setFixedRate`'s, or one per system: `advance(delta)` from `onUpdate`
+   * adds the time, runs `update(step)` for each whole step it holds (at
+   * most `maxSteps`), keeps the remainder and returns `alpha`. */
+  export interface FixedStep {
+    readonly rate: number;
+    readonly step: number;
+    readonly maxSteps: number;
+    /** How far the time held is between the last step and the next, 0 to
+     * under 1: for interpolating drawn state. */
+    readonly alpha: number;
+    readonly paused: boolean;
+    /** Steps run, and steps dropped past `maxSteps`, since made or reset. */
+    readonly steps: number;
+    readonly droppedSteps: number;
+    /** Adds `delta` seconds (finite, 0 or more; RangeError) and runs the
+     * whole steps it makes (a remainder within 1e-9 of a step counts as
+     * one), at most `maxSteps`; returns `alpha`. A delta of more than 2^52
+     * steps counts as 2^52 (all but `maxSteps` dropped, alpha 0). While paused it adds
+     * nothing. A step that pauses it ends the call, the steps it had left
+     * counted as dropped; one that throws ends it too, the error
+     * propagating. From inside `update` it throws an `InvalidStateError`. */
+    advance(delta: number): number;
+    /** Stops adding time until `resume` (the remainder is kept). */
+    pause(): void;
+    resume(): void;
+    /** Drops the time held (alpha 0) and zeroes `steps` and
+     * `droppedSteps`. From inside `update` it also ends that `advance`'s
+     * steps. */
+    reset(): void;
+  }
+  /** A new fixed-timestep loop (since API_MINOR 37, `FIXED_STEP_MINOR`):
+   * `const sim = createFixedStep({ rate: 120, update: (dt) => world.step(dt) });
+   * onUpdate((delta) => { const alpha = sim.advance(delta); draw(alpha); });`.
+   * TypeError without `update` or with both `rate` and `step`, RangeError
+   * for a rate, step or maxSteps out of range. */
+  export function createFixedStep(options: FixedStepOptions): FixedStep;
+
+  // -- String tables -----------------------------------------------------------
+  /** The game's translated strings (since API_MINOR 37,
+   * `STRING_TABLES_MINOR`; `strings` is undefined for games declaring an
+   * older `engine.minor`), in the player's language (`preferences().
+   * language`: their Options › Language, else the account's, else the
+   * device's) unless the game sets another.
+   *
+   * Tables are JSON: an object of tables by language tag, each an object
+   * of messages by key, nested objects joining their keys with a dot
+   * (`{"hud": {"coins": …}}` is `hud.coins`):
+   * `{"en-US": {"title": "Harbor", "coins": {"one": "{count} coin",
+   * "other": "{count} coins"}}, "fr": {"title": "Port"}}`. The first
+   * locale loaded is the default unless `defaultLocale` says otherwise.
+   *
+   * The fallback chain, from the language to the tables (CLDR's parent
+   * locales where games need them): the tag itself; its language and
+   * region (variants dropped); its regional parent: Spanish of the
+   * Americas (`es-MX`, `es-US`, … every CLDR child of `es-419`) to
+   * `es-419`, Portuguese outside Brazil (`pt-AO`, `pt-MZ`, … CLDR's
+   * children of `pt-PT`) to `pt-PT`, English outside the US, its
+   * territories and Canada to `en-001` then `en-GB`; its language and
+   * script; the bare language (`fr`); the language's main locale (`en-US`,
+   * `es-ES`, `fr-FR`, `pt-BR`, `de-DE`, `it-IT`, …; Chinese `zh-CN`, or
+   * `zh-TW` for Traditional); then the language's other tables in the
+   * order loaded; then the default. A table of another script never
+   * stands in (`zh-TW` never takes `zh-CN`'s). So `es-MX` reads `es-419`,
+   * `es-ES`, then the default; `en-AU` reads `en-GB` then `en-US`;
+   * `fr-CA` reads `fr-CA`, then `fr`/`fr-FR`; `pt-PT` reads `pt-BR` when
+   * it is the only Portuguese. Each key falls back on its own: a key
+   * missing in `fr-CA` comes from `fr-FR`, then the default, then the key
+   * itself (and a console warning, once a key).
+   *
+   * Placeholders: `{name}` is `String(vars.name)` when `vars` has its own
+   * `name` (else it stays as written); `{{` and `}}` are literal braces.
+   * Plurals: `plural(key, count)` takes, in each locale of the chain in
+   * turn, `key.=N` for a whole `count` N, else `key.<category>` (`zero`,
+   * `one`, `two`, `few`, `many`, `other`) by that locale's CLDR rule
+   * (Unicode CLDR 48, the engine's own data, so the same on every
+   * runtime; the operands are those of `String(count)`: `1` is one in
+   * English, `1.5` is not), else `key.other`, and fills `{count}` in that
+   * locale's digits and grouping (`1,234`, `1.234`, `1 234`) unless `vars`
+   * gives `count`. `ordinal` does the same by the ordinal rule
+   * (`place.one` "{count}st", `place.two`, `place.few`, `place.other`).
+   *
+   * StarHermit account strings: keys `starhermit.<name>` are the engine's
+   * own, in the platform's nine locales (en-US, en-GB, es-419, es-ES,
+   * de-DE, fr-FR, fr-CA, pt-BR, it-IT), followed in the game's locale
+   * (else the player's language) through the same chain, ending in
+   * en-US: `signIn` "Sign in with StarHermit", `signInHint` "sync progress
+   * and settings", `signedInAs` "Signed in as {name}", `signedOut`,
+   * `invite` "Invite a friend", `inviteHint`, `inviteCopied`,
+   * `inviteFailed`, `inviteLink` "Copy this invite link: {link}",
+   * `leaderboardPosting`, `leaderboardRank` "Leaderboard rank: #{rank}",
+   * `leaderboardPosted`, `leaderboardNotPosted`. A game's own message for
+   * one of these keys, in a table of its locale's language, wins. */
+  export interface StringTables {
+    /** Adds tables from a package file of JSON (read as `files.readJson`
+     * reads it) or an object of that shape, all or nothing: a TypeError
+     * for anything but strings and objects of them or a key given both
+     * dotted and nested (`"a.b"` and `a: { b }`), a RangeError for a
+     * locale that is not a language tag (tags are kept in canonical case:
+     * `pt_br` is `pt-BR`), a key over 256 characters or more than 1,000
+     * locales in all. A locale loaded
+     * again takes the new messages over its old. Returns the locales read. */
+    load(source: string | { readonly [locale: string]: unknown }): string[];
+    /** The locales with tables, in the order loaded. */
+    readonly locales: string[];
+    /** The last locale of every chain: the first loaded unless set (a
+     * RangeError for one without a table). */
+    defaultLocale: string | null;
+    /** The language the chain starts from: `setLanguage`'s, else the
+     * player's. */
+    readonly language: string;
+    /** Starts the chain from this language instead of the player's (null
+     * follows the player's again). A RangeError for a malformed tag. */
+    setLanguage(tag: string | null): void;
+    /** The locale the strings are in: the chain's first, else the
+     * language itself when no table matches (account strings follow it). */
+    readonly locale: string;
+    /** The fallback chain, the locale first. */
+    readonly chain: string[];
+    /** `key`'s message, its placeholders filled from `vars`. */
+    t(key: string, vars?: { readonly [name: string]: unknown }): string;
+    /** Whether `key` has a message anywhere along the chain. */
+    has(key: string): boolean;
+    /** The plural message `key` for `count` (see above). */
+    plural(key: string, count: number, vars?: { readonly [name: string]: unknown }): string;
+    /** The ordinal message `key` for `count` ("1st", "2nd"). */
+    ordinal(key: string, count: number, vars?: { readonly [name: string]: unknown }): string;
+    /** The first locale of `tag`'s chain over `locales` (no default), or
+     * null: the games' `pickLocale`. */
+    bestLocale(tag: string, locales: readonly string[]): string | null;
+    /** Called with the new locale when it changes (the player changed
+     * their language, `setLanguage`, `load`); the next frame's strings
+     * are in it either way. */
+    onChange(listener: (locale: string) => void): Unsubscribe;
+  }
+  export const strings: StringTables;
+
   /** The game is busy with a long piece of work it cannot split across
    * frames (a level generated, a world built), or no longer (null; since
    * API_MINOR 5). While it is busy a call may run up to 60 seconds, not
@@ -1405,6 +1759,24 @@ declare module "starhermit:input" {
     readonly pressed: boolean;
     readonly slot: number;
     readonly source: InputSource;
+    /** The binding that made this edge (since API_MINOR 37; undefined
+     * before): the key's `KeyboardEvent.code` (`"ArrowLeft"`, `"Enter"`),
+     * a mouse input's name as `Binding.code` gives it (`"MouseLeft"`,
+     * `"WheelDown"`), or null for a gamepad, a finger (on-screen
+     * controls) and the runtime's own releases (focus lost, a rebind). A
+     * game that does one thing for an action's Enter and another for its
+     * arrow reads it here rather than `isKeyDown`, which the player's
+     * rebinding leaves behind. */
+    readonly code?: string | null;
+    /** The modifier keys held as the edge happened, either side (since
+     * API_MINOR 37; undefined before): as `KeyboardEvent`'s `shiftKey`,
+     * `ctrlKey`, `altKey` and `metaKey`, from any source (Shift held with
+     * a gamepad's press too). A modifier bound to the action itself is
+     * held on its own press. */
+    readonly shift?: boolean;
+    readonly ctrl?: boolean;
+    readonly alt?: boolean;
+    readonly meta?: boolean;
   }
   /** Each press and release (a press is a user gesture). */
   export function onAction(listener: (event: ActionEvent) => void): Unsubscribe;
@@ -1628,6 +2000,91 @@ declare module "starhermit:input" {
    * and release). */
   export function setTouchControls(controls: readonly TouchControl[] | null): void;
 
+  // -- Gestures (since API_MINOR 37) -----------------------------------------
+  // Taps, double taps, long presses, drags and pinches, recognized by the
+  // engine from the mouse's primary button and the player's fingers alike
+  // and delivered as one stream: what games built from `onPointerButton`,
+  // `onPointerMove` and `onTouch` themselves (skipping the pointer a
+  // platform moves and presses with the first finger, a tap slop of
+  // 12 px times `frame().scale`, a drag committed on release). The same
+  // events at the same times give the same gestures natively and in
+  // browsers. Positions are window pixels, as `onPointerButton`'s.
+  //
+  // One contact makes taps, long presses and drags: the mouse's primary
+  // button while it is held, or the first finger down (not one on the
+  // `setTouchControls` controls, which never make a gesture). While a
+  // finger is down, and for 600 ms after a finger's last event, the
+  // pointer's own events are taken for the platform's emulation of it and
+  // make nothing. A press the game's UI takes (a widget, a panel's box,
+  // a dismissible toast: `ui.pointerCaptured()`) makes no gesture.
+  //
+  // - `tap`: let go within the slop (12 logical pixels, times the window's
+  //   scale factor) before a long press; `count` is the taps in a row (a
+  //   tap's press within 300 ms of the last tap's release, within 24
+  //   logical pixels of it, on the same device: 2, 3…).
+  // - `doubleTap`: right after a tap whose `count` is 2.
+  // - `longPress`: held within the slop for 500 ms, as the frame that
+  //   reaches it begins (or as it is let go, between frames). Its release
+  //   then taps nothing; moving past the slop still drags.
+  // - `dragStart` (moved past the slop: `startX`/`startY` where it was
+  //   pressed, `dx`/`dy` from there), `drag` (each move, `dx`/`dy` since
+  //   the last), `dragEnd` (let go; `cancelled` when a second finger went
+  //   down, the touch was cancelled, the window lost focus or the runtime's
+  //   interface opened).
+  // - `pinchStart`, `pinch`, `pinchEnd`: a second finger went down with
+  //   the first (whose drag ends cancelled); `x`/`y` is their midpoint,
+  //   `scale` their distance over that at the start, `rotation` how far the
+  //   line between them turned (radians, clockwise). One finger lifting
+  //   ends it; the other then makes nothing until it lifts too.
+  //
+  // Gestures arrive after the input event that made them (after its
+  // `onPointerButton` or `onTouch` listeners), a long press before
+  // `onUpdate` of the frame that reached its time. The recognizer runs
+  // only while a listener is registered (it starts afresh when the first
+  // is added). Games declaring an older `engine.minor` have no
+  // `onGesture`.
+  export type GestureType =
+    | "tap" | "doubleTap" | "longPress" | "dragStart" | "drag" | "dragEnd" | "pinchStart" | "pinch" | "pinchEnd";
+  export interface GestureEvent {
+    readonly type: GestureType;
+    /** What made it: the mouse (or a pen) or a finger. */
+    readonly device: "pointer" | "touch";
+    /** Where it is now (a pinch's midpoint), window pixels. */
+    readonly x: number;
+    readonly y: number;
+    /** Where it was pressed (a pinch's midpoint at its start). */
+    readonly startX: number;
+    readonly startY: number;
+    /** Moved since the gesture's last event. */
+    readonly dx: number;
+    readonly dy: number;
+    /** Seconds since the press (a pinch: since it began). */
+    readonly held: number;
+    /** Taps in a row (`tap`, `doubleTap`); 0 otherwise. */
+    readonly count: number;
+    /** Pinches: the fingers' distance over that at the start; 1 otherwise. */
+    readonly scale: number;
+    /** Pinches: radians the line between the fingers turned, clockwise. */
+    readonly rotation: number;
+    /** A drag or pinch that ended without its release. */
+    readonly cancelled: boolean;
+  }
+  /** Since API_MINOR 38 (`GESTURE_SLOP_MINOR`). */
+  export interface GestureOptions {
+    /** How far (logical pixels, times the window's scale factor) a
+     * contact moves and still taps or long-presses: 1 to 256 (RangeError
+     * past them; a non-number is a TypeError), default 12. It holds from
+     * this call on while any listener is registered, the latest given
+     * winning, and goes back to 12 once none is. */
+    slop?: number;
+  }
+  /** Listens for gestures (a frozen event each); since API_MINOR 37,
+   * undefined before. `options` since API_MINOR 38; before it they are
+   * not read and the slop is 12. */
+  export const onGesture:
+    | ((listener: (event: GestureEvent) => void, options?: GestureOptions) => Unsubscribe)
+    | undefined;
+
   // -- Gamepads ---------------------------------------------------------------
   /** The W3C standard mapping: 17 buttons (0 South/A, 1 East/B, 2 West/X,
    * 3 North/Y, 4–5 shoulders, 6–7 triggers, 8 Select, 9 Start, 10–11 stick
@@ -1684,6 +2141,53 @@ declare module "starhermit:storage" {
     usage(): { readonly bytes: number; readonly keys: number; readonly quotaBytes: number; readonly maxKeys: number };
   }
   export const storage: KeyValueStorage;
+
+  /** The Web Storage interface (`localStorage`'s `Storage`) over
+   * {@link storage} (since API_MINOR 37, `LOCAL_STORAGE_MINOR`; undefined
+   * for games declaring an older `engine.minor`), for a browser build's
+   * shared scripts (`js/*.js`) that keep their records in `localStorage`.
+   * It is a view of the same keys: `getItem(key)` is `storage.getText(key)`,
+   * `setItem` is `storage.set` with text, so what one writes the other
+   * reads, with storage's persistence (a write reaches the disk as the
+   * frame ends), limits and capability (without `storage` in the
+   * manifest's capabilities every call throws `NotAllowedError`). As Web
+   * Storage, keys and values are converted to strings (`setItem("n", 1)`
+   * stores `"1"`, a Symbol is a TypeError), too few arguments are a
+   * TypeError, and a write past storage's limits (a value over 1 MiB, the
+   * game's quota or its key count) throws an Error named
+   * `QuotaExceededError` and changes nothing; one past storage's write
+   * rate (16 MiB at once, 4 MiB a second) throws a RangeError, as
+   * `storage.set` does, and changes nothing. `removeItem` and `clear()`
+   * never throw (`clear()` removes every key of `storage` at once). Keys
+   * and values keep every UTF-16 code unit: a lone surrogate, and U+FFFF,
+   * are stored as U+FFFF and the unit's four hex digits (other text as
+   * it is, so `storage.getText` reads it). Keys are storage's: a key
+   * that is not 1–120 bytes of text (so stored) without control
+   * characters is never set (`getItem` gives null, `removeItem` does
+   * nothing, `setItem` throws a TypeError). `key(i)` and `length` follow
+   * `storage.keys()` (the keys in order of their UTF-8 bytes). A key
+   * holding bytes that are not UTF-8 throws a TypeError from `getItem`,
+   * as from `getText`. The object and its prototype are frozen: items are
+   * read and written through the methods only (no `localStorage.name`
+   * properties). */
+  export interface LocalStorage {
+    readonly length: number;
+    key(index: number): string | null;
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+    removeItem(key: string): void;
+    clear(): void;
+  }
+  export const localStorage: LocalStorage;
+  /** Makes {@link localStorage} the global `localStorage` (since API_MINOR
+   * 37, `LOCAL_STORAGE_MINOR`) and returns it, so a classic script loaded
+   * after (`loadClassic`) reads and writes the device's storage as it did
+   * the browser's. Opt-in, as the global is the browser build's name: the
+   * engine defines no `localStorage` of its own (a game may still assign
+   * its own), and the browser's game worker has none either. Call it
+   * before the scripts that read the global run (at the top of the module
+   * imported first). */
+  export function installLocalStorage(): LocalStorage;
 
   /** The game's own settings (difficulty, camera options), kept with the
    * player's engine settings: on this device, and in the player's account
@@ -3267,10 +3771,22 @@ declare module "starhermit:scene" {
   export interface RendererCapabilities {
     readonly floatRenderable: boolean;
     readonly floatFilterable: boolean;
+    /** Since API_MINOR 38 (`MRT_MINOR`; absent before): the most textures
+     * a `WebGLRenderTarget` holds here (its `count`), 4 to 8: the device's
+     * color attachments (Vulkan `maxColorAttachments`, OpenGL ES and
+     * WebGL2 `MAX_DRAW_BUFFERS`, WebGPU `maxColorAttachments`; Direct3D 12
+     * and Metal 8), at most 8 everywhere; 4 until the runtime knows the
+     * device (the first frame or two). */
+    readonly maxColorAttachments?: number;
   }
   /** Since API_MINOR 8: `RenderTarget`'s options (three.js's; others are
    * ignored). */
   export interface RenderTargetOptions {
+    /** Since API_MINOR 38 (`MRT_MINOR`; ignored before, and by
+     * `RenderTarget` and the array and 3D targets): a `WebGLRenderTarget`'s
+     * textures (three.js r185's multiple render targets; default 1). See
+     * `WebGLRenderTarget`. */
+    count?: number;
     /** Since API_MINOR 35: its depth as a texture (`DepthTexture`), which
      * makes `depthBuffer` true. */
     depthTexture?: DepthTexture | null;
@@ -3396,9 +3912,42 @@ declare module "starhermit:scene" {
     /** Releases its image; `texture` is disposed with it. */
     dispose(): void;
   }
-  /** Since API_MINOR 8: three.js's name for `RenderTarget`. */
+  /** Since API_MINOR 8: three.js's name for `RenderTarget`.
+   *
+   * Since API_MINOR 38 (`MRT_MINOR`) it takes three.js r185's `count`
+   * (multiple render targets, a G-buffer): `count` textures, `textures[0]`
+   * being `texture` and each other a clone of its settings at construction
+   * (three.js's), of its size, format and type, without depth of their
+   * own. A pass into the target draws into all of them: a
+   * `ShaderMaterial` whose `fragmentShader` returns a struct of
+   * `@location(n)` `vec4f` members (location 0 among them, three.js's
+   * `pc_fragColor`) writes texture `n` from member `n`: location 0 as a
+   * `vec4f` fragment's color is written (fogged, tone mapped and encoded
+   * as the target's type says), the others as given (clamped to 0–1 in
+   * 8-bit textures). Built-in materials, and programs without a location,
+   * leave those textures as they are, as three.js's WebGLRenderer does
+   * with draw buffers a shader has no output for; a clear clears them
+   * all; blending applies to each alike (unblended where 32-bit floats).
+   * `renderer.readRenderTargetPixelsAsync` reads any by its
+   * `textureIndex`; `setSize`, a new `depthTexture` and `dispose()` take
+   * them all along. `count` is a whole number from 1 to 8 (RangeError),
+   * at most `renderer.capabilities.maxColorAttachments` here, and a
+   * sample of all the textures may take at most 32 bytes on every device
+   * (WebGPU's default `maxColorAttachmentBytesPerSample`, held natively
+   * too so a game draws the same targets everywhere), counted as WebGPU
+   * counts them: RGBA8 and RGBA16F 8 bytes, RGBA32F 16, RG8 2, R8 1,
+   * RG16F 4, R16F 2, RG32F 8, R32F 4 — so 4 × RGBA8 or HalfFloatType,
+   * or 2 × FloatType, fit, and past them the RangeError gives the
+   * arithmetic. Each texture counts as a render target (of the 32 a game
+   * holds) and against the image budget. MSAA is not offered with
+   * `count` past 1: `samples` above 0 with it is a RangeError (the
+   * engine's render targets are not multisampled, and `samples` is
+   * otherwise ignored). Older games' targets ignore `count`. */
   export class WebGLRenderTarget extends RenderTarget {
     readonly isWebGLRenderTarget: true;
+    /** Since API_MINOR 38 (`MRT_MINOR`; absent before): its textures,
+     * `texture` first (one but with `count`). */
+    readonly textures?: Texture[];
   }
   /** Since API_MINOR 35 (`DEPTH_TEXTURES_MINOR`; a TypeError before):
    * three.js r185's `DepthTexture`, a render target's depth as a texture,
@@ -4821,7 +5370,12 @@ declare module "starhermit:scene" {
     defines?: Record<string, number | boolean>;
     /** WGSL declaring `fn vertex(v: Vertex) -> Vertex` (optional). */
     vertexShader?: string;
-    /** WGSL declaring `fn fragment(f: Fragment) -> vec4f`. */
+    /** WGSL declaring `fn fragment(f: Fragment) -> vec4f`. Since
+     * API_MINOR 38 (`MRT_MINOR`) it may instead return a struct the same
+     * code declares, each member a `vec4f` with one `@location(n)` (`n` 0
+     * to 7, each once, 0 among them; the only attributes a game's WGSL
+     * carries): a `WebGLRenderTarget` with `count` gets texture `n` from
+     * member `n` (see there); elsewhere location 0 alone is drawn. */
     fragmentShader?: string;
     /** WGSL declaring `fn fog(f: Fog) -> Fog` (since API_MINOR 9; with
      * `fog: true`). */
@@ -5835,6 +6389,454 @@ declare module "starhermit:scene" {
     geometry: BufferGeometry;
     material: PointsMaterial;
   }
+  /** Three numbers: a Vector3 (or anything with x, y and z) or [x, y, z]. */
+  export type ParticleVector = { x: number; y: number; z: number } | readonly [number, number, number];
+  /** A `ParticleEmitter`'s settings (since API_MINOR 37). Vectors are in
+   * the emitter's space: its axes and scale. */
+  export interface ParticleEmitterOptions {
+    /** The most particles alive at once, 1 to 16,384 (default 256). Fixed
+     * when made; a game's emitters hold at most 32,768 together and a game
+     * has at most 256 emitters (a RangeError past either). */
+    capacity?: number;
+    /** Point sprites: a `PointsMaterial` (default: a new one). Instanced:
+     * any mesh material (default: a new `MeshBasicMaterial`). */
+    material?: Material;
+    /** Draws each particle as an instance of this geometry (default null:
+     * point sprites). */
+    geometry?: BufferGeometry | null;
+    /** The random stream's seed, an integer 0 to 2^32 − 1 (default 1). */
+    seed?: number;
+    /** Particles a second, spread evenly through each frame (default 0:
+     * only bursts). */
+    rate?: number;
+    /** A particle's life in seconds, or [min, max] (uniformly between;
+     * 0.001 to 3600; default 1). */
+    life?: number | readonly [number, number];
+    /** "world" (default): particles spawn where the emitter is and stay in
+     * the world as it moves on. "local": they move with it. */
+    space?: "world" | "local";
+    /** Where particles start round the emitter's origin (or a burst's
+     * point): "point" (default), "box" (anywhere within ±`extent` on each
+     * axis), "sphere" (anywhere within radius `extent`) or "shell" (on
+     * that sphere). */
+    shape?: "point" | "box" | "sphere" | "shell";
+    /** The box's half extents (a number: a cube) or the sphere's radius. */
+    extent?: number | ParticleVector;
+    /** A spawned particle's velocity (units a second; default 0), plus up
+     * to ±`velocitySpread` on each axis, plus a speed from `speed` along a
+     * direction within `spread` radians of `direction` (π: any). */
+    velocity?: ParticleVector;
+    velocitySpread?: number | ParticleVector;
+    /** A number, or [min, max] (default 0). */
+    speed?: number | readonly [number, number];
+    /** Default [0, 1, 0]. */
+    direction?: ParticleVector;
+    /** 0 to π radians (default 0). */
+    spread?: number;
+    /** Acceleration in units a second squared (default 0). */
+    gravity?: ParticleVector;
+    /** Each frame's velocity is divided by 1 + drag × delta (default 0). */
+    drag?: number;
+    /** A size factor, or 1 to 8 of them evenly spaced over each life
+     * (default 1). Points: times the material's `size` (pixels, or with
+     * `sizeAttenuation` world units as three.js's PointsMaterial). Instances:
+     * the instance's scale. */
+    size?: number | readonly number[];
+    /** The particles' color (default white; linear values above 1 bloom):
+     * multiplies the material's color. */
+    color?: ColorInput;
+    /** 1 to 8 colors evenly spaced over each life, in place of `color`. */
+    colors?: readonly ColorInput[];
+    /** 0 to 1, or 1 to 8 values evenly spaced over each life (default 1):
+     * multiplies the material's opacity (a `transparent` material shows it). */
+    opacity?: number | readonly number[];
+    /** Since API_MINOR 38 (an unknown option before): each particle's own
+     * oscillation, a star's twinkle (default null: none). */
+    twinkle?: ParticleTwinkle | null;
+    /** Since API_MINOR 38: instances' scale on each axis, times `size`
+     * (default 1; 0 to 4,096). Point sprites leave it out. */
+    scale?: number | ParticleVector;
+    /** Since API_MINOR 38: up to ± this much of `scale` on each axis, a
+     * factor of each particle's own (default 0; never below 0), so pieces
+     * of debris differ in shape. */
+    scaleSpread?: number | ParticleVector;
+  }
+  /** A per-particle oscillation (since API_MINOR 38). Each particle has a
+   * phase and a frequency of its own, hashed from its spawn number and the
+   * seed (the random stream is untouched, and live particles twinkle as
+   * soon as it is set). Its opacity is multiplied by `1 − opacity × w` and
+   * its size by `1 − size × w`, w going 0 → 1 → 0 once a cycle. */
+  export interface ParticleTwinkle {
+    /** Cycles a second, or [min, max] (0 to 1,000; default 1). */
+    frequency?: number | readonly [number, number];
+    /** 0 to 1 (default 1). */
+    opacity?: number;
+    /** 0 to 1 (default 0). */
+    size?: number;
+  }
+  /** A burst's options (since API_MINOR 38; an older game's third argument
+   * is ignored). */
+  export interface ParticleBurstOptions {
+    /** Multiplies the color ramp for these particles all their lives (later
+     * `set({ color })` does not undo it), so one emitter bursts many colors. */
+    color?: ColorInput;
+    /** Spawned at random points of their lives (same place and velocity),
+     * not at age 0: an ambient field shows at once despite a fade-in. */
+    aged?: boolean;
+  }
+  // -- Audio in the scene (three.js r185's audio objects, host API 1.37) ----
+  // starhermit:audio's graph placed by the scene: an `AudioListener` (on a
+  // camera, usually) moves `context.listener`, and each `PositionalAudio`
+  // its PannerNode, once a frame after the scene's sync, ramping to where
+  // their objects are over the frame's delta as three.js does (a
+  // PositionalAudio only while it plays). They need starhermit:audio
+  // imported and `SPATIAL_AUDIO_MINOR` (37): a TypeError otherwise. Buffers
+  // are starhermit:audio's `AudioBuffer`s (`context.decodeAudioData`,
+  // `createBuffer`); sounds of clips placed in 3D are `play(clip, {
+  // position })`, which follow the same listener.
+
+  /** three.js's AudioListener: its gain (`getInput()`) leads to the
+   * effects bus, and a filter may sit after it. */
+  export class AudioListener extends Object3D {
+    constructor();
+    readonly type: "AudioListener";
+    readonly context: import("starhermit:audio").AudioContext;
+    readonly gain: import("starhermit:audio").GainNode;
+    filter: import("starhermit:audio").AudioNode | null;
+    /** The last frame's delta, seconds. */
+    timeDelta: number;
+    getInput(): import("starhermit:audio").GainNode;
+    removeFilter(): this;
+    getFilter(): import("starhermit:audio").AudioNode | null;
+    setFilter(value: import("starhermit:audio").AudioNode): this;
+    getMasterVolume(): number;
+    setMasterVolume(value: number): this;
+  }
+  /** three.js's Audio: a buffer played through its gain into the listener. */
+  export class Audio extends Object3D {
+    constructor(listener: AudioListener);
+    readonly type: string;
+    readonly listener: AudioListener;
+    readonly context: import("starhermit:audio").AudioContext;
+    readonly gain: import("starhermit:audio").GainNode;
+    autoplay: boolean;
+    buffer: import("starhermit:audio").AudioBuffer | null;
+    detune: number;
+    loop: boolean;
+    loopStart: number;
+    loopEnd: number;
+    offset: number;
+    duration: number | undefined;
+    playbackRate: number;
+    isPlaying: boolean;
+    hasPlaybackControl: boolean;
+    source: import("starhermit:audio").AudioBufferSourceNode | null;
+    sourceType: string;
+    filters: import("starhermit:audio").AudioNode[];
+    getOutput(): import("starhermit:audio").AudioNode;
+    setBuffer(audioBuffer: import("starhermit:audio").AudioBuffer): this;
+    play(delay?: number): this | undefined;
+    pause(): this | undefined;
+    stop(delay?: number): this | undefined;
+    connect(): this;
+    disconnect(): this | undefined;
+    getFilters(): import("starhermit:audio").AudioNode[];
+    setFilters(value: import("starhermit:audio").AudioNode[]): this;
+    getFilter(): import("starhermit:audio").AudioNode | undefined;
+    setFilter(filter: import("starhermit:audio").AudioNode | null): this;
+    setDetune(value: number): this;
+    getDetune(): number;
+    setPlaybackRate(value: number): this;
+    getPlaybackRate(): number;
+    getLoop(): boolean;
+    setLoop(value: boolean): this;
+    setLoopStart(value: number): this;
+    setLoopEnd(value: number): this;
+    getVolume(): number;
+    setVolume(value: number): this;
+  }
+  /** three.js's PositionalAudio: an Audio through a PannerNode
+   * (`panningModel` "HRTF", rendered as equal-power) that follows the
+   * object and faces its +z. */
+  export class PositionalAudio extends Audio {
+    constructor(listener: AudioListener);
+    readonly panner: import("starhermit:audio").PannerNode;
+    getRefDistance(): number;
+    setRefDistance(value: number): this;
+    getRolloffFactor(): number;
+    setRolloffFactor(value: number): this;
+    getDistanceModel(): string;
+    setDistanceModel(value: "linear" | "inverse" | "exponential"): this;
+    getMaxDistance(): number;
+    setMaxDistance(value: number): this;
+    setDirectionalCone(coneInnerAngle: number, coneOuterAngle: number, coneOuterGain: number): this;
+  }
+
+  /** Since API_MINOR 37 (`PARTICLE_EMITTER_MINOR`; constructing one in an
+   * older game throws a TypeError): a pool of particles the runtime itself
+   * spawns, moves (velocity, gravity, drag), colors, fades and sizes over
+   * their lives and draws, once a frame after `onRender` and the scene's
+   * sync, so a game pays nothing in script per particle. Add it to the scene
+   * as any object; set it up once and change it now and then (`set`,
+   * `rate`), and `burst` it. Without a `geometry` its particles are point
+   * sprites drawn with its `PointsMaterial`; with one they are instances of
+   * it. Seeded and stepped by the frame's delta (the delta `onUpdate` gets,
+   * at most 0.25 s a frame), with the engine's own arithmetic, so the same
+   * frames give the same particles natively and in browsers: replays and
+   * render checks repeat. A step costs the frame's fuel one unit an emitter
+   * and one each 8 live particles. Points of all emitters together count
+   * toward a frame's 65,536 points, instances toward the instanced meshes'
+   * budget. */
+  export class ParticleEmitter extends Object3D {
+    constructor(options?: ParticleEmitterOptions);
+    readonly isParticleEmitter: true;
+    material: Material;
+    geometry: BufferGeometry | null;
+    /** Fixed when made. */
+    readonly capacity: number;
+    /** Changing it starts the random stream again. */
+    seed: number;
+    /** Particles a second. */
+    rate: number;
+    /** A paused emitter neither moves nor spawns (its particles still draw). */
+    paused: boolean;
+    /** Its live particles, as of the last frame's step. */
+    readonly count: number;
+    /** A copy of its settings. */
+    readonly options: ParticleEmitterOptions;
+    /** Changes some settings (all but `capacity`); the live particles stay
+     * and keep their lives. */
+    set(options: ParticleEmitterOptions): this;
+    /** Spawns `count` particles (default 1) at the next step, at `at` in the
+     * emitter's space (default its origin) plus the shape's offset. Past the
+     * capacity they are dropped. */
+    burst(count?: number, at?: ParticleVector, options?: ParticleBurstOptions): this;
+    /** Since API_MINOR 38 (absent before): runs it `seconds` (0 to 600)
+     * ahead now, from where it is, as frames of at most 0.25 s would,
+     * paused or not, so a steady emitter starts full. Charged as those
+     * steps (one unit each and one each 8 particles), each before it runs. */
+    prewarm(seconds: number): this;
+    /** Lets every live particle go. */
+    clear(): this;
+    /** Lets its particles and its capacity go; it draws nothing after. */
+    dispose(): void;
+  }
+  /** A `TextLabel`'s settings (since API_MINOR 37). Sizes in font sizes
+   * are fractions of `size`. */
+  export interface TextLabelOptions {
+    text?: string;
+    /** The font size: world units (default 0.5), or CSS pixels with
+     * `units: "pixels"` (default 16). */
+    size?: number;
+    /** `"world"` (default): it is sized in the scene and shrinks with
+     * distance; `"pixels"`: the same size on screen at any distance (a
+     * billboard only). */
+    units?: "world" | "pixels";
+    /** Faces the camera (default, as a Sprite), or false: lies in the
+     * object's xy plane facing +z and turns with it. */
+    billboard?: boolean;
+    /** Hidden behind nearer surfaces (default); false draws it over them
+     * (raise `renderOrder` to draw it over other transparent objects). */
+    depthTest?: boolean;
+    /** Default white. */
+    color?: ColorLike;
+    /** A CSS font family list (default "sans-serif"): the engine's fonts
+     * and those the game added (`starhermit:canvas` fonts), as a canvas
+     * `font` names them (`"'StarHermit Emoji', sans-serif"` draws the
+     * engine's emoji font's symbols first). */
+    font?: string;
+    /** A CSS font weight (default "normal"). */
+    weight?: string | number;
+    /** "normal" (default) or "italic". */
+    style?: string;
+    /** Default black. */
+    outlineColor?: ColorLike;
+    /** The outline round the glyphs, in font sizes (default 0: none). */
+    outlineWidth?: number;
+    /** A rounded box behind the text (default none). */
+    background?: ColorLike | null;
+    /** Space round the text, in font sizes (default 0.2). */
+    padding?: number;
+    /** The background's corner radius, in font sizes (default 0.25). */
+    radius?: number;
+    /** Lines (split at "\n") aligned within the widest (default "center"). */
+    align?: "left" | "center" | "right";
+    /** Line spacing, in font sizes (default 1.2). */
+    lineHeight?: number;
+    /** The label's point at its position: [0, 0] its bottom left, [1, 1]
+     * its top right (default [0.5, 0.5]; `center` for a billboard, as
+     * Sprite's). */
+    anchor?: readonly [number, number] | { x: number; y: number };
+    /** World labels: texture pixels a font size (default 64). Pixel labels
+     * are laid out at the window's scale, a texture pixel a window pixel.
+     * A label larger than a canvas may be (4096 pixels a side, 2^23 in
+     * all) is laid out scaled down to fit, as large but coarser. */
+    resolution?: number;
+    /** The material's opacity (default 1). */
+    opacity?: number;
+  }
+  /** Text in the scene (since API_MINOR 37, `TEXT_LABELS_MINOR`; older
+   * games' constructor throws a TypeError), for names, scores and tile
+   * numerals without a canvas bake in script: the runtime lays the text
+   * out with the engine's text stack (shaping, fallback fonts, emoji, as
+   * canvas text) into a texture of the label's own in one call, and again
+   * only when what it shows changes (its text, font, colors, outline,
+   * background, padding, alignment or resolution; not its position, world
+   * size, depth test or opacity). Add it to the scene like any object; it
+   * draws as a Sprite (`billboard`, the default) or as a plane mesh, with
+   * a SpriteMaterial or MeshBasicMaterial whose `map` is its texture (not
+   * tone mapped, no fog, transparent, not writing depth).
+   *
+   * Like three-spritetext's `SpriteText`, the label sets its own `scale`
+   * from its text: size it with `size`. A world label's line is `size`
+   * world units of font; a pixel label (`units: "pixels"`) is `size` CSS
+   * pixels of font whatever its distance, fitted after `onRender` to the
+   * window's camera (`renderer.camera`) and the window's height (in other
+   * cameras' views it keeps that scale). It has no raycast. Each label
+   * holds a canvas and a texture image (against the game's canvas and
+   * image budgets) until `dispose()`, or until it is collected (a label
+   * that finds no room in the canvas budget releases dropped ones first).
+   * Settings that throw (`set`, the setters) leave it as it was. */
+  export class TextLabel extends Object3D {
+    constructor(text?: string, options?: TextLabelOptions);
+    constructor(options: TextLabelOptions);
+    readonly isTextLabel: true;
+    /** The text shown; setting the same text again lays nothing out. */
+    text: string;
+    /** What draws it (its own; replaced as `billboard` changes). */
+    readonly material: SpriteMaterial | MeshBasicMaterial;
+    /** A fixed label's plane (shared by labels of its anchor). */
+    readonly geometry: BufferGeometry;
+    /** Its anchor, as Sprite's `center`. */
+    readonly center: Vector2;
+    /** A copy of its settings. */
+    readonly options: TextLabelOptions;
+    /** Changes some settings; it lays out again only if what it shows
+     * changed. */
+    set(options: TextLabelOptions): this;
+    /** Its size: world units for a world label, CSS pixels for a pixel
+     * label. */
+    readonly width: number;
+    readonly height: number;
+    /** Lets its texture, canvas and materials go; it draws nothing after. */
+    dispose(): void;
+  }
+  /** Robert Penner's easings as easings.net names them, and `linear`
+   * (since API_MINOR 37). */
+  export type EasingName =
+    | "linear"
+    | "easeInQuad" | "easeOutQuad" | "easeInOutQuad"
+    | "easeInCubic" | "easeOutCubic" | "easeInOutCubic"
+    | "easeInQuart" | "easeOutQuart" | "easeInOutQuart"
+    | "easeInQuint" | "easeOutQuint" | "easeInOutQuint"
+    | "easeInSine" | "easeOutSine" | "easeInOutSine"
+    | "easeInExpo" | "easeOutExpo" | "easeInOutExpo"
+    | "easeInCirc" | "easeOutCirc" | "easeInOutCirc"
+    | "easeInBack" | "easeOutBack" | "easeInOutBack"
+    | "easeInElastic" | "easeOutElastic" | "easeInOutElastic"
+    | "easeInBounce" | "easeOutBounce" | "easeInOutBounce";
+  /** A tween's timing and callbacks (since API_MINOR 37). Times are
+   * seconds of the frames' deltas. */
+  export interface TweenOptions {
+    /** Seconds a run takes (default 1; 0 jumps to the end values). */
+    duration?: number;
+    /** Seconds before it starts (default 0). */
+    delay?: number;
+    /** Default `"linear"`. */
+    easing?: EasingName;
+    /** Runs after the first (default 0; `Infinity` repeats until stopped). */
+    repeat?: number;
+    /** Every other run goes back from the end values to the start values
+     * with the same easing (tween.js's yoyo). */
+    yoyo?: boolean;
+    /** Seconds before each repeat, held at the run's end (default 0). */
+    repeatDelay?: number;
+    /** Start values for some of the tweened properties, in the same forms
+     * as `to` (default: each property's value when the tween starts). */
+    from?: Record<string, unknown>;
+    /** Starts paused. */
+    paused?: boolean;
+    /** Once it finishes (not when stopped), after its end values were
+     * written. */
+    onComplete?: () => void;
+    /** As each repeat begins. */
+    onRepeat?: () => void;
+  }
+  /** Since API_MINOR 37 (`TWEENS_MINOR`; older games' calls throw a
+   * TypeError): eases `target`'s properties to the values in `to`, stepped
+   * by the runtime itself, so no script runs a frame for a tween's timing
+   * and easing. A property is
+   *
+   * - a number (`material.opacity`, `light.intensity`, a uniform's
+   *   `value`, any numeric field of a plain object);
+   * - a Vector2, Vector3 or Vector4 (`position`, `scale`): `to` gives a
+   *   vector, `{ x, y, z }`, `[x, y, z]` or one number for every component;
+   * - a Color (`material.color`, `emissive`): any `ColorLike`, lerped in
+   *   linear light as `Color.lerp`;
+   * - an Euler (`rotation`): `[x, y, z]` or `{ x, y, z }`, its angles
+   *   lerped and set with `rotation.set` (its order kept);
+   * - a Quaternion (`quaternion`): a quaternion, `[x, y, z, w]` or an
+   *   Euler, slerped as three.js r185's `Quaternion.slerp` and set with
+   *   `quaternion.set`.
+   *
+   * So `tween(mesh, { position: [0, 2, 0], scale: 1.5 })`,
+   * `tween(mesh.material, { opacity: 0 })` and
+   * `tween(material.uniforms.glow, { value: 1 })`.
+   *
+   * Timing is tween.js's (three.js's examples' tween library) in seconds:
+   * after `delay`, `repeat + 1` runs of `duration`, each repeat after
+   * `repeatDelay`; the start values are read as the tween starts (as its
+   * delay ends) unless `from` gives them. Once a frame, just before
+   * `onUpdate` (and `nextFrame`'s callbacks), every running tween advances
+   * by the frame's delta (`frame().delta`) and its values are written as
+   * plain assignments (`position.x = …`; Euler and Quaternion through their
+   * `set`, so the other follows), so script reads them as it would its own
+   * and `onUpdate` may still change them. Then, in the order the tweens
+   * were made, repeats call `onRepeat` and finished tweens call
+   * `onComplete` and resolve `finished`. Time is summed from the frames'
+   * deltas and the easings use the engine's own powers and angles, so the
+   * same frames give the same values bit for bit natively and in browsers
+   * (replays and render checks repeat).
+   *
+   * A tween takes over the properties it drives as it starts: an older
+   * tween of the same property of the same object lets that property go,
+   * and stops (`finished` false) once it drives none. A property a plain
+   * assignment cannot store (read-only, a getter without a setter, a
+   * frozen or non-extensible object's, an array's `length`) throws a
+   * TypeError here. At most 16,384 tweens at once (RangeError) and 64
+   * properties a tween; a step costs the frame's fuel about one unit a
+   * tweened property. */
+  export function tween(target: object, to: Record<string, unknown>, options?: TweenOptions): Tween;
+  /** A running tween (since API_MINOR 37), made by `tween`. */
+  export class Tween {
+    private constructor();
+    /** The object `tween` was given. */
+    readonly target: object;
+    /** Resolves true when it finishes, false when it is stopped (`stop`,
+     * `stopTweens`, or other tweens took all its properties over). */
+    readonly finished: Promise<boolean>;
+    /** Whether it is waiting out its delay or running. */
+    readonly running: boolean;
+    /** A paused tween keeps its values and its place in time. */
+    paused: boolean;
+    pause(): this;
+    resume(): this;
+    /** Its current run's progress before easing, 0 to 1 (0 while delayed,
+     * 1 once it ended). */
+    readonly progress: number;
+    /** Stops it where it is: `finished` resolves false, no `onComplete`. */
+    stop(): this;
+    /** Writes the values its last run ends on (for a tween repeating
+     * forever, the end of a forward run) and finishes it at once:
+     * `onComplete` runs and `finished` resolves true. */
+    end(): this;
+  }
+  /** Since API_MINOR 37: easing `name` at `t` (0 to 1 is the run; the
+   * curves go on outside it), the values tweens use. */
+  export function ease(name: EasingName, t: number): number;
+  /** Since API_MINOR 37: stops the tweens `tween` was given `target` for,
+   * or every tween without one. */
+  export function stopTweens(target?: object): void;
   /** A line through the geometry's `position` vertices (three.js `Line`,
    * since API_MINOR 17), by its index when it has one, within its draw
    * range, drawn one pixel wide with a `LineBasicMaterial` (another
@@ -6546,7 +7548,15 @@ declare module "starhermit:scene" {
   }
   /** Anti-aliasing: none, three.js's `FXAAShader` or `SMAAPass` (SMAA 1x)
    * after the output, or 4× multisampling resolved before the other
-   * effects. */
+   * effects. Assigning `antialias` (any value, including "off") renders
+   * through the linear path: the scene in linear half-float color, fog and
+   * translucent or additive blending mixed in linear light before the
+   * output, so they look the same at every setting and the mode changes
+   * edges alone (since engine 1.36.2, at every API_MINOR; "off" drew
+   * straight to the window before). A game that never sets it keeps
+   * three.js's canvas look: drawn straight to the window, fog and blending
+   * in encoded color. A device without half-float color draws an assigned
+   * "off" straight too (its 8-bit post buffers draw every mode that way). */
   export type AntialiasMode = "off" | "fxaa" | "smaa" | "msaa";
 
   /** How the scene is drawn. The game decides the camera, lights, shadows
@@ -6590,7 +7600,9 @@ declare module "starhermit:scene" {
      * (opaque objects only). Refused code is logged once and the scene
      * draws without it. */
     post: PostShader | null;
-    /** Default "off". "msaa" takes 4 samples; since API_MINOR 14 the
+    /** Default "off", never assigned: three.js's canvas look (see
+     * `AntialiasMode`; an assigned "off" draws as the other modes do, in
+     * linear light). "msaa" takes 4 samples; since API_MINOR 14 the
      * graphics level's `msaaSamples` (8 at cosmic and infinite, lowered to
      * what the device supports) for games declaring `engine.minor=14` or
      * later. */
@@ -6746,7 +7758,8 @@ declare module "starhermit:scene" {
      * FloatType. With `buffer` (an array of that kind holding them) the
      * texels go into it and the promise resolves with it; without, with a
      * new array. `activeCubeFaceIndex` picks a WebGLArrayRenderTarget's
-     * layer; `textureIndex` is 0.
+     * layer; `textureIndex` is 0 (since API_MINOR 38 any of the target's
+     * `textures`, below).
      *
      * The texels are what the passes queued before the call drew. The GPU
      * copies them while the game goes on, and the promise settles as the
@@ -6760,7 +7773,9 @@ declare module "starhermit:scene" {
      * does with an Error (three.js's) for bounds outside the target or a
      * value that is no render target, and with a TypeError or RangeError
      * for a buffer of the wrong kind or too short. The call's fuel pays
-     * for the bytes. */
+     * for the bytes. Since API_MINOR 38 (`MRT_MINOR`) `textureIndex`
+     * names which of a `WebGLRenderTarget`'s `textures` it reads (0 to
+     * `textures.length - 1`, else a RangeError; before it, 0 only). */
     /** Since API_MINOR 35 (`VOLUME_TEXTURES_MINOR`; absent before): three.js
      * r185's `copyTextureToTexture` for 3D textures, the engine's region
      * update of one: the box `srcRegion` (a Box3 of whole texels, max
@@ -7276,7 +8291,10 @@ declare module "starhermit:canvas" {
      * `monospace`, `system-ui`, `cursive`, `fantasy`), which map to the
      * operating system's fonts as browsers map them (see `starhermit:draw`;
      * the system's families have no names of their own here) with the
-     * engine's emoji font and pixel font (`starhermit pixel`) last.
+     * engine's emoji font and pixel font (`starhermit pixel`) last. Since
+     * API_MINOR 37 `'StarHermit Emoji'` names the engine's emoji font,
+     * which then draws what it has in its place in the list (see "Emoji"
+     * in `starhermit:draw`).
      * Characters a face lacks draw with the next face that has them; emoji
      * draw in colour (see "Emoji" in `starhermit:draw`). Default
      * `10px sans-serif`. */
@@ -7459,6 +8477,27 @@ declare module "starhermit:draw" {
   // the font from disk in a moment): a game that bakes emoji into a canvas
   // once waits for `fonts.load(font, text)` from `starhermit:canvas` first
   // (since engine 1.20.1), as on the web.
+  // Since API_MINOR 37 (`EMOJI_FAMILY_MINOR`) a game can name the font as
+  // a family, `StarHermit Emoji` (any case; quoted in a canvas `font`):
+  // a canvas's `font` (`"48px 'StarHermit Emoji', sans-serif"`), `text`'s
+  // `font` here, a `starhermit:ui` text `font` and `setFont`, and a
+  // `TextLabel`'s `font`. Text in it draws every character the font has
+  // with the font's glyph (in emoji or text style as above), ahead of any
+  // system face, so symbols such as `● ▲ ■ ◆ ★ ✚ ◐ ⬡ → ✓` look the same on
+  // every system, natively and in browsers; the characters it lacks (ASCII
+  // letters and digits, spaces, most punctuation) draw with the faces after
+  // it in a canvas font list, else with `sans-serif` (for `text` and UI
+  // text, always `sans-serif`) and then the pixel font. As the first family
+  // it sets the line's metrics (ascent 1900 and descent 500 of 2048 units
+  // an em). A family the game adds under the same name is its own, as any
+  // added family is. Older minors' text naming it draws as an unknown
+  // family does (`sans-serif`; a UI `font` throws).
+  // Text in the default and generic families is unchanged at every minor:
+  // an emoji in emoji style already draws with this font on every system
+  // (the runtime loads no system colour font), while a character that is
+  // text style by default (`★ → ©`) draws with the first face that has it,
+  // as in browsers, so the system's where it has one; name the family for
+  // the same glyph everywhere.
 
   export interface Clip {
     /** Only the part inside this window rectangle draws. */
@@ -7498,6 +8537,48 @@ declare module "starhermit:draw" {
   /** A filled simple polygon (3 to 256 points, `[x, y]` pairs, convex or
    * not; self-intersecting outlines fill as their triangulation falls). */
   export function polygon(points: readonly (readonly [number, number])[], color: ColorLike, options?: Clip): void;
+  /** A path's look (`draw.path`). `fill`, `stroke` or both (TypeError
+   * without either); the fill is drawn first. */
+  export interface PathOptions extends Clip, Rotation, Blend {
+    fill?: ColorLike;
+    stroke?: ColorLike;
+    /** The stroke's width in path units (1), so scaled with the path as
+     * SVG's `stroke-width` and a canvas's under `scale()`; 0 or less
+     * strokes nothing. */
+    lineWidth?: number;
+    /** Window pixels a path unit (1); negative mirrors, 0 draws nothing. */
+    scale?: number;
+    /** `"nonzero"` (default) or `"evenodd"`, as canvas's `fill(rule)`. */
+    fillRule?: "nonzero" | "evenodd";
+    /** As canvas's: `"butt"` (default), `"round"`, `"square"`. */
+    lineCap?: "butt" | "round" | "square";
+    /** As canvas's: `"miter"` (default), `"round"`, `"bevel"`. */
+    lineJoin?: "miter" | "round" | "bevel";
+    /** As canvas's (10; one not above 0 is ignored). */
+    miterLimit?: number;
+  }
+  /** SVG path data filled and stroked in the overlay (since API_MINOR 37,
+   * `DRAW_PATH_MINOR`; undefined for games declaring an older
+   * `engine.minor`): the icons and glyphs games kept as SVG sprites, with
+   * holes, curves and arcs, as `new Path2D(d)` reads them (M, L, H, V, C,
+   * S, Q, T, A and Z, absolute and relative, implicit repetition; drawn
+   * up to the data's first error as SVG draws it). The path's point
+   * (px, py) lands at (x + px × scale, y + py × scale), then `rotation`
+   * turns it about `origin` (window pixels, default (x, y)) as the other
+   * items turn; `clip` and `blend` as theirs. The data is parsed and
+   * flattened (curves within 0.1 window pixels at the scale drawn) by
+   * canvas's code natively, and the fill (by `fillRule`) and the stroke
+   * (canvas's joins and caps) cut into triangles that do not overlap, so
+   * a translucent path blends once everywhere, crossings and overlapping
+   * subpaths included; edges are not antialiased (as `polygon`'s and
+   * `line`'s). One overlay item a call. The triangles are kept per data
+   * and scale (by powers of two, every scale's own tolerance; a curve
+   * takes at most 4,096 chords), so drawing the same path each frame
+   * parses it once; a path not kept costs fuel for its parse, flattening,
+   * stroke and sweep as they run, a refused one too. Limits: 65,536 bytes
+   * of data (RangeError), 16,384 segments and points flattened, 65,536
+   * vertices drawn, a sweep's work (RangeErrors). */
+  export function path(d: string, x: number, y: number, options: PathOptions): void;
   /** Turns a text or image about `origin` (default its top-left corner, in
    * window pixels; a circle, ellipse or arc about its center). */
   export interface Rotation {
@@ -7542,7 +8623,9 @@ declare module "starhermit:draw" {
     /** A family added with `canvas.fonts`, a generic family (`system-ui`,
      * the default, `sans-serif`, `serif`, `monospace`, `cursive`,
      * `fantasy`) or `starhermit pixel` (the pixel font, crisp at multiples
-     * of 10); any other name draws as `sans-serif`, as browsers fall back.
+     * of 10), or since API_MINOR 37 `StarHermit Emoji` (the engine's emoji
+     * font first, then `sans-serif`: see "Emoji" above); any other name
+     * draws as `sans-serif`, as browsers fall back.
      * The system's own families (Arial, DejaVu Sans) are reached only
      * through the generic families. */
     font?: string;
@@ -7567,7 +8650,10 @@ declare module "starhermit:draw" {
      * each text, size and width (a changing text, a score, once a value),
      * and the text stays one text item (play scripts match it once). */
     stroke?: { color: ColorLike; width?: number };
-    /** Wrap at this width in pixels. */
+    /** Wrap at this width in pixels. With `align: "center"`, since
+     * API_MINOR 38 (`TEXT_LINE_CENTER_MINOR`) each wrapped line is centred
+     * on `x` on its own, as CSS's `text-align: center`; before it the
+     * lines start together and the block (its widest line) is centred. */
     maxWidth?: number;
     direction?: "ltr" | "rtl";
   }
@@ -7751,7 +8837,9 @@ declare module "starhermit:ui" {
     /** A family added with `canvas.fonts` (any case), a generic family
      * (`system-ui`, `sans-serif`, `serif`, `monospace`, `cursive`,
      * `fantasy`: the system's faces, as `starhermit:draw` maps them) or
-     * `starhermit pixel`; absent with a `weight`, the UI's own family
+     * `starhermit pixel`, or since API_MINOR 37 `StarHermit Emoji` (the
+     * engine's emoji font first: see "Emoji" in `starhermit:draw`); absent
+     * with a `weight`, the UI's own family
      * (`setFont`'s, else `system-ui`). Another name throws a TypeError. The
      * runtime bundles no handwriting face: `cursive` is the system's
      * (Comic Sans MS on Windows, as browsers pick; elsewhere and on the web
@@ -8829,7 +9917,9 @@ declare module "starhermit:ui" {
   }
   /** Registers styles under their keys: a widget kind (`"button"`) sets its
    * defaults, `".name"` a class. A key registered again is replaced. At
-   * most 512 keys (RangeError) and 256 KiB of JSON a call. */
+   * most 512 keys (RangeError) and 256 KiB of JSON a call. Since
+   * API_MINOR 37 a key may end in size conditions (`".panel@compact"`;
+   * see "Size classes"), each such key counting toward the 512. */
   export function setStyles(styles: { readonly [key: string]: Style }): void;
   /** The values `"$name"` stands for anywhere in a style: colors, numbers
    * (corners, sizes), font names, fills and shadows. A changed token
@@ -8968,6 +10058,141 @@ declare module "starhermit:ui" {
     readonly reducedMotion: boolean;
   }
   export function preferences(): UiPreferences;
+
+  // -- Size classes (since API_MINOR 37) ---------------------------------
+  //
+  // What kind of screen to lay out for, at breakpoints every game shares
+  // (Material 3's window classes), from the logical viewport: the window
+  // inside its safe area (`frame().safeArea`), divided by
+  // `preferences().scale`, so a larger interface size moves a game to a
+  // smaller class as a browser's zoom does. Width: `"compact"` below 600
+  // logical pixels (a phone upright), `"medium"` from 600 (a phone on its
+  // side, a small tablet, a narrow window), `"expanded"` from 840 (a
+  // tablet on its side, a laptop's window), `"large"` from 1200 (a
+  // desktop). Height: `"compact"` below 480 (a phone on its side),
+  // `"medium"` from 480, `"expanded"` from 900. `"landscape"` when wider
+  // than tall (a square is portrait).
+  //
+  // Styles follow them: a key may name conditions after `@`, and its rule
+  // applies right after the key's own (before the next class) while every
+  // condition holds, as CSS's `@media` rules: `".panel@compact"`,
+  // `"button@landscape@short"`. Conditions: a width class (`compact`,
+  // `medium`, `expanded`, `large`), a width class or wider (`medium+`,
+  // `expanded+`, `large+`: CSS's `min-width`), `portrait`, `landscape`,
+  // `short` (the compact height class) and `tall` (the expanded one). An
+  // unknown condition is a TypeError; a class with only conditioned rules
+  // is styled where they hold and warns nowhere. They follow the frame's
+  // classes, so a resize or a new interface size restyles from the next
+  // frame. Games declaring an older `engine.minor` have neither
+  // `viewport` nor `breakpoints`, and `@` stays part of a class's name.
+  export type WidthClass = "compact" | "medium" | "expanded" | "large";
+  export type HeightClass = "compact" | "medium" | "expanded";
+  export interface Viewport {
+    /** The safe area's inner box in logical pixels, from the window's
+     * top-left (`x`, `y` are the safe area's left and top insets). */
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+    /** Window pixels per logical pixel, as `preferences().scale`. */
+    readonly scale: number;
+    readonly widthClass: WidthClass;
+    readonly heightClass: HeightClass;
+    readonly orientation: "portrait" | "landscape";
+  }
+  /** The frame's logical viewport and its size classes (a new frozen
+   * object each call): what games worked out themselves as
+   * `(frame().width - safeArea.left - safeArea.right) /
+   * ui.preferences().scale`. Since API_MINOR 37; undefined before. */
+  export const viewport: (() => Viewport) | undefined;
+  /** The breakpoints in logical pixels: where `medium`, `expanded` and
+   * `large` widths and `medium` and `expanded` heights begin
+   * (`{ width: { medium: 600, expanded: 840, large: 1200 }, height: {
+   * medium: 480, expanded: 900 } }`, frozen). Since API_MINOR 37;
+   * undefined before. */
+  export const breakpoints:
+    | {
+        readonly width: { readonly medium: 600; readonly expanded: 840; readonly large: 1200 };
+        readonly height: { readonly medium: 480; readonly expanded: 900 };
+      }
+    | undefined;
+
+  // -- Toasts (since API_MINOR 37) ---------------------------------------
+  //
+  // Short notifications the engine queues, times, stacks and draws over
+  // the game's UI (and its dialogs), whether or not the frame builds any
+  // widgets: "Saved", "Invite link copied", "Connection lost". At most 3
+  // show at once in each stack, the bottom one (the default, the newest
+  // nearest the bottom edge) and the top one (the newest nearest the top);
+  // more wait in order, each one's time starting as it shows, and past 32
+  // waiting the oldest waiting is dropped. Each shows for `duration`
+  // seconds; by default 3 (info, success) or 5 (warning, error), or as
+  // long as its text takes to read (15 characters a second) up to 10,
+  // whichever is longer; 0 (or Infinity) keeps it until dismissed. The
+  // pointer resting on one keeps it up. A press and release on a
+  // dismissible one (the default) dismisses it; the UI takes that press
+  // (`ui.pointerOver()` and `ui.pointerCaptured()` are true over it, and
+  // `input.onGesture` makes no gesture of it), while one with
+  // `dismissible: false` lets the pointer through.
+  //
+  // They follow the player's settings: the UI's scale and text size, high
+  // contrast (the forced look of every box), reduced motion (no fade or
+  // slide: they appear and go at once), and they stay inside the window's
+  // safe area. The engine's look is a dark rounded box with the kind's
+  // accent as its border (blue, green, amber, red) and light text; `style`
+  // gives the toast the game's own instead, as `ui.style(…)` takes it
+  // (class names, style objects, or a list of them): its box, padding and
+  // text color. Each toast is a label in the accessibility tree and,
+  // unless `announce: false`, a screen reader announces it as it shows
+  // (politely; warnings and errors assertively), as `ui.announce` would:
+  // a game that announced its own toasts drops that call. Times run on the
+  // game's clock (`frame().time`), so a play script and a replay see the
+  // same toasts in the same frames. Games declaring an older
+  // `engine.minor` have neither `toast` nor `clearToasts`.
+  export type ToastKind = "info" | "success" | "warning" | "error";
+  export interface ToastOptions {
+    /** Default `"info"`; another value is a TypeError. */
+    kind?: ToastKind;
+    /** Seconds it shows once it shows (0 or Infinity: until dismissed;
+     * at most 3600, RangeError; a negative or non-number is a
+     * TypeError). Default: the kind's time or the reading time. */
+    duration?: number;
+    /** A press on it dismisses it (default true). */
+    dismissible?: boolean;
+    /** The stack it shows in (default `"bottom"`). */
+    position?: "top" | "bottom";
+    /** Since API_MINOR 38 (`TOAST_PLACEMENT_MINOR`; not read before):
+     * where across the safe area its stack stands (default `"center"`;
+     * the margin in from that side for left and right). Another value is a
+     * TypeError. */
+    anchor?: "left" | "center" | "right";
+    /** Since API_MINOR 38 (not read before): logical pixels its stack
+     * starts in from its edge past the margin, to clear a HUD or a tray
+     * (0 to 4096, RangeError; a non-number is a TypeError; default 0).
+     * Toasts with the same position, anchor and offset share a stack of
+     * 3; at most 8 stacks show at once, and a toast of another stack waits
+     * (as a full stack's do) until one empties. */
+    offset?: number;
+    /** Screen readers announce it as it shows (default true). */
+    announce?: boolean;
+    /** The game's look for its box and text instead of the engine's, as
+     * `ui.style(…)` takes it. */
+    style?: string | Style | readonly (string | Style)[];
+  }
+  export interface Toast {
+    readonly id: number;
+    /** Fades it out (a waiting one goes at once); false when it is no
+     * longer queued. */
+    dismiss(): boolean;
+    /** Showing or waiting: not dismissed, timed out or cleared. */
+    readonly queued: boolean;
+  }
+  /** Queues a toast (since API_MINOR 37): its handle, or null for blank
+   * text. At most 500 characters (RangeError). Undefined before. */
+  export const toast: ((text: string, options?: ToastOptions) => Toast | null) | undefined;
+  /** Removes every toast at once, showing and waiting (since API_MINOR
+   * 37; undefined before). */
+  export const clearToasts: (() => void) | undefined;
   /** The size, in window pixels, that a widget with this text takes this
    * frame (since API_MINOR 11), within rounding of the rectangle it
    * returns: a `label` (the default `kind`), a `heading`, or a `button`
@@ -9185,6 +10410,12 @@ declare module "starhermit:audio" {
   /** From samples (−1..1): one array per channel (1–8), 8–192 kHz;
    * non-finite samples throw a TypeError. */
   export function createClip(channels: readonly Float32Array[], sampleRate: number): AudioClip;
+  /** Since API_MINOR 37 (`OFFLINE_AUDIO_MINOR`; a TypeError before): a
+   * clip of an AudioBuffer's samples at its rate (8–192 kHz, else a
+   * RangeError), copied natively: what `OfflineAudioContext`'s
+   * `startRendering()` gives becomes a clip to `play` (with `loop`)
+   * without a sample passing through script. */
+  export function createClip(buffer: AudioBuffer): AudioClip;
   export interface PlayOptions {
     /** 0–16 (default 1). */
     gain?: number;
@@ -9195,6 +10426,67 @@ declare module "starhermit:audio" {
     loop?: boolean;
     /** Default `"effects"`. */
     bus?: Bus;
+    /** Since API_MINOR 37 (`SCHEDULED_PLAY_MINOR`; ignored before): when
+     * it starts, in seconds of `context.currentTime`, as Web Audio's
+     * `start(when)`: `play(clip, { when: context.currentTime + 0.5 })`
+     * starts half a second from now, on the very frame a graph source
+     * started at the same time does; a time already past (or omitted)
+     * starts at once. TypeError when not finite, RangeError below 0. Until
+     * then the sound is `playing` and silent; its end (and `onEnded`) comes
+     * that much later. */
+    when?: number;
+    /** Since API_MINOR 37 (`SOUND_BANK_MINOR`; ignored before): which of
+     * the game's sounds the player's sound limit keeps heard, an integer
+     * −32,768 to 32,767 (RangeError outside; default 0): past the limit a
+     * sound of higher priority displaces a playing one of lower, and equal
+     * priorities keep the sounds already heard. */
+    priority?: number;
+    /** Since API_MINOR 37 (`SOUND_CAPTIONS_MINOR`; ignored before): the
+     * sound's caption, shown by the runtime as it starts (see
+     * `showCaption`), lasting as long as the clip plays at its pitch (a
+     * loop's as long as it takes to read). TypeError for a bad caption,
+     * before the sound plays. */
+    caption?: Caption;
+    /** Since API_MINOR 37 (`SPATIAL_AUDIO_MINOR`; ignored before): a 3D
+     * position, `[x, y, z]` or a Vector3: the sound is heard as a Web Audio
+     * `PannerNode` at that place would make it against `context.listener`
+     * (equal-power panning by its azimuth, its distance model's and
+     * cone's gain times `gain`; `pan` is then unused), worked out by the
+     * runtime each frame as the sound (`setPosition`) or the listener
+     * moves, and glided to by the mixer over a render quantum. A mono clip
+     * pans as a mono input, a stereo one by the stereo law. TypeError
+     * when not finite. With the player's Spatial sound off it keeps its
+     * distance and cone gain and drops only the panning: it plays
+     * centered, as a source straight ahead would. */
+    position?: readonly [number, number, number] | { readonly x: number; readonly y: number; readonly z: number };
+    /** Which way it faces (default `[1, 0, 0]`), for a cone. */
+    orientation?: readonly [number, number, number] | { readonly x: number; readonly y: number; readonly z: number };
+    /** The panner's attributes, as `PannerNode`'s (Web Audio's defaults:
+     * inverse distance, refDistance 1, maxDistance 10,000, rolloffFactor
+     * 1, no cone); RangeError or `InvalidStateError` as there. */
+    panner?: PannerAttributes;
+  }
+  /** A `PannerNode`'s attributes (Web Audio's `PannerOptions` but the
+   * position and orientation). */
+  export interface PannerAttributes {
+    /** `"HRTF"` is taken and renders as `"equalpower"` (the engine has no
+     * head-related transfer functions). */
+    panningModel?: "equalpower" | "HRTF";
+    distanceModel?: "linear" | "inverse" | "exponential";
+    /** At least 0 (RangeError). */
+    refDistance?: number;
+    /** Above 0 (RangeError); bounds every distance model, as Chromium
+     * does: past it a source keeps the gain it has there. (The written Web
+     * Audio specification bounds the linear model alone; the engine
+     * follows Chrome, where most games and three.js scenes are tuned.) */
+    maxDistance?: number;
+    /** At least 0 (RangeError); the linear model clamps it to 1. */
+    rolloffFactor?: number;
+    /** Degrees (default 360). */
+    coneInnerAngle?: number;
+    coneOuterAngle?: number;
+    /** 0–1 (`InvalidStateError` outside), default 0. */
+    coneOuterGain?: number;
   }
   /** A playing clip. Control calls on a finished sound do nothing.
    * `fade`, `setPitch` and `setPan` never throw for the frame's audio
@@ -9215,6 +10507,14 @@ declare module "starhermit:audio" {
     setPan(pan: number | null): void;
     /** It ended or was stopped. */
     onEnded(listener: () => void): Unsubscribe;
+    /** Since API_MINOR 37: moves a sound played with a `position`
+     * (TypeError for one played without, or not finite); it is heard there
+     * from the frame's end. */
+    setPosition(x: number, y: number, z: number): void;
+    setPosition(position: { readonly x: number; readonly y: number; readonly z: number }): void;
+    /** Since API_MINOR 37: turns it (for its cone). */
+    setOrientation(x: number, y: number, z: number): void;
+    setOrientation(orientation: { readonly x: number; readonly y: number; readonly z: number }): void;
   }
   /** At most min(`engine.limits.voices`, 256) sounds at once and 1,024 audio
    * operations a frame (plays, a stream's opening, play and pause, and
@@ -9226,6 +10526,256 @@ declare module "starhermit:audio" {
    * the machine) a sound is not refused: it runs on silently and is heard
    * once there is room, as a sound the limit displaced. */
   export function play(clip: AudioClip, options?: PlayOptions): Sound;
+
+  // -- The game's mute (host API 1.37) ------------------------------------------
+  // The player's Options › Audio volumes stay the player's: a game never
+  // changes them. A game's own mute (a M key, a "Sound" toggle in its
+  // settings) is a separate flag on the game's buses that combines with
+  // them: the game is heard only while neither mutes it. The mute is not
+  // kept between runs (keep it in the game's saves or storage and set it
+  // again at the start).
+
+  /** Since API_MINOR 37 (`GAME_MUTE_MINOR`; a TypeError before): mutes or
+   * unmutes all of the game's sound (music, effects and interface: clips,
+   * streams and the synthesis graph), from the next frame's audio; the
+   * graph's clock and sounds' ends run on meanwhile. Not counted among the
+   * frame's audio operations. */
+  export function setMuted(muted: boolean): void;
+  /** Since API_MINOR 37: the game's own mute, as last set (false at the
+   * start). */
+  export function isMuted(): boolean;
+  /** Since API_MINOR 37: whether the player's Options › Audio silence the
+   * game (its master volume at 0), for a game's own toggle to show; it
+   * follows the player's changes. */
+  export function isPlayerMuted(): boolean;
+
+  // -- Music directors and ambience beds (host API 1.37) ---------------------------
+  // Adaptive music and ambience run by the runtime and the mixer, not the
+  // script: a `MusicDirector` plays one state at a time, each state one or
+  // more looping stems (clips) started on the same mixer frame, so stems of
+  // one length stay in lockstep for good, with each stem's gain following
+  // the director's intensity; a state change crossfades on the mixer (the
+  // new stems fade in and the old fade out from the same frame, linearly as
+  // `linearRampToValueAtTime`, and stop once silent). An `AmbienceBed`
+  // keeps looping layers at levels: a layer set above silence starts
+  // looping and fades in, one set to 0 fades out and stops. Every change
+  // takes effect 0.1 s after `context.currentTime` (on the mixer's frame
+  // for that time, so its sounds start and fade together wherever the
+  // calls' operations land), and costs the script nothing per frame. Each
+  // stem or layer playing is one of the game's sounds (`play`'s limit), and
+  // a crossfade holds both states' stems until it ends. Disposing a stem's
+  // clip stops its sound. `context` is made with the first director or bed
+  // (its clock times the changes).
+
+  /** A stem: a clip, or a clip with its gain (0–16, default 1) and how its
+   * gain follows the director's intensity: rising from 0 to 1 as the
+   * intensity goes from `intensity[0]` to `intensity[1]` (a step at the
+   * first when the two are equal) and falling from 1 to 0 over `until`. */
+  export type Stem =
+    | AudioClip
+    | {
+        clip: AudioClip;
+        gain?: number;
+        intensity?: readonly [number, number];
+        until?: readonly [number, number];
+      };
+  export interface MusicDirectorOptions {
+    /** The states by name (1–64), each its stems (1–16), or `{ stems,
+     * bar }` where `bar` is seconds of a bar (0–3600, default 0: none) that
+     * changes may align to. */
+    states: {
+      readonly [state: string]: Stem | readonly Stem[] | { stems: Stem | readonly Stem[]; bar?: number };
+    };
+    /** Seconds of a change's crossfade (0–60, default 2). */
+    crossfade?: number;
+    /** Seconds a state plays at least before a change takes effect (0–3600,
+     * default 0): a change sooner waits until then, the latest winning
+     * (cue hysteresis), unless it is `immediate`. */
+    dwell?: number;
+    /** 0–1 (default 1). */
+    intensity?: number;
+    /** 0–16 (default 1), times each stem's. */
+    gain?: number;
+    /** Default `"music"`. */
+    bus?: Bus;
+    /** As `PlayOptions.priority`, for every stem. */
+    priority?: number;
+  }
+  /** Since API_MINOR 37 (`MUSIC_DIRECTOR_MINOR`; a TypeError before): music
+   * states with crossfades and intensity-layered stems, run natively.
+   * TypeError or RangeError for bad options; at most 32 directors and beds
+   * at once. */
+  export class MusicDirector {
+    constructor(options: MusicDirectorOptions);
+    /** The state playing (or about to start), or null. */
+    readonly state: string | null;
+    /** As last set. */
+    readonly intensity: number;
+    /** Crossfades to `state` (null: fades out and stops) over `crossfade`
+     * seconds (the director's by default); `align: "bar"` starts it on the
+     * playing state's next bar line (counted from when it started) rather
+     * than now; `immediate` skips the dwell. The state already playing
+     * changes nothing. TypeError for an unknown state. */
+    setState(
+      state: string | null,
+      options?: { crossfade?: number; align?: "now" | "bar"; immediate?: boolean },
+    ): void;
+    /** Each stem's gain to follow `intensity` (0–1) over `seconds` (0–60,
+     * default 1), all from one frame. */
+    setIntensity(intensity: number, seconds?: number): void;
+    /** The director's gain (0–16) over `seconds` (default 0.5). */
+    setGain(gain: number, seconds?: number): void;
+    /** Fades out over `seconds` (default the crossfade) and stops:
+     * `setState(null, { immediate: true })`. */
+    stop(seconds?: number): void;
+    /** Stops its sounds at once; later calls throw a TypeError. */
+    dispose(): void;
+  }
+  export interface AmbienceBedOptions {
+    /** The layers by name (1–64), each a clip or `{ clip, gain }`. */
+    layers: { readonly [layer: string]: AudioClip | { clip: AudioClip; gain?: number } };
+    /** Seconds of a level change's fade (0–60, default 2). */
+    fade?: number;
+    /** 0–16 (default 1), times each layer's gain and level. */
+    gain?: number;
+    /** Default `"effects"`. */
+    bus?: Bus;
+    priority?: number;
+  }
+  /** Since API_MINOR 37 (`MUSIC_DIRECTOR_MINOR`; a TypeError before): looping
+   * ambience layers (rain, wind, crickets) at levels, faded and started or
+   * stopped natively. Every layer starts silent. */
+  export class AmbienceBed {
+    constructor(options: AmbienceBedOptions);
+    /** Sets layers' levels (0–1) over `seconds` (default the bed's fade);
+     * layers left out keep theirs. Below 0.001 a layer fades out and
+     * stops. TypeError for an unknown layer. */
+    set(levels: { readonly [layer: string]: number }, seconds?: number): void;
+    /** A layer's level, as last set. */
+    level(layer: string): number;
+    setGain(gain: number, seconds?: number): void;
+    /** Every layer to 0 over `seconds`. */
+    stop(seconds?: number): void;
+    dispose(): void;
+  }
+
+  // -- Captions (host API 1.37) --------------------------------------------------
+  // Subtitles for spoken lines and descriptions of sounds that matter to
+  // play ("[Glass shatters]"), drawn by the runtime over the game, below
+  // its own screens: centered near the bottom, at most three at once (the
+  // newest at the bottom; a full queue drops its oldest sound description
+  // first), each up as long as its sound and as long as its text takes to
+  // read, and at least 1.5 s; the same caption again keeps it up longer
+  // rather than stacking a copy. They follow the player's Options ›
+  // Accessibility: Subtitles (spoken lines), Sound captions (descriptions),
+  // Caption size (0.5–3) and Caption background (a dark box, else an
+  // outline), on by default; a kind turned off is not shown (and goes at
+  // once when turned off). Text is the game's, already translated; screen
+  // readers read captions as labels.
+
+  /** A caption: a string is a sound's description (the runtime adds the
+   * brackets); an object gives a spoken line (`kind: "dialogue"`, the
+   * default with a `speaker`, shown as `speaker: text`) or a description
+   * (`"sound"`, the default without one). `text` at most 400 characters,
+   * `speaker` 64, `duration` seconds (default the sound's length, or a
+   * reading time) 0 or more (else a RangeError). */
+  export type Caption =
+    | string
+    | {
+        text: string;
+        speaker?: string;
+        kind?: "sound" | "dialogue";
+        duration?: number;
+      };
+  /** Since API_MINOR 37 (`SOUND_CAPTIONS_MINOR`; a TypeError before):
+   * shows a caption without a sound of its own (a graph's sound, a
+   * stream's line). A frame shows at most 32 captions (the rest are left
+   * out). TypeError for a bad caption. */
+  export function showCaption(caption: Caption): void;
+  /** Since API_MINOR 37 (a TypeError before): the player's caption
+   * choices, for a game that draws captions of its own (`subtitles` for
+   * spoken lines, `sounds` for descriptions); they follow the player's
+   * changes. */
+  export function captionSettings(): { readonly subtitles: boolean; readonly sounds: boolean };
+
+  // -- Sound banks (host API 1.37) -------------------------------------------------
+  /** `SoundBank`'s options. Jitters are fractions of the base, drawn
+   * uniformly each play from the bank's own seeded stream. */
+  export interface SoundBankOptions {
+    /** The variants, 1 to 64 clips. */
+    clips: readonly AudioClip[];
+    /** `"random"` (default: any variant but the last one played),
+     * `"shuffle"` (each once in a seeded order, then again, never the last
+     * one first) or `"sequence"` (in turn). */
+    order?: "random" | "shuffle" | "sequence";
+    /** 0–16 (default 1). */
+    gain?: number;
+    /** 0–1 (default 0): each play's gain is `gain × (1 ± gainJitter)`. */
+    gainJitter?: number;
+    /** 0.125–8 (default 1). */
+    pitch?: number;
+    /** 0–0.5 (default 0): each play's pitch is `pitch × (1 ± pitchJitter)`. */
+    pitchJitter?: number;
+    /** −1..1; omitted: the clips' own channels (unless `panJitter`). */
+    pan?: number;
+    /** 0–1 (default 0): each play's pan is `pan ± panJitter`. */
+    panJitter?: number;
+    /** Seconds of `frame().time` (0–60, default 0): a play sooner after the
+     * last one is skipped (`play` returns null), so a burst of hits makes
+     * one sound. */
+    minGap?: number;
+    /** 1–256 (default 256): its sounds at once; past it its oldest sound
+     * stops for the new one. */
+    maxInstances?: number;
+    /** As `PlayOptions.priority`. */
+    priority?: number;
+    /** Default `"effects"`. */
+    bus?: Bus;
+    /** Since API_MINOR 37 (`SPATIAL_AUDIO_MINOR`): the panner of plays
+     * with a `position`. */
+    panner?: PannerAttributes;
+    /** Since API_MINOR 37 (`SOUND_CAPTIONS_MINOR`): each play's caption
+     * (as `PlayOptions.caption`; a burst of plays shows it once, kept up
+     * longer). */
+    caption?: Caption;
+    /** The stream's seed (a finite number, taken as a 32-bit integer): the
+     * same seed and the same plays give the same variants and jitter in
+     * every run. Omitted: a different stream each run. */
+    seed?: number;
+  }
+  /** A play's options: `gain` and `pitch` scale the bank's (after jitter),
+   * `pan` and `caption` replace its own; `when`, `loop` and `bus` are
+   * `play`'s. */
+  export interface SoundBankPlayOptions {
+    gain?: number;
+    pitch?: number;
+    pan?: number;
+    when?: number;
+    loop?: boolean;
+    bus?: Bus;
+    /** Replaces the bank's caption for this play. */
+    caption?: Caption;
+    /** Since API_MINOR 37: as `PlayOptions`' (the bank's `panner`
+     * unless this play names one). */
+    position?: PlayOptions["position"];
+    orientation?: PlayOptions["orientation"];
+    panner?: PannerAttributes;
+  }
+  /** Since API_MINOR 37 (`SOUND_BANK_MINOR`; a TypeError before): variants
+   * of one sound effect (footsteps, hits, clicks) with seeded pitch and
+   * gain jitter, a minimum gap between plays, a cap on its sounds at once
+   * and a priority, over `play`. TypeError or RangeError for bad options. */
+  export class SoundBank {
+    #private;
+    constructor(options: SoundBankOptions);
+    /** Its sounds playing now. */
+    readonly playing: number;
+    /** Plays the next variant, or returns null within `minGap` of its last
+     * play (drawing nothing from its stream then). Throws as `play` does. */
+    play(options?: SoundBankPlayOptions): Sound | null;
+    /** Stops its sounds. */
+    stop(): void;
+  }
 
   // -- Streams (host API 1.14) -----------------------------------------------------
   // Long music decoded as it plays: an Ogg Opus (1–2 channels) or Ogg
@@ -9330,8 +10880,9 @@ declare module "starhermit:audio" {
   // (4,096 at most) and 32 MiB of delay lines, 256 periodic waves, and an
   // estimated render cost of 20,000 units at 48 kHz (less above): a node
   // costs gain 5, constant source 4, stereo panner 5, oscillator 20, buffer
-  // source 40, biquad 28, delay 25, and from its first ramp, target, curve
-  // or parameter connection on 20, 14, 75, 210, 42, 280 and 42; each
+  // source 40, biquad 28, delay 25 (since API_MINOR 37 panner 12 and the
+  // listener 2), and from its first ramp, target, curve or parameter
+  // connection on 20, 14, 75, 210, 42, 280 and 42 (40 and 20); each
   // connection 2: past one a RangeError. An automation event counts until
   // the clock passes it, except that a setValue or setTarget (`value =`
   // included) supersedes a setValue or setTarget right before it at the same
@@ -9341,9 +10892,11 @@ declare module "starhermit:audio" {
   // press), but events at different future times still fill the budget
   // meanwhile. Not supported: channel count settings (buffers are mono or
   // stereo), wave shapers, convolvers, compressors, analysers, 3D panners
-  // and listeners, IIR filters, channel splitters and mergers, worklets,
-  // media nodes and offline contexts; `AudioParam.value` reads the last
-  // value set, not the automation's progress.
+  // and listeners before API_MINOR 37 (`PannerNode`, `context.listener`;
+  // HRTF renders as equal-power), IIR filters, channel splitters and mergers, worklets
+  // and media nodes; offline contexts before API_MINOR 37
+  // (`OfflineAudioContext`); `AudioParam.value` reads the last value set,
+  // not the automation's progress.
 
   export type AutomationRate = "a-rate" | "k-rate";
   export abstract class AudioParam {
@@ -9375,6 +10928,8 @@ declare module "starhermit:audio" {
   }
   export abstract class AudioNode {
     #private;
+    /** The context that made it (an `OfflineAudioContext`'s nodes give
+     * theirs). */
     readonly context: AudioContext;
     readonly numberOfInputs: number;
     readonly numberOfOutputs: number;
@@ -9438,6 +10993,68 @@ declare module "starhermit:audio" {
     /** −1..1, default 0. */
     readonly pan: AudioParam;
   }
+  /** Since API_MINOR 37 (`SPATIAL_AUDIO_MINOR`; `createPanner` throws a
+   * TypeError before): Web Audio's PannerNode, a mono or stereo input
+   * placed in 3D against the context's `listener`, output in stereo:
+   * equal-power panning by the source's azimuth (behind folds to the
+   * front, as the specification has it), times its distance model's gain
+   * and its cone's, the specification's formulas with Chromium's bound
+   * (the distance clamped to `maxDistance` in the inverse and exponential
+   * models too). With the player's Spatial sound off it keeps that gain
+   * and drops only the panning (centered, as a source straight ahead):
+   * the setting is the player's, so the graph's panners honour it as
+   * placed sounds do; an offline context renders as set. The position,
+   * orientation and the listener are taken once a render quantum (128
+   * frames: their automation's value at its first frame), as Firefox
+   * does. Positions are a-rate AudioParams (automatable; connections into
+   * them modulate as usual). Render cost 12, automated 40. */
+  export abstract class PannerNode extends AudioNode {
+    readonly positionX: AudioParam;
+    readonly positionY: AudioParam;
+    readonly positionZ: AudioParam;
+    /** Default (1, 0, 0). */
+    readonly orientationX: AudioParam;
+    readonly orientationY: AudioParam;
+    readonly orientationZ: AudioParam;
+    /** An unknown model is ignored, as Web IDL enumerations are. */
+    panningModel: "equalpower" | "HRTF";
+    distanceModel: "linear" | "inverse" | "exponential";
+    refDistance: number;
+    maxDistance: number;
+    rolloffFactor: number;
+    coneInnerAngle: number;
+    coneOuterAngle: number;
+    coneOuterGain: number;
+    /** The deprecated setters (the AudioParams' `value`s). */
+    setPosition(x: number, y: number, z: number): void;
+    setOrientation(x: number, y: number, z: number): void;
+    /** Sets the attributes `attributes` names at once (an engine
+     * addition: one change instead of one a property). */
+    configure(attributes: PannerAttributes): void;
+  }
+  /** Since API_MINOR 37 (`SPATIAL_AUDIO_MINOR`): Web Audio's AudioListener
+   * (`context.listener`, an offline context's own): where every
+   * PannerNode, and every sound played with a `position`, is heard from.
+   * Its parameters are AudioParams (automatable; not modulated by
+   * connections, `NotSupportedError`) and count one node against the
+   * graph's budget. Positioned clips follow the value each was last set
+   * to, or the value its last ramp, target or set goes to. starhermit:
+   * scene's `AudioListener` (three.js's) moves it with a camera. */
+  export abstract class AudioListener {
+    readonly positionX: AudioParam;
+    readonly positionY: AudioParam;
+    readonly positionZ: AudioParam;
+    /** Default (0, 0, -1). */
+    readonly forwardX: AudioParam;
+    readonly forwardY: AudioParam;
+    readonly forwardZ: AudioParam;
+    /** Default (0, 1, 0). */
+    readonly upX: AudioParam;
+    readonly upY: AudioParam;
+    readonly upZ: AudioParam;
+    setPosition(x: number, y: number, z: number): void;
+    setOrientation(x: number, y: number, z: number, xUp: number, yUp: number, zUp: number): void;
+  }
   export abstract class DelayNode extends AudioNode {
     /** Seconds, 0..the node's maximum. */
     readonly delayTime: AudioParam;
@@ -9468,6 +11085,16 @@ declare module "starhermit:audio" {
     readonly playbackRate: AudioParam;
     readonly detune: AudioParam;
     start(when?: number, offset?: number, duration?: number): void;
+  }
+  /** `createNoise`'s options (since API_MINOR 37). */
+  export interface NoiseOptions {
+    /** Default `"white"`. */
+    color?: "white" | "pink" | "brown";
+    /** As `createNoiseBuffer`'s: the same noise every run. */
+    seed?: number;
+    /** Seconds before the loop repeats (more than 0, at most 60; default
+     * 2). */
+    seconds?: number;
   }
   /** The game's one synthesis graph: `new AudioContext()` returns `context`
    * (options are ignored), so web code ports unchanged. */
@@ -9500,6 +11127,10 @@ declare module "starhermit:audio" {
     createOscillator(): OscillatorNode;
     createBiquadFilter(): BiquadFilterNode;
     createStereoPanner(): StereoPannerNode;
+    /** Since API_MINOR 37 (`SPATIAL_AUDIO_MINOR`; a TypeError before). */
+    createPanner(): PannerNode;
+    /** Since API_MINOR 37 (a TypeError before reading it). */
+    readonly listener: AudioListener;
     /** `maxDelayTime` seconds, 0 < x < 180 (default 1; `NotSupportedError`
      * outside). */
     createDelay(maxDelayTime?: number): DelayNode;
@@ -9508,8 +11139,17 @@ declare module "starhermit:audio" {
     /** 1–2 channels at 3–768 kHz (`NotSupportedError` otherwise). */
     createBuffer(numberOfChannels: number, length: number, sampleRate: number): AudioBuffer;
     /** Noise for buffer sources (there is no noise node): `seconds` of
-     * white, pink or brown noise, looped seamlessly when played with `loop`. */
-    createNoiseBuffer(seconds: number, color?: "white" | "pink" | "brown"): AudioBuffer;
+     * white, pink (Paul Kellet's filter) or brown noise, looped seamlessly
+     * when played with `loop`. Since API_MINOR 37 (`AUDIO_NOISE_MINOR`;
+     * ignored before) `seed`, a whole number of at most 2^53 − 1
+     * (RangeError), gives the same samples for the same seed, length and
+     * sample rate in every run and on every platform; without one the noise
+     * differs each time. */
+    createNoiseBuffer(seconds: number, color?: "white" | "pink" | "brown", options?: { seed?: number }): AudioBuffer;
+    /** Since API_MINOR 37 (`AUDIO_NOISE_MINOR`; a TypeError before): a
+     * noise source, a buffer source playing `seconds` (default 2) of
+     * `createNoiseBuffer`'s noise in a loop, to connect and start. */
+    createNoise(options?: NoiseOptions): AudioBufferSourceNode;
     /** Equal lengths of at least 2 (`IndexSizeError`); coefficients whose
      * unnormalized wave exceeds the float range are a RangeError. */
     createPeriodicWave(real: Float32Array | readonly number[], imag: Float32Array | readonly number[], constraints?: { disableNormalization?: boolean }): PeriodicWave;
@@ -9527,6 +11167,77 @@ declare module "starhermit:audio" {
     suspend(): Promise<void>;
   }
   export const context: AudioContext;
+
+  /** Since API_MINOR 37 (`OFFLINE_AUDIO_MINOR`; the constructor throws a
+   * TypeError before): Web Audio's OfflineAudioContext, for pads, beds,
+   * ticks and other procedural sound a game bakes once and plays as a
+   * clip. Its nodes are made as `context`'s are, with the same bounds
+   * (counted per context: at most 256 nodes alive, or `engine.limits.voices`
+   * if lower, else a RangeError "audio node limit reached"; 1,024
+   * connections), and connect only to its own nodes and buses
+   * (`InvalidAccessError` across contexts); every bus of an offline
+   * context is its output. `startRendering()` renders natively, by the
+   * mixer's own synthesis code, a share of the render each frame as frames
+   * begin (counted in the graph's estimated cost, so a render settles at
+   * the same frame in every run; a 4 s pad of a few nodes takes a frame or
+   * two), and settles with an AudioBuffer. The samples are the bits the
+   * live graph gives for the same graph and sample rate at unity volume,
+   * with its sources' times from 0, except that they are not clamped to
+   * ±1. `createClip(buffer)` makes it a clip. At most 16 offline contexts
+   * at once that have not finished rendering (RangeError); a context gives
+   * up its place as its render completes, so one context per stem rendered
+   * in turn never reaches it. Finished contexts not yet collected: at most
+   * 256, holding no more than 16 graphs' budgets in all (RangeError). Each
+   * renders at most 8,388,608 samples (channels × length; RangeError). */
+  export class OfflineAudioContext {
+    #private;
+    /** 1 or 2 channels, a length of at least one frame, 3–768 kHz (rounded
+     * to a whole hertz): `NotSupportedError` otherwise. */
+    constructor(numberOfChannels: number, length: number, sampleRate: number);
+    constructor(options: { numberOfChannels?: number; length: number; sampleRate: number });
+    readonly length: number;
+    readonly numberOfChannels: number;
+    readonly sampleRate: number;
+    /** Seconds rendered: 0 until `startRendering()`, `length / sampleRate`
+     * once done. */
+    readonly currentTime: number;
+    /** `"suspended"` until `startRendering()`, `"running"` while it
+     * renders, `"closed"` once done. */
+    readonly state: "suspended" | "running" | "closed";
+    /** Its output (every bus of an offline context is). */
+    readonly destination: AudioBusNode;
+    bus(name: Bus): AudioBusNode;
+    /** Fires as the render is done, after its sources' `ended` and before
+     * the promise settles. */
+    oncomplete: ((event: { type: "complete"; renderedBuffer: AudioBuffer }) => void) | null;
+    addEventListener(type: "complete", listener: (event: { type: "complete"; renderedBuffer: AudioBuffer }) => void): void;
+    removeEventListener(type: "complete", listener: (event: { type: "complete"; renderedBuffer: AudioBuffer }) => void): void;
+    createGain(): GainNode;
+    createOscillator(): OscillatorNode;
+    createBiquadFilter(): BiquadFilterNode;
+    createStereoPanner(): StereoPannerNode;
+    /** Since API_MINOR 37 (`SPATIAL_AUDIO_MINOR`). */
+    createPanner(): PannerNode;
+    readonly listener: AudioListener;
+    createDelay(maxDelayTime?: number): DelayNode;
+    createConstantSource(): ConstantSourceNode;
+    createBufferSource(): AudioBufferSourceNode;
+    createBuffer(numberOfChannels: number, length: number, sampleRate: number): AudioBuffer;
+    /** As `context.createNoiseBuffer`, at this context's rate. */
+    createNoiseBuffer(seconds: number, color?: "white" | "pink" | "brown", options?: { seed?: number }): AudioBuffer;
+    /** As `context.createNoise`. */
+    createNoise(options?: NoiseOptions): AudioBufferSourceNode;
+    createPeriodicWave(real: Float32Array | readonly number[], imag: Float32Array | readonly number[], constraints?: { disableNormalization?: boolean }): PeriodicWave;
+    decodeAudioData(data: ArrayBuffer | Uint8Array): Promise<AudioBuffer>;
+    loadBuffer(path: string): Promise<AudioBuffer>;
+    /** Renders the graph built so far to an AudioBuffer of
+     * `numberOfChannels` × `length` frames at `sampleRate` (it counts
+     * toward the game's 32 MiB of buffers from the start, its length
+     * reserved while it renders; a RangeError rejects past it).
+     * Once: `InvalidStateError` again. Changes to the graph afterwards are
+     * not heard. */
+    startRendering(): Promise<AudioBuffer>;
+  }
 }
 
 // ===========================================================================
@@ -10093,7 +11804,132 @@ declare module "starhermit:platform" {
      * `friendsOnly`, which is a player's (a guest's rejects with
      * `signed-out`). An unknown id rejects with `not-found`. */
     entries(leaderboardId: string, options?: { friendsOnly?: boolean; page?: number; pageSize?: number; scope?: string; region?: string }): Promise<{ items: LeaderboardEntry[]; total: number; page: number; pageSize: number }>;
+    /** Since API_MINOR 37 (`SUBMIT_SCORE_MINOR`; undefined before): a
+     * finished run's score, through the game's server script. The client
+     * never writes a board: this opens a practice session (the run's, with
+     * `options.run`), sends the script one standard result message
+     * (`ScoreResultMessage`: the claimed scores, the run's play time and
+     * frames, the game's evidence), waits for its `result-ack`
+     * (`ScoreResultAck`) and then reads the player's rank on the board. The
+     * script checks the claim and writes the board itself, or refuses it
+     * (the platform's `scores` effect; `api/starhermit-results.js` has the
+     * checks: one result a session, bounds by play time, a replay
+     * re-simulated, and the acknowledgement). A server script that trusts
+     * the raw number is cheatable: anyone can send it any number from a
+     * modified client.
+     *
+     * `board` is the board's key (1–64 characters, not `__proto__`,
+     * `constructor` or `prototype`, as for every key in `scores`); `result`
+     * its score, or an object with `score`, `scores` (other boards' claims
+     * in the same result, at most 16 boards in all), `playedMs` and `frames` (the run's
+     * own counts by default), and `evidence` (at most 12 KB of JSON: an
+     * input log, a replay seed, whatever the script re-simulates from).
+     * `options.timeoutMs` (1,000–120,000, default 15,000) bounds the wait
+     * for the acknowledgement, `options.rank: false` skips the rank's read.
+     * Never rejects for the platform's failures or the script's verdict:
+     * the outcome says what happened (no session, or no socket for it while
+     * the game's own sockets fill the limit, is `"unavailable"`). A bad
+     * argument is a TypeError or
+     * RangeError, and a run already submitted or cancelled an
+     * `InvalidStateError`. */
+    submitScore(board: string, result: number | ScoreResult, options?: { run?: ScoreRun; timeoutMs?: number; rank?: boolean }): Promise<ScoreSubmission>;
+    /** Since API_MINOR 37 (`SUBMIT_SCORE_MINOR`; undefined before): starts
+     * a run as play begins: opens its practice session now and tells the
+     * server script (`{ type: "run-start", v: 1, atMs }`, `atMs` how far
+     * into the run the session opened), so the script times the run on its
+     * own clock instead of taking the client's word, and counts the run's
+     * frames and play time (update frames and their deltas) until
+     * `submitScore(board, result, { run })` ends it. The script's
+     * `run-started` answer gives the run its `seed`, which the result names
+     * back. A game has one live run: starting another cancels the one
+     * before if it was not yet submitted (its socket closed, its counts
+     * stopped; submitting it then rejects with `InvalidStateError`), so
+     * runs hold at most one of the game's sockets. A run whose session
+     * failed (`"unavailable"`, a socket refused included) still counts: the
+     * submission opens a session of its own, and the script sees no start.
+     * Throws `not-allowed` without the platform capability. */
+    startRun(): ScoreRun;
   };
+  /** Since API_MINOR 37: a run's score claim (see `leaderboards.submitScore`). */
+  export interface ScoreResult {
+    readonly score: number;
+    readonly scores?: { readonly [board: string]: number };
+    /** Milliseconds played (the run's count by default; null without a run). */
+    readonly playedMs?: number;
+    /** Frames played (the run's count by default; null without a run). */
+    readonly frames?: number;
+    /** The game's evidence for the server script's replay check. */
+    readonly evidence?: JsonValue;
+  }
+  /** Since API_MINOR 37: a run started with `leaderboards.startRun()`. */
+  export abstract class ScoreRun {
+    /** "starting" (its session on the way), "running" (the server script
+     * heard its start), "unavailable" (no session; a submission opens its
+     * own), "submitted" or "cancelled". */
+    readonly state: "starting" | "running" | "unavailable" | "submitted" | "cancelled";
+    readonly sessionId: string | null;
+    /** Update frames since it started, and their deltas' sum in ms. */
+    readonly frames: number;
+    readonly playedMs: number;
+    /** The seed the server script issued the run (a 32-bit integer from
+     * its `run-started` answer; `api/starhermit-results.js` issues one), or
+     * null before it comes or from a script that issues none. A game that
+     * seeds its run from it (`createRandom(run.seed)`) has replays the
+     * script re-simulates under its own copy of the seed, bound to the
+     * session. */
+    readonly seed: number | null;
+    /** Abandons the run (closes its session's socket); nothing is sent. */
+    cancel(): void;
+  }
+  /** Since API_MINOR 37: how `leaderboards.submitScore` went. */
+  export interface ScoreSubmission {
+    /** Whether the server script took the score for `board`. */
+    readonly accepted: boolean;
+    readonly board: string;
+    readonly score: number;
+    /** "accepted"; "rejected" (the script's acknowledgement left the board
+     * out, or it refused the message: `why` says why); "timeout" (no
+     * acknowledgement in time); "closed" (the session's socket stopped
+     * first); "signed-out" (a guest: nothing was sent); "unavailable" (no
+     * practice session). */
+    readonly reason: "accepted" | "rejected" | "timeout" | "closed" | "signed-out" | "unavailable";
+    /** The script's reason for the board (`rejected[board]`, such as
+     * "too-fast"), the refusal's or the platform's message, or null. */
+    readonly why: string | null;
+    /** The player's rank on the board once taken: the acknowledgement's
+     * `ranks[board]` when the platform adds one, else read from the
+     * board's first 100 entries; null past them, when not taken, or when
+     * the read failed. */
+    readonly rank: number | null;
+    /** The script's whole acknowledgement (null when none came). */
+    readonly ack: ScoreResultAck | null;
+    readonly sessionId: string | null;
+  }
+  /** Since API_MINOR 37: what `submitScore` sends the server script
+   * (`ctx.message.data`). Older scripts reading `{ type: "result", scores }`
+   * read it unchanged. */
+  export interface ScoreResultMessage {
+    readonly type: "result";
+    readonly v: 1;
+    readonly board: string;
+    readonly scores: { readonly [board: string]: number };
+    readonly timing: { readonly playedMs: number | null; readonly frames: number | null };
+    /** The run's seed, as its session issued it (a run's result only). */
+    readonly runSeed?: number;
+    readonly evidence?: JsonValue;
+  }
+  /** Since API_MINOR 37: the server script's answer, to the sender alone
+   * (`broadcast: [{ to: [from], data }]`). `accepted` is the boards it
+   * wrote (the older scripts' shape); `rejected` each refused board's
+   * reason; `ranks` is read when present (the platform does not add it
+   * today). */
+  export interface ScoreResultAck {
+    readonly type: "result-ack";
+    readonly v?: number;
+    readonly accepted: readonly string[];
+    readonly rejected?: { readonly [board: string]: string };
+    readonly ranks?: { readonly [board: string]: number };
+  }
   export interface Achievement {
     readonly key: string;
     readonly name: string;
