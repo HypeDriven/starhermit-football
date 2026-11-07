@@ -1,22 +1,19 @@
-// The game language (spec.md §10), from the game's own tables
-// (logic/strings.ts) and the platform's language resolver (sh-language.js, a
+// The game language (spec.md §10), from the engine's string tables
+// (assets/strings.json) and the platform's language resolver (sh-language.js, a
 // classic script loaded with starhermit:script's loadClassic). The choice is
 // the per-player game setting `ui.language` ({ choice }), kept by
 // starhermit:storage on the device and in the account. Automatic follows
 // the signed-in player's StarHermit language, then the player's interface
 // language (the device's for a guest), then en-US. The UI announces in it
-// through starhermit:ui's setLanguage. The account strings are
-// logic/accountStrings.ts.
-import { onPreferencesChange, preferences } from "starhermit:engine";
+// through starhermit:ui's setLanguage. The account strings are the game's acct.*
+// rows, and the engine's starhermit.* where their wording is the game's.
+import { onPreferencesChange, preferences, strings } from "starhermit:engine";
 import { loadClassic } from "starhermit:script";
 import { settings } from "starhermit:storage";
 import * as ui from "starhermit:ui";
 import { me } from "./platform.ts";
-import { accountStrings } from "./logic/accountStrings.ts";
-import { STRINGS } from "./logic/strings.ts";
 
 export const LOCALES = ["en-US", "en-GB", "es-419", "es-ES", "de-DE", "fr-FR", "fr-CA", "pt-BR", "it-IT"] as const;
-const PARENT: Record<string, string> = { "en-GB": "en-US", "es-ES": "es-419", "fr-CA": "fr-FR" };
 const SETTING = "ui.language";
 
 interface ShLanguageInstance {
@@ -32,7 +29,9 @@ interface ShLanguage {
   create(opts: Record<string, unknown>): ShLanguageInstance;
 }
 
-const tables: Record<string, Record<string, string>> = STRINGS;
+strings.load("assets/strings.json");
+strings.defaultLocale = "en-US";
+strings.setLanguage("en-US");
 let SL: ShLanguage | null = null;
 let texts: ShLanguageInstance | null = null;
 let lang = "en-US";
@@ -40,20 +39,11 @@ let choice = "auto";
 let status: "account" | "device" | "unavailable" = "device";
 const listeners = new Set<(lang: string) => void>();
 
-function lookup(key: string): string {
-  for (let l: string | undefined = lang; l; l = PARENT[l]) {
-    const t = tables[l];
-    if (t && Object.prototype.hasOwnProperty.call(t, key)) return t[key]!;
-  }
-  return key;
-}
-
 /** Translate an English source string; {name} placeholders filled from vars.
  * Text without a row in the tables is its own English. */
 export function T(key: string, vars?: Record<string, string | number>): string {
-  const s = lookup(key);
-  if (!vars) return s;
-  return s.replace(/\{(\w+)\}/g, (m, k: string) => (Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : m));
+  if (strings.has(key)) return strings.t(key, vars);
+  return vars ? key.replace(/\{(\w+)\}/g, (m, k: string) => (Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : m)) : key;
 }
 
 export function language(): string {
@@ -77,6 +67,7 @@ function compute(): void {
   status = platform ? "account" : "device";
   if (resolved === lang) return;
   lang = resolved;
+  strings.setLanguage(lang);
   try {
     ui.setLanguage(lang);
   } catch {
@@ -177,9 +168,20 @@ export function languageTexts(): { heading: string; label: string; status: strin
 
 // ── the StarHermit account strings ──
 
+const ACCOUNT_KEYS = ["termsTitle", "termsText", "expiredTitle", "expiredText", "relaunch", "playOffline", "relaunchFailed", "inviteCopied", "inviteFailed", "signedOut",
+  "achievements", "achLoading", "achEmpty", "achFailed", "achUnlocked", "achLocked", "back"];
+const ENGINE_KEYS: Record<string, string> = { signIn: "signIn", invite: "invite", lbPosting: "leaderboardPosting", lbRank: "leaderboardRank", lbPosted: "leaderboardPosted", lbNotPosted: "leaderboardNotPosted" };
+let accountLang = "";
+let account: Record<string, string> = {};
 /** The account-surface strings in the game language. */
 export function platformStrings(): Record<string, string> {
-  return accountStrings(lang);
+  if (accountLang !== lang) {
+    accountLang = lang;
+    account = {};
+    for (const k of ACCOUNT_KEYS) account[k] = strings.t(`acct.${k}`);
+    for (const [k, e] of Object.entries(ENGINE_KEYS)) account[k] = strings.t(`starhermit.${e}`);
+  }
+  return account;
 }
 
 /** Locale-aware upper case where the runtime has it. */

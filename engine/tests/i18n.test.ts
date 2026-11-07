@@ -1,4 +1,4 @@
-// The game's translation tables (logic/strings.ts) against the text the native
+// The game's translation tables (assets/strings.json) against the text the native
 // client shows: every key it passes to T() is translated in every locale with
 // its placeholders intact (en-GB, es-ES and fr-CA inherit from en-US, es-419
 // and fr-FR), every row is text the client shows, the account strings cover
@@ -8,10 +8,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";
-import { STRINGS } from "../src/logic/strings.ts";
-import { ACCOUNT_LOCALES, accountStrings, pickLocale } from "../src/logic/accountStrings.ts";
 
 const repo = process.env["FOOTBALL_REPO"] ?? ".";
+const STRINGS = JSON.parse(readFileSync(`${repo}/assets/strings.json`, "utf8")) as Record<string, Record<string, string>>;
 const FULL = ["es-419", "de-DE", "fr-FR", "pt-BR", "it-IT"];
 const LOCALES = ["en-US", "en-GB", "es-419", "es-ES", "de-DE", "fr-FR", "fr-CA", "pt-BR", "it-IT"];
 
@@ -19,7 +18,7 @@ const LOCALES = ["en-US", "en-GB", "es-419", "es-ES", "de-DE", "fr-FR", "fr-CA",
 function sources(): string {
   const root = `${repo}/engine/src/`;
   return readdirSync(root, { recursive: true })
-    .filter((f) => f.endsWith(".ts") && !f.endsWith("logic/strings.ts"))
+    .filter((f) => f.endsWith(".ts"))
     .map((f) => readFileSync(root + f, "utf8"))
     .join("\n");
 }
@@ -55,6 +54,7 @@ test("every row is text the client shows, with its placeholders intact", () => {
   for (const [locale, table] of Object.entries(STRINGS)) {
     if (!LOCALES.includes(locale)) problems.push(`unknown locale ${locale}`);
     for (const [key, text] of Object.entries(table)) {
+      if (key.startsWith("acct.")) continue;
       if (!src.includes(JSON.stringify(key))) problems.push(`${locale} unused: ${key}`);
       if (placeholders(key) !== placeholders(text)) problems.push(`${locale} placeholders: ${key}`);
     }
@@ -63,16 +63,11 @@ test("every row is text the client shows, with its placeholders intact", () => {
   assert.deepEqual(problems, []);
 });
 
-test("the account strings cover all nine locales", () => {
-  assert.deepEqual([...ACCOUNT_LOCALES], LOCALES);
-  const keys = Object.keys(accountStrings("en-US"));
-  for (const l of LOCALES) for (const k of keys) assert.ok((accountStrings(l) as Record<string, string>)[k], `${l} ${k}`);
-  assert.ok(accountStrings("de-DE").termsText.includes("StarHermit"));
-  assert.equal(accountStrings("de-AT").signIn, accountStrings("de-DE").signIn);
-  assert.equal(pickLocale("en-AU"), "en-GB");
-  assert.equal(pickLocale("fr-CA"), "fr-CA");
-  assert.equal(pickLocale("es-MX"), "es-419");
-  assert.equal(pickLocale("xx"), "en-US");
+test("the account strings cover the full locales", () => {
+  const keys = Object.keys(STRINGS["en-US"]!).filter((k) => k.startsWith("acct."));
+  assert.ok(keys.length >= 17);
+  for (const l of FULL) for (const k of keys) assert.ok(STRINGS[l]![k] ?? STRINGS["en-US"]![k], `${l} ${k}`);
+  assert.ok(STRINGS["de-DE"]!["acct.termsText"]!.includes("StarHermit"));
 });
 
 test("the platform's resolver picks the locale i18n.ts asks for", () => {

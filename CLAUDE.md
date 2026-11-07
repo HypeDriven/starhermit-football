@@ -29,7 +29,7 @@ client on the runtime.
 - **Per-entity work belongs in kernels.** The crowd, haze and poses run as `starhermit:world`
   kernels with bindings; `world/rigMath.ts` is `logic/pose.ts`'s math as kernels, and the Node
   tests hold the two equal — change both together.
-- **Strings**: player-facing text uses the English keys of `engine/src/logic/strings.ts` through
+- **Strings**: player-facing text uses the English keys of `assets/strings.json` through
   `T` (`engine/src/i18n.ts`); a new key needs all nine locales, and a row the client no longer
   shows goes (the i18n test checks both).
 - **Assets**: stadium and character art stay generated in code; the authored assets are the cover

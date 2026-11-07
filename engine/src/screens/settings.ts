@@ -9,9 +9,8 @@ import * as ui from "starhermit:ui";
 import type { Audio } from "../audio.ts";
 import { LOCALES, T, autoLabel, languageChoice, languageTexts, nativeName, setLanguageChoice } from "../i18n.ts";
 import { P, errorKind, me } from "../platform.ts";
-import { OVERRIDE_TIERS, currentTier, override, setOverride } from "../quality.ts";
+import { OVERRIDE_TIERS, currentTier, levelContent, override, setOverride } from "../quality.ts";
 import type { Override } from "../quality.ts";
-import { contentQuality } from "../logic/quality.ts";
 
 const TIER_NAMES: Record<string, string> = { low: "Low", balanced: "Balanced", high: "High", ultra: "Ultra" };
 /** The game-content categories' labels. */
@@ -92,7 +91,7 @@ export class SettingsPanel {
       ui.heading(T("Graphics"));
       ui.label(`${TIER_NAMES[currentTier()] ?? currentTier()} — the StarHermit Options menu (F1) sets quality, resolution and frame rate`, { tone: "muted" });
       // the game's own content per category, over the preset
-      const preset = contentQuality(currentTier());
+      const preset = levelContent();
       const presetTier: Record<Override, string> = {
         detail: preset.detail ? "detailed" : "plain",
         crowd: preset.crowdFull ? "full" : "sparse",

@@ -3,12 +3,11 @@
 // glows and shadow-casting spotlights, scrolling LED boards, tunnel,
 // dugouts, corner flags, camera flashes and haze (points), and the floodlit
 // environment map for reflections. Everything is generated in code. The
-// parts with a cost follow the runtime's quality tier through the game's own
-// presets (logic/quality.ts): shadow-map size and the second
-// caster, the grass and line texture sizes, the detailed pitch (with its
+// parts with a cost follow the runtime's graphics level (logic/quality.ts):
+// the level's shadow-map size and post effects, and through the game's own
+// presets the second caster, the grass and line texture sizes, the detailed pitch (with its
 // mow-stripe normal map), crowd density and LOD, Lambert materials on Low,
-// particles, reflections and the post effects (ambient occlusion, bloom,
-// the grade and anti-aliasing).
+// particles and reflections.
 //
 // The build and the texture rebuilds slice their work across frames when the
 // running call's fuel runs low (tasks.ts). The crowd's sway (an eighth of
@@ -95,13 +94,15 @@ const TOWER_H = 30;
 // blooms), the grade, the output, then SMAA or FXAA (MSAA on Low and Ultra).
 // three r176 page: the engine's r176 UnrealBloomPass model (minor 30) at the page's own strength.
 const BLOOM = { model: "r176" as const, strength: 0.55, radius: 0.45, threshold: 1.3 };
-function gtao(high: boolean, resolution: number) {
+function gtao(ao: { resolution: number; samples: number; denoiseSamples: number }) {
+  const high = ao.resolution >= 1; // the engine's AoQuality: full resolution is "high"
+  const { resolution, samples, denoiseSamples } = ao;
   return {
     blendIntensity: high ? 0.85 : 0.7, radius: 1.2, distanceExponent: 1.6, thickness: 1.5, scale: 1.0,
-    samples: high ? 16 : 8, distanceFallOff: 1.0, resolution,
+    samples, distanceFallOff: 1.0, resolution,
     // updatePdMaterial changes samples and rings only on High (r176 keeps the
     // disk exponent at 1 until then; Ultra's call leaves them as they were)
-    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: high ? 6 : 4, rings: 2, samples: high ? 16 : 8, radiusExponent: high ? 1 : 2 },
+    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: high ? 6 : 4, rings: 2, samples: denoiseSamples, radiusExponent: high ? 1 : 2 },
   };
 }
 // GradeShader: gentle S-curve, more saturation, cool shadows / warm highlights, vignette 0.26.
@@ -1270,6 +1271,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
       const gen = ++generation;
       void rebuildTextures(want, gen).catch((e: unknown) => console.warn("stadium textures:", e instanceof Error ? e.message : String(e)));
     }
+    // the game sets the map size (minor 23+: the engine keeps whatever it is given): the level's
     setShadow(spot, want.shadowMap);
     // the opposite tower also casts at the top shadow tier
     setShadow(spot2, want.secondCaster ? want.shadowMap : 0);
@@ -1316,8 +1318,8 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
       flashLit[n] = flashLit[--litN]!;
     }
     flashes.visible = haze.visible = particlesOn && night;
-    renderer.bloom = want.bloom ? { ...BLOOM, resolution: want.bloomRes } : null;
-    renderer.ao = want.ao !== "off" ? gtao(want.ao === "high", want.aoRes) : null;
+    renderer.bloom = want.bloomRes !== null ? { ...BLOOM, resolution: want.bloomRes } : null;
+    renderer.ao = want.ao ? gtao(want.ao) : null;
     renderer.grade = want.grade ? GRADE : null;
     renderer.antialias = want.antialias;
   }

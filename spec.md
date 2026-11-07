@@ -38,7 +38,7 @@ File map (everything shipped or run from this repository):
 | `engine/src/net.ts`, `platform.ts` | The game and room sockets and the platform calls through `starhermit:platform`. |
 | `engine/src/screens/` | Lobby, Controls, Leaderboard, Replays, Achievements and SETTINGS screens. |
 | `engine/src/world/` | Stadium, footballer rig (`rig.ts`, `rigMath.ts`: the poses as world kernels), name tags, officials, ball and coin, kits, crests, the environment map. |
-| `engine/src/logic/` | Pure, Node-tested parts: quality presets and budgets, translation tables, account strings, pose math, snapshot parsing and interpolation, prediction, camera, lobby model, text formats. |
+| `engine/src/logic/` | Pure, Node-tested parts: quality presets and budgets, pose math, snapshot parsing and interpolation, prediction, camera, lobby model, text formats. |
 | `engine/starhermit.d.ts`, `engine/tsconfig.json`, `engine/tests/`, `engine/HOST-API-GAPS.md` | The runtime's host-API contract (a copy), type checking, the Node tests (`run.sh`), what the host API still lacks. |
 | `assets/` | `keyart-night-stadium.webp` (loading screen), `crest-blue.webp`, `crest-red.webp` (score bar and lobby). |
 | `cover.jpg`, `coverart.png`, `icon.png` | Library cover (`cover=`), platform listing art and icon. |
@@ -324,23 +324,24 @@ so the stripes shift with the view angle, and blade grain; one grass texture at 
 normal map, rebuilt when the tier changes), crowd density (full, or an evenly spread half) and
 particles (camera flashes in the stands that burst on goals, haze drifting in the beams).
 
-The runtime's quality tier — its Options menu (F1), `frame().quality`, Auto by the runtime's own
-GPU detection, which offers Ultra on capable GPUs — is the game's preset (`logic/quality.ts`).
+The runtime's graphics level — its Options menu (F1), `frame().level`, Auto by the runtime's own
+GPU detection, which offers Ultra on capable GPUs — sets the engine's effects (shadow size, AO,
+bloom, grade, anti-aliasing: `levelSettings()`), and its tier is the game's preset (`logic/quality.ts`).
 SETTINGS overrides the three categories that are the game's own content (pitch detail, crowd,
-flashes and haze) in the `graphics` game setting; render scale, adaptive resolution and frame-rate
-limits are the runtime's own options. Changes apply live. Presets:
+flashes and haze, scaled up to 2× within a tier with the level's particle budget) in the `graphics` game setting; render scale, adaptive resolution and frame-rate
+limits are the runtime's own options. Changes apply live. At each tier's first level:
 
 | Preset | Shadows | AO | Bloom | Grade | AA | Reflections | Detail | Crowd | Particles |
 |---|---|---|---|---|---|---|---|---|---|
-| Low | off | off | off | off | MSAA | off | plain | sparse | off |
+| Low | off | off | off | off | off | off | plain | sparse | off |
 | Balanced | 1024² | off | on | on | FXAA | on | detailed | full | on |
 | High | 2048² | on | on | on | SMAA | on | detailed | full | on |
 | Ultra | 4096² ×2 | high | on | on | MSAA ×4 | on | detailed | full | on |
 
 The post effects run in three.js r176's `EffectComposer` order on the host's renderer: GTAO
 (blend 0.7, radius 1.2, distance exponent 1.6, thickness 1.5, 8 samples on High; blend 0.85 and
-16 samples on Ultra; Poisson denoise) at the budget's `aoRes`, bloom (strength 0.55, radius 0.45,
-threshold 1.3) at its `bloomRes`, the grade, the output, then SMAA or FXAA; effects that are off
+16 samples on Ultra; Poisson denoise) at the level's resolution, bloom (strength 0.55, radius 0.45,
+threshold 1.3) at the level's resolution, the grade, the output, then SMAA or FXAA; effects that are off
 cost nothing.
 
 **Per-preset budgets** (`BUDGETS` in `logic/quality.ts`; each tuned to hold 60 FPS on the weakest
@@ -374,7 +375,7 @@ band-passed noise voices with slow LFOs whose level follows `excitement^1.4 × 0
 eases toward `0.3 + 0.55 × danger`, where danger is how deep the ball is in either final 30 % of
 the pitch (`match.ts updateAudio`), and the bed's level curve is scheduled again when it moves by
 0.002. There is no music: the crowd is the score. The game's mute (the in-match menu's SOUND,
-SETTINGS) is its `muted` game setting; the volumes and the concurrent-sound limit are the
+SETTINGS) is its `muted` game setting, applied with the engine's game mute (voice chat has its own); the volumes and the concurrent-sound limit are the
 runtime's Options. The runtime's mixer needs no gesture to start.
 
 Authored clips (`sfx/*.opus`, 48 kHz mono Opus, −20 LUFS, MOSS-SoundEffect v2) are decoded into
@@ -415,10 +416,10 @@ Every player-facing string ships in nine locales: **en-US, en-GB, es-419, es-ES,
 fr-CA, pt-BR, it-IT**.
 
 - **Tables.** English source strings are the keys (menu buttons keep the UPPERCASE style in every
-  language). `engine/src/logic/strings.ts` holds rows of [English, es-419, de-DE, fr-FR, pt-BR,
-  it-IT]; en-GB, es-ES and fr-CA list only their differences and otherwise fall back to en-US,
-  es-419 and fr-FR. The account strings (sign-in, invite, session-expired and updated-terms
-  prompts, achievements screen, leaderboard line) are `engine/src/logic/accountStrings.ts`.
+  language). `assets/strings.json` is the engine's string tables by locale; en-GB, es-ES and fr-CA list
+  only their differences and otherwise fall back to en-US, es-419 and fr-FR. The account strings
+  (session-expired and updated-terms prompts, invite and sign-out lines, achievements screen) are
+  its `acct.*` rows; sign-in, the invite button and the leaderboard lines are the engine's `starhermit.*`.
   "StarHermit Football", player names, key names and the achievement names the server script
   declares stay as they are; the SETTINGS labels and text without a row stay English.
 - **How it is applied.** Text goes through `T('…', vars)` (`engine/src/i18n.ts`) as each frame

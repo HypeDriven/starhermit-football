@@ -720,8 +720,7 @@ function screensUi(): void {
   const f = frame();
   draw.rect(0, 0, f.width, f.height, [5 / 255, 7 / 255, 12 / 255, 0.35]);
   fullViewport();
-  const width = (f.width - f.safeArea.left - f.safeArea.right) / f.scale;
-  const height = (f.height - f.safeArea.top - f.safeArea.bottom) / f.scale;
+  const { width, height } = ui.viewport!();
   ui.column("screen", () => {
     switch (screen) {
       case "menu":

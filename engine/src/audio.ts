@@ -5,13 +5,13 @@
 // decoded clip. The crowd bed, the stadium "reverb" (two feedback delays)
 // and the excitement level are always synthesised. UI clicks play on the
 // player's interface bus; volumes and the concurrent-sound limit are the
-// runtime's own Options. The game's mute is its `muted` setting.
+// runtime's own Options. The game's mute is its `muted` setting, applied with
+// the engine's game mute.
 //
 // The host graph is bounded (nodes, connections, render cost), so every
 // short-lived chain releases its nodes when its source ends, and a sound
 // that does not fit is dropped rather than failing the game.
-import { lowOnFuel, nextFrame } from "./tasks.ts";
-import { context } from "starhermit:audio";
+import { context, OfflineAudioContext, setMuted as muteGame } from "starhermit:audio";
 import type { AudioBuffer, AudioBusNode, AudioNode, BiquadFilterNode, GainNode, OscillatorNode } from "starhermit:audio";
 import { settings } from "starhermit:storage";
 import { files } from "starhermit:engine";
@@ -96,10 +96,12 @@ interface ClipOpts {
   pan?: number;
 }
 
+const NOISE_DRY = 0.37;
+const NOISE_WET = 1.3;
+
 export function createAudio(): Audio {
   const ctx = context;
   let built = false;
-  let master: GainNode | null = null; // master gain -> effects bus
   let sfxBus: GainNode | null = null; // dry bus for ball/player sounds
   let uiBus: GainNode | null = null; // menu clicks -> interface bus
   let crowdBus: GainNode | null = null; // crowd sounds, feeds master + reverb send
@@ -108,26 +110,39 @@ export function createAudio(): Audio {
   let noiseBuffer: AudioBuffer | null = null;
   let excitement = 0.35;
   let muted = readMuted();
+  muteGame(muted);
   const clips = new Map<string, AudioBuffer>(); // event id -> decoded clip
 
   const ready = (): boolean => built;
 
-  // White noise with a mild 1/f tilt so raw loops feel less harsh; two
-  // seconds of stereo samples, made a block at a time across frames.
+  // One channel of the noise, rendered natively: white noise with a mild
+  // tilt so raw loops feel less harsh, dry plus a gentle lowpass (fitted within
+  // about 1 dB per band to the old script's white * 0.275 + one-pole * 1.6).
+  async function renderNoiseChannel(seed: number, len: number): Promise<Float32Array> {
+    const settle = Math.round(0.05 * ctx.sampleRate);
+    const off = new OfflineAudioContext(1, settle + len, ctx.sampleRate);
+    const noise = off.createNoise({ seed, seconds: len / ctx.sampleRate }); // periodic, so the slice loops
+    const dry = off.createGain();
+    dry.gain.value = NOISE_DRY;
+    const lp = off.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 2128;
+    lp.Q.value = 0.3;
+    const wet = off.createGain();
+    wet.gain.value = NOISE_WET;
+    noise.connect(dry).connect(off.destination);
+    noise.connect(lp).connect(wet).connect(off.destination);
+    noise.start();
+    const r = await off.startRendering();
+    return r.getChannelData(0).slice(settle);
+  }
+
+  // Two seconds of stereo noise.
   async function buildNoiseBuffer(): Promise<AudioBuffer> {
     const len = Math.floor(ctx.sampleRate * 2);
     const buf = ctx.createBuffer(2, len, ctx.sampleRate);
-    const data = new Float32Array(len);
-    for (let ch = 0; ch < 2; ch++) {
-      let last = 0;
-      for (let i = 0; i < len; i++) {
-        const white = Math.random() * 2 - 1;
-        last = last * 0.94 + white * 0.06;
-        data[i] = (white * 0.55 + last * 3.2) * 0.5;
-        if ((i & 4095) === 4095 && lowOnFuel()) await nextFrame();
-      }
-      buf.copyToChannel(data, ch);
-    }
+    const channels = await Promise.all([renderNoiseChannel(0x4b1d, len), renderNoiseChannel(0x7e57, len)]);
+    channels.forEach((data, ch) => buf.copyToChannel(data, ch));
     return buf;
   }
 
@@ -221,18 +236,17 @@ export function createAudio(): Audio {
     building = true;
     try {
       const m = ctx.createGain();
-      m.gain.value = muted ? 0 : 1;
+      m.gain.value = 1;
       m.connect(ctx.destination);
-      master = m;
 
       const sfx = ctx.createGain();
       sfx.gain.value = 0.9;
       sfx.connect(m);
       sfxBus = sfx;
 
-      // The player's interface volume for menu clicks; muting still applies.
+      // The player's interface volume for menu clicks.
       const uiMaster = ctx.createGain();
-      uiMaster.gain.value = muted ? 0 : 1;
+      uiMaster.gain.value = 1;
       uiMaster.connect(ctx.bus("interface"));
       uiBus = uiMaster;
 
@@ -417,14 +431,7 @@ export function createAudio(): Audio {
       } catch {
         // settings unavailable — ignore
       }
-      if (ready()) {
-        const t = ctx.currentTime;
-        for (const bus of [master, uiBus]) {
-          if (!bus) continue;
-          bus.gain.cancelScheduledValues(t);
-          bus.gain.setTargetAtTime(muted ? 0 : 1, t, 0.03);
-        }
-      }
+      muteGame(muted);
     },
 
     isMuted: () => muted,

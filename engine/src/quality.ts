@@ -1,14 +1,14 @@
-// The game's graphics content: the runtime's quality tier (its Options
-// menu, frame().quality) as the game's preset (logic/quality.ts), plus the player's per-category overrides for what is the
+// The game's graphics content: the runtime's graphics level (its Options
+// menu, frame().level): its effects and its tier's preset (logic/quality.ts), plus the player's per-category overrides for what is the
 // game's own content — pitch detail, crowd density, flashes and haze — kept
 // in the `graphics` game setting ({ detail, crowd,
-// particles, … }); the preset's shadows, ambient occlusion, bloom, grade,
-// anti-aliasing and reflections follow the tier, and the render scale is the
+// particles, … }); shadows, ambient occlusion, bloom, grade and anti-aliasing
+// follow the level, reflections the tier, and the render scale is the
 // runtime's. Listeners hear every change.
-import { frame } from "starhermit:engine";
+import { frame, levelSettings } from "starhermit:engine";
 import { settings } from "starhermit:storage";
 import type { JsonValue } from "starhermit:engine";
-import { contentQuality } from "./logic/quality.ts";
+import { TIER_ANCHOR, contentQuality } from "./logic/quality.ts";
 import type { ContentQuality } from "./logic/quality.ts";
 
 export type Override = "detail" | "crowd" | "particles";
@@ -19,7 +19,7 @@ export const OVERRIDE_TIERS: Record<Override, readonly string[]> = {
 };
 const SETTING = "graphics";
 
-let tier: string | null = null;
+let level: string | null = null;
 let cached: Record<string, JsonValue> | null = null;
 let watching = false;
 const listeners = new Set<(q: ContentQuality) => void>();
@@ -30,6 +30,12 @@ export function currentTier(): string {
   } catch {
     return "balanced";
   }
+}
+
+/** This frame's level as the game's content, before the player's overrides. */
+export function levelContent(): ContentQuality {
+  const s = levelSettings(frame().level);
+  return contentQuality(s, s.particles / levelSettings(TIER_ANCHOR[s.quality]).particles);
 }
 
 function readSetting(): Record<string, JsonValue> {
@@ -81,7 +87,7 @@ export function setOverride(cat: Override, value: string | null): void {
 }
 
 export function currentQuality(): ContentQuality {
-  const q = contentQuality(currentTier());
+  const q = levelContent();
   const detail = override("detail");
   const crowd = override("crowd");
   const particles = override("particles");
@@ -102,12 +108,12 @@ function notify(): void {
 }
 
 /** Called once a frame: tells the builders when the player changed the
- * tier in the runtime's Options (overrides notify as they change). */
+ * level in the runtime's Options (overrides notify as they change). */
 export function pollQuality(): void {
-  const t = currentTier();
-  if (t === tier) return;
-  const first = tier === null;
-  tier = t;
+  const l = frame().level;
+  if (l === level) return;
+  const first = level === null;
+  level = l;
   graphicsSetting();
   if (!first) notify();
 }
