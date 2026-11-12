@@ -1,3 +1,4 @@
+import { localizedCanvasFont } from "../l10n/font.ts";
 // The procedural night-match stadium: striped pitch with line markings, goals with nets, a two-tier seated bowl
 // with an instanced animated crowd, floodlight towers with light cones, lamp
 // glows and shadow-casting spotlights, scrolling LED boards, tunnel,
@@ -525,10 +526,10 @@ function makeLedTexture(): CanvasTexture {
     ctx.fillStyle = fg;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = "italic 900 72px sans-serif"; // generic families only
+    ctx.font = localizedCanvasFont("italic 900 72px sans-serif"); // generic families only
     ctx.fillText(word, x + segW / 2, 56);
     ctx.globalAlpha = 0.65;
-    ctx.font = "700 22px sans-serif";
+    ctx.font = localizedCanvasFont("700 22px sans-serif");
     ctx.fillText("OFFICIAL CLUB PARTNER", x + segW / 2, 102);
     ctx.globalAlpha = 1;
     ctx.fillStyle = "rgba(255,255,255,0.28)";
@@ -571,13 +572,13 @@ function makeSignTexture(): CanvasTexture {
   ctx.fillStyle = "#ffffff";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.font = "900 52px sans-serif";
+  ctx.font = localizedCanvasFont("900 52px sans-serif");
   // "★ STARHERMIT FC ★", with the stars drawn as paths (the system's fonts
   // may have no ★)
   const text = "STARHERMIT FC";
   // fit the line (the system's sans-serif may be wider than Arial)
   const k = Math.min(1, 480 / (ctx.measureText(text).width + 2 * ctx.measureText(" ").width + 80));
-  ctx.font = `900 ${Math.floor(52 * k)}px sans-serif`;
+  ctx.font = localizedCanvasFont(`900 ${Math.floor(52 * k)}px sans-serif`);
   ctx.fillText(text, 256, 50);
   const half = ctx.measureText(text).width / 2;
   const gap = ctx.measureText(" ").width;

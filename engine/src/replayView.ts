@@ -1,3 +1,4 @@
+import { localizedDrawOptions as __l10nDrawOptions } from "./l10n/font.js";
 // Render-only 3D playback of an archived online match. Loads the replay log embedded in the archived session
 // state (replays.get → state.replay) and plays it on a virtual 30 Hz tick
 // clock, interpolating between the 2 fps keyframes with the live snapshot
@@ -238,13 +239,13 @@ export class ReplayViewer {
     const s = f.scale;
     if (this.message) {
       const size = 14 * s;
-      const tw = draw.measureText(this.message, { size }).width;
+      const tw = draw.measureText(this.message, __l10nDrawOptions({ size })).width;
       const w = tw + 2.8 * 16 * s;
       const h = size + 2 * 16 * s;
       const x = f.width / 2 - w / 2;
       const y = f.height * 0.38 - h / 2;
       panel(x, y, w, h, 10 * s, s);
-      draw.text(this.message, f.width / 2, y + (h - size) / 2, { size, color: "#c7d2dc", align: "center" });
+      draw.text(this.message, f.width / 2, y + (h - size) / 2, __l10nDrawOptions({ size, color: "#c7d2dc", align: "center" }));
     }
     if (!this.ready && !this.unavailable) return;
     const width = Math.min(560 * s, f.width * 0.92);

@@ -1,3 +1,4 @@
+import { localizedDrawOptions as __l10nDrawOptions } from "./l10n/font.js";
 // In-match text chat, online matches only. Every
 // game session has a platform conversation (session → chatConversationId).
 // History comes from chat.messages, new messages from the SDK's polled
@@ -178,17 +179,17 @@ export function createMatchChat(sessionId: string, myUserId: string | null): Mat
       for (let i = first; i < total; i++) {
         let lx = x + padX;
         if (i >= tail.length) {
-          draw.text(sys[i - tail.length]!, lx, ly, { size, color: "#93a1b0", clip });
+          draw.text(sys[i - tail.length]!, lx, ly, __l10nDrawOptions({ size, color: "#93a1b0", clip }));
         } else {
           const m = tail[i]!;
           if (m.kind && m.kind !== "text") {
-            draw.text(oneLine(m.content ?? ""), lx, ly, { size, color: "#93a1b0", clip });
+            draw.text(oneLine(m.content ?? ""), lx, ly, __l10nDrawOptions({ size, color: "#93a1b0", clip }));
           } else {
             const own = String(m.senderId ?? "").toLowerCase() === me;
             const label = `${displayNameNow(m.senderId) ?? "…"} `;
-            draw.text(label, lx, ly, { size, color: own ? ACCENT2 : "#9fb0c0", weight: 700, clip });
-            lx += draw.measureText(label, { size, weight: 700 }).width;
-            draw.text(oneLine(m.content ?? ""), lx, ly, { size, color: "#d7e1e9", clip });
+            draw.text(label, lx, ly, __l10nDrawOptions({ size, color: own ? ACCENT2 : "#9fb0c0", weight: 700, clip }));
+            lx += draw.measureText(label, __l10nDrawOptions({ size, weight: 700 })).width;
+            draw.text(oneLine(m.content ?? ""), lx, ly, __l10nDrawOptions({ size, color: "#d7e1e9", clip }));
           }
         }
         ly += lineH;

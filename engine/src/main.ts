@@ -1,10 +1,21 @@
+import { localizedDrawOptions as __l10nDrawOptions } from "./l10n/font.js";
+import { withLanguageRender as __l10nRender } from "./l10n/menu.js";
+// localization-runtime:attached
+import { localizedCanvasFont as __l10nCanvasFont } from "./l10n/font.js";
+import { openLocalizedOptions as __l10nOptions } from "./l10n/menu.js";
 // StarHermit Football — the game's entry: boot, the screens state machine (menu → lobby → match →
 // result, leaderboard, replays and the replay viewer, achievements), the
 // in-match menu, SETTINGS, the scene camera and the match lifecycle, on the
 // StarHermit runtime's host API v1. The match simulation is server.js, shared
 // with the platform (see sim.ts); the strings are the game's tables (see
 // i18n.ts).
-import { frame, onFixedUpdate, onRender, onStart, onUpdate, openMenu, setFixedRate } from "starhermit:engine";
+// StarHermit Football — the game's entry: boot, the screens state machine (menu → lobby → match →
+// result, leaderboard, replays and the replay viewer, achievements), the
+// in-match menu, SETTINGS, the scene camera and the match lifecycle, on the
+// StarHermit runtime's host API v1. The match simulation is server.js, shared
+// with the platform (see sim.ts); the strings are the game's tables (see
+// i18n.ts).
+import { frame, onFixedUpdate, onRender, onStart, onUpdate, setFixedRate } from "starhermit:engine";
 import type { JsonValue } from "starhermit:engine";
 import { ACESFilmicToneMapping, PCFSoftShadowMap, PerspectiveCamera, renderer, scene } from "starhermit:scene";
 import { createImageBitmap } from "starhermit:canvas";
@@ -123,9 +134,9 @@ function uiConfirm(c: Omit<Confirm, "resolve" | "primaryYes"> & { primaryYes?: b
  * where a build refuses it. */
 function signIn(): void {
   try {
-    P.requestSignIn().catch(() => openMenu());
+    P.requestSignIn().catch(() => __l10nOptions());
   } catch {
-    openMenu();
+    __l10nOptions();
   }
 }
 
@@ -451,7 +462,7 @@ function logoTexture(): CanvasTexture {
   const first = "STARHERMIT ";
   const [c, ctx] = makeCanvas(1200, size + pad * 2);
   const style = (): void => {
-    ctx.font = `800 ${size}px sans-serif`;
+    ctx.font = __l10nCanvasFont(`800 ${size}px sans-serif`);
     ctx.letterSpacing = `${0.12 * size}px`;
   };
   style();
@@ -777,8 +788,8 @@ function loadingScreen(text: string): void {
   }
   draw.image(veil, 0, 0, f.width, f.height);
   const logo = 22.4 * s; // .small-logo 1.4rem
-  draw.text("STARHERMIT FOOTBALL", f.width / 2, f.height / 2 - logo * 1.2, { size: logo, color: TEXT, align: "center", letterSpacing: 0.12 * logo, weight: 800 });
-  draw.text(text, f.width / 2, f.height / 2 + logo * 0.4, { size: 16 * s, color: MUTED, align: "center" });
+  draw.text("STARHERMIT FOOTBALL", f.width / 2, f.height / 2 - logo * 1.2, __l10nDrawOptions({ size: logo, color: TEXT, align: "center", letterSpacing: 0.12 * logo, weight: 800 }));
+  draw.text(text, f.width / 2, f.height / 2 + logo * 0.4, __l10nDrawOptions({ size: 16 * s, color: MUTED, align: "center" }));
   // how far the build has got (the native loading screen's addition)
   const bw = 200 * s;
   const bh = 4 * s;
@@ -891,7 +902,7 @@ onUpdate((delta) => {
   hud.setMic(!!match && voice.active, voice.muted);
 });
 
-onRender(() => {
+onRender(__l10nRender(() => {
   // Minor 20+: the camera keeps its own aspect, as three's (the browser build set it on resize).
   const fr = frame();
   if (fr.width > 0 && fr.height > 0 && Math.abs(camera.aspect - fr.width / fr.height) > 1e-6) {
@@ -920,4 +931,8 @@ onRender(() => {
     return;
   }
   screensUi();
-});
+}));
+
+// localization-runtime:menu
+import { installLanguageMenu as __installLanguageMenu } from "./l10n/menu.js";
+__installLanguageMenu(false);

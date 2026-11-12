@@ -1,3 +1,4 @@
+import { localizedDrawOptions as __l10nDrawOptions } from "./l10n/font.js";
 // The in-match HUD drawn each frame with starhermit:draw: the score bar with the club crests,
 // team names and match clock, the off-screen ball arrow, the shot power bar,
 // event banners, the mouse camera hint, the ☰ match-menu button and the mic
@@ -94,7 +95,7 @@ function measurer(weight: import("starhermit:engine").FontWeight, spacing?: numb
     if (t !== text || s !== size) {
       text = t;
       size = s;
-      width = draw.measureText(t, spacing === undefined ? { size: s, weight } : { size: s, weight, letterSpacing: spacing * s }).width;
+      width = draw.measureText(t, __l10nDrawOptions(spacing === undefined ? { size: s, weight } : { size: s, weight, letterSpacing: spacing * s })).width;
     }
     return width;
   };
@@ -218,19 +219,19 @@ export function createHud(): Hud {
     cx += crestSize + gap;
     nameStyle.size = small;
     nameStyle.letterSpacing = 0.05 * small;
-    draw.text(home, cx, mid - small / 2, nameStyle);
+    draw.text(home, cx, mid - small / 2, __l10nDrawOptions(nameStyle));
     cx += wHome + gap;
     scoreStyle.size = big;
     scoreStyle.letterSpacing = 0.05 * big;
-    draw.text(score, cx, mid - big / 2, scoreStyle);
+    draw.text(score, cx, mid - big / 2, __l10nDrawOptions(scoreStyle));
     cx += wScore + gap;
-    draw.text(away, cx, mid - small / 2, nameStyle);
+    draw.text(away, cx, mid - small / 2, __l10nDrawOptions(nameStyle));
     cx += wAway + gap;
     draw.image(crest(1).canvas, cx, mid - crestSize / 2, crestSize, crestSize);
     cx += crestSize + gap * 2;
     // unspaced: the engine's football probe reads the clock as one text
     clockStyle.size = clockSize;
-    draw.text(time, cx, mid - clockSize / 2, clockStyle);
+    draw.text(time, cx, mid - clockSize / 2, __l10nDrawOptions(clockStyle));
   }
 
   function drawArrow(s: number): void {
@@ -256,7 +257,7 @@ export function createHud(): Hud {
     const size = 11.2 * s; // #ball-arrow-dist 0.7rem
     arrowStyle.size = size;
     arrowShadow.y = s;
-    draw.text(arrowDist, cx, cy + 14 * s, arrowStyle);
+    draw.text(arrowDist, cx, cy + 14 * s, __l10nDrawOptions(arrowStyle));
   }
 
   function drawPower(W: number, H: number, s: number, bottomInset: number): void {
@@ -294,13 +295,13 @@ export function createHud(): Hud {
     glowNext.x = 2 * s;
     glowPair.size = glowLast.size = bannerStyle.size = size;
     glowPair.letterSpacing = glowLast.letterSpacing = bannerStyle.letterSpacing = spacing;
-    draw.text(bannerText, W / 2 - 4 * s, y, glowPair);
-    draw.text(bannerText, W / 2, y, glowPair);
-    draw.text(bannerText, W / 2 + 4 * s, y, glowLast);
+    draw.text(bannerText, W / 2 - 4 * s, y, __l10nDrawOptions(glowPair));
+    draw.text(bannerText, W / 2, y, __l10nDrawOptions(glowPair));
+    draw.text(bannerText, W / 2 + 4 * s, y, __l10nDrawOptions(glowLast));
     bannerWhite[3] = alpha;
     bannerDrop.color[3] = 0.8 * alpha;
     bannerDrop.y = 2 * s;
-    draw.text(bannerText, W / 2, y, bannerStyle);
+    draw.text(bannerText, W / 2, y, __l10nDrawOptions(bannerStyle));
   }
 
   function drawMouseHint(W: number, H: number, s: number, bottomInset: number): void {
@@ -318,7 +319,7 @@ export function createHud(): Hud {
     panel(x, y, w, h, 7 * s, s, "rgba(255,255,255,0.2)", HINT_FILL);
     hintStyle.size = size;
     hintStyle.letterSpacing = spacing;
-    draw.text(text, x + padX, y + padY, hintStyle);
+    draw.text(text, x + padX, y + padY, __l10nDrawOptions(hintStyle));
   }
 
   function drawMenuButton(W: number, s: number, top: number, right: number): void {
@@ -355,7 +356,7 @@ export function createHud(): Hud {
     mic.h = h;
     const color = micMuted ? "#e74c3c" : TEXT;
     panel(mic.x, mic.y, w, h, 8 * s, s, micMuted ? "#e74c3c" : BORDER);
-    draw.text(label, mic.x + w / 2, mic.y + (h - size) / 2, { size, color, align: "center", weight: 700 });
+    draw.text(label, mic.x + w / 2, mic.y + (h - size) / 2, __l10nDrawOptions({ size, color, align: "center", weight: 700 }));
   }
 
   return {
