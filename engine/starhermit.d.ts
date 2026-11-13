@@ -1,5 +1,3 @@
-// Copied unchanged below this note from the StarHermit runtime 1.38.0
-// (`starhermit types .`). Refresh it with each engine re-pin.
 // StarHermit host API, version 1: the built-in modules a script game imports
 // by name (`import { onUpdate } from "starhermit:engine"`). The runtime
 // (`starhermit`) is the only trusted code; a game package is data, and every
@@ -255,6 +253,13 @@ declare var crypto: Crypto;
  *   are bounds-checked and trap.
  * - Execution costs the calling entry's fuel (a function's entry and each
  *   turn of a loop), so a WebAssembly loop is stopped as a script loop is.
+ *   Each is charged ahead, at one script instruction per WebAssembly
+ *   instruction, for every instruction it may run straight through: a
+ *   loop's turn for its whole body (branches it skips included), a
+ *   function's entry for its straight-line code. So keep hot loops small:
+ *   a short skip loop in its own function costs a turn's few
+ *   instructions, while a loop whose body holds rarely taken work pays
+ *   for that work every turn.
  * - Every memory of a realm together is at most `engine.limits.wasm_mib`
  *   (default 256 MiB, at most 1,024): a memory past it is a `RangeError`,
  *   and `memory.grow` past it fails (-1 in WebAssembly, a `RangeError`
@@ -661,8 +666,9 @@ declare module "starhermit:engine" {
     readonly quality: QualityTier;
     /** The graphics level in use (since API_MINOR 14): Auto's (it starts
      * at the level detected for the device, at most stellar, steps down a
-     * level on sustained overload and may climb by measured headroom to
-     * cosmic, never infinite), or the player's choice held to what the
+     * level when it cannot hold 60 frames a second, and climbs a level
+     * while it renders above 60, up to what the device allows), or the
+     * player's choice held to what the
      * device allows. It may change between frames. */
     readonly level: GraphicsLevel;
     /** The level's index, 0 (quantum) to 9 (infinite) (since API_MINOR
@@ -1714,6 +1720,53 @@ declare module "starhermit:engine" {
     readonly textScale: number;
     /** High-contrast colors asked for (`starhermit:ui` applies them). */
     readonly highContrast: boolean;
+    /** Options → Graphics volume settings, applied by `starhermit:volume`
+     * (since API_MINOR 39, `VOLUME_OPENVDB_MINOR`; older games' preferences
+     * have only the four fields above, and hear no change of these). */
+    readonly volume: VolumeGraphicsPreferences;
+  }
+  export interface VolumeGraphicsPreferences {
+    readonly lighting: "volume" | "frame";
+    readonly multipleScattering: "off" | "diffusion" | "two-sided" | "octaves" | "neural";
+    readonly quality: number;
+    readonly shadowQuality: number;
+    readonly froxelWidth: number;
+    readonly froxelHeight: number;
+    readonly froxelDepth: number;
+    readonly froxelSubSteps: number;
+    readonly shadowResolution: number;
+    readonly shadowCascades: number;
+    readonly shadowDistance: number;
+    readonly castShadowSteps: number;
+    readonly castShadowMapSize: number;
+    readonly pixelsPerFroxel: number;
+    readonly gridPassBudget: number;
+    readonly castShadowCascades: number;
+    readonly castShadowDistance: number;
+    readonly castShadowUpdatesPerFrame: number;
+    readonly castShadowCoarse: boolean;
+    readonly emissionResolution: number;
+    readonly emissionRange: number;
+    readonly emissionCascades: number;
+    readonly emissionDistance: number;
+    /** Zero disables view-distance fading. */
+    readonly fadeRadius: number;
+    readonly neuralStrength: number;
+    readonly scatteringOctaves: number;
+    readonly scatteringOctaveExtinction: number;
+    readonly scatteringOctaveContribution: number;
+    readonly scatteringOctavePhase: number;
+    readonly spectral: boolean;
+    readonly phaseGExponent: number;
+    readonly phase: "isotropic" | "henyey-greenstein" | "dual-lobe" | "lorenz-mie" | "lorenz-mie-rgb";
+    readonly environmentLighting: "outward" | "directional" | "spherical-harmonics";
+    readonly environmentSamples: number;
+    readonly environmentShOrder: number;
+    readonly mipmaps: boolean;
+    readonly temporal: boolean;
+    readonly temporalBlend: number;
+    readonly castShadows: boolean;
+    readonly jitter: boolean;
   }
   export function preferences(): Preferences;
   export function onPreferencesChange(listener: (preferences: Preferences) => void): Unsubscribe;
@@ -3492,7 +3545,8 @@ declare module "starhermit:scene" {
     setFrames(first: VolumeAtlasFrame, second?: VolumeAtlasFrame): void;
     dispose(): void;
   }
-  /** Integrates up to 16 overlapping fields in one ray, with mutual directional shadows.
+  /** Integrates up to 32 overlapping fields in one ray (16 for games before API_MINOR 39,
+   * `VOLUME_OPENVDB_MINOR`, whose uniform arrays keep 1.38's sizes), with mutual directional shadows.
    * Empty gaps between fields consume no ray samples. Supports perspective and orthographic cameras.
    * The batch owns its bounding transform; keep instances outside its descendant tree.
    * Shared frame storage remains owned by its VolumeAtlas. */
@@ -3767,6 +3821,9 @@ declare module "starhermit:scene" {
    * prefiltering; false while its images decode or it prefilters, and for
    * null. */
   export function environmentReady(value: Texture | null): boolean;
+  /** Linear RGB/latitude texels for volume environment lighting, or null while prefiltering
+   * (since API_MINOR 39, `VOLUME_OPENVDB_MINOR`; absent for older games). */
+  export function environmentLight(value: Texture | null): Float32Array | null;
   /** Since API_MINOR 34: `renderer.capabilities`. */
   export interface RendererCapabilities {
     readonly floatRenderable: boolean;
@@ -7853,23 +7910,87 @@ declare module "starhermit:scene" {
  * fire, clouds, fog banks). Each `VolumeEffect` is a box Mesh (its origin
  * the centre of the box's base) whose ShaderMaterial ray-marches the box
  * with jittered steps: Beer–Lambert extinction, a two-lobe Henyey–Greenstein
- * phase, a short shadow march toward the sun with multiple-scattering
- * octaves, blackbody emission from temperature, ending at
+ * phase, and a short shadow march toward the sun. Multiple scattering is
+ * the path-tracer-trained 20→32→32→1 neural model by default, with off,
+ * diffusion, two-sided diffusion and octaves selectable per effect or in
+ * Options → Graphics. Spectral extinction, density normalization/cutoff,
+ * wavelength-scaled phases and blackbody emission end at
  * `renderer.sceneDepth` (soft where it meets opaque geometry) and fogged by
  * the scene's `Fog`/`FogExp2` at its opacity-weighted depth. Density comes
  * from a shape function over a shared 64³ tileable noise (baked on the GPU
  * into a WebGL3DRenderTarget, 16 slice passes a frame for its first four
  * frames, 2 MiB of images) or from a `VolumeGrid` (an RG16F Data3DTexture,
  * e.g. a `.vdb` converted by starhermit-volume's `vdb_brick` example). Each
- * effect takes one program and three texture slots. See the README's
- * "Volumetric effects" for costs and resolutions. */
+ * effect takes one program and up to twelve texture slots, with Lorenz–Mie
+ * phase tables, CIE emission, environment and point/spot lighting, auxiliary
+ * grids and CPU mipmaps. Independent effects can cast coarse occupied-voxel
+ * shadows; frame mode shares world/froxel grids and soft mesh transmittance.
+ * See the README's "Volumetric effects" for costs and resolutions. */
+// From host API 1.39 (`VOLUME_OPENVDB_MINOR`, engine.minor=39) this module is
+// the OpenVDB feature set described here: neural multiple scattering by
+// default, Options → Graphics volume settings, WVDB grids and sequences,
+// frame lighting, Beer shadow maps, emission probes and a material light
+// hook's `volume_shadow`. A game declaring 1.38 or older (1.36 at least)
+// keeps 1.38's module exactly: `VolumeEffect`, `VolumeEffects`, `VolumeGrid`
+// (`fromBytes`, `fromVdb`) and `volumePresets` as 1.38 documented them, the
+// same values, errors, GPU work and fuel.
 declare module "starhermit:volume" {
-  import type { ColorInput, Color, Data3DTexture, Fog, FogExp2, Group, Mesh, Object3D, ShaderMaterial, Vector3, Vector4 } from "starhermit:scene";
+  import type { Camera, ColorInput, Color, Data3DTexture, Fog, FogExp2, Group, Mesh, Object3D, RenderTarget, ShaderMaterial, Vector3, Vector4, VolumeLayer, WebGL3DRenderTarget } from "starhermit:scene";
 
   export type VolumeShape = "plume" | "fireball" | "billow" | "flame" | "cumulus" | "slab" | "grid";
   export type VolumePresetName = "smoke" | "explosion" | "dust" | "fire" | "cloud" | "fogBank";
+  export type VolumeMultipleScattering = "off" | "diffusion" | "two-sided" | "octaves" | "neural";
+  export type VolumePhase = "isotropic" | "henyey-greenstein" | "dual-lobe" | "lorenz-mie" | "lorenz-mie-rgb";
+  export type VolumeEmissionSpectrum = "approximate" | "planck" | "soot";
+  export type VolumeAngstromExponent = "cloud" | "dust" | "smoke" | "air";
+  export const volumeLights: Readonly<{ ambient: 32; point: 16; directional: 8; spot: 4; hemisphere: 2; environment: 1; all: 63 }>;
 
-  export interface VolumeEffectOptions {
+  export interface VolumeAdvancedOptions {
+    /** Undefined follows Options → Graphics (neural by default). Spectral rendering falls back from neural to diffusion. */
+    multipleScattering?: VolumeMultipleScattering;
+    /** Bitmask from volumeLights (default all). */
+    lights?: number;
+    neuralStrength?: number;
+    scatteringOctaves?: number;
+    scatteringOctaveExtinction?: number;
+    scatteringOctaveContribution?: number;
+    scatteringOctavePhase?: number;
+    phase?: VolumePhase;
+    phaseGExponent?: number;
+    spectral?: boolean;
+    angstromExponent?: VolumeAngstromExponent | number;
+    extinctionScale?: readonly [number, number, number];
+    densityCutoff?: number;
+    /** Divide grid density by its non-zero mean (default true). */
+    normalizeDensity?: boolean;
+    /** Self-shadow strength (default 1; 0 disables it). */
+    absorbance?: number;
+    scatterColor?: ColorInput;
+    offset3D?: readonly [number, number, number];
+    /** Grid wrapping: 0 clamp, 1 repeat, 2 mirrored repeat. */
+    wrap3D?: 0 | 1 | 2;
+    /** CIE 1931 Planck color, optionally with soot's wavelength emissivity. */
+    emissionSpectrum?: VolumeEmissionSpectrum;
+    sootExponent?: number;
+    /** Light ordinary meshes with a point source in volume mode or cascaded irradiance probes in frame mode. */
+    emissionProbe?: boolean;
+    emissionProbeIntensity?: number;
+    emissionProbeDistance?: number;
+    /** Scalar density mask and separate emission grid. */
+    maskGrid?: VolumeGrid | null;
+    emissiveGrid?: VolumeGrid | null;
+    baseColorGrid?: VolumeColorGrid | null;
+    /** Raw heat value that maps to temperatureMax. */
+    emissiveScale?: number;
+    /** Cast coarse occupied-voxel shadows onto ordinary meshes; undefined follows Graphics. */
+    castShadows?: boolean;
+    /** Proxy samples per axis, 2..16. */
+    volumeShadowResolution?: number;
+    /** CPU mipmaps for distant grids; undefined follows Graphics. */
+    mipmaps?: boolean;
+  }
+
+  export interface VolumeEffectOptions extends VolumeAdvancedOptions {
     shape?: VolumeShape;
     /** The box in world units (x, height, z); the origin is its base's centre. */
     size?: readonly [number, number, number];
@@ -7893,7 +8014,7 @@ declare module "starhermit:volume" {
     emission?: number;
     /** Kelvin at heat 0 and heat 1. */
     temperature?: readonly [number, number];
-    /** Samples along a ray through the whole box diagonal (8..128; shorter rays take fewer), and toward the sun (0..8). */
+    /** Base samples along a ray (8..128) and toward the sun (0..32); Graphics quality scales both. */
     steps?: number;
     shadowSteps?: number;
     /** How far the shadow march reaches, world units. */
@@ -7911,13 +8032,22 @@ declare module "starhermit:volume" {
     seed?: number;
   }
   /** The presets, frozen: `{ ...volumePresets.smoke, density: 3 }`. */
-  export const volumePresets: Readonly<Record<VolumePresetName, Readonly<Required<Omit<VolumeEffectOptions, "grid">>>>>;
+  export const volumePresets: Readonly<Record<VolumePresetName, Readonly<Required<Omit<VolumeEffectOptions, "grid" | keyof VolumeAdvancedOptions>>>>>;
 
   /** The exports of starhermit-volume-kernel's .wasm (`new WebAssembly.Instance(new WebAssembly.Module(files.readBytes("starhermit_volume_kernel.wasm")), {}).exports`). */
   export interface VolumeKernel {
     readonly memory: { readonly buffer: ArrayBuffer };
     vdb_input(len: number): number; vdb_open(len: number): number; vdb_close(file: number): void;
     vdb_brick(file: number, density: number, heat: number, width: number, height: number, depth: number, format: number, densityScale: number): number;
+    wvdb_open(len: number): number; wvdb_open_lods(len: number, lods: number): number; wvdb_close(file: number): void;
+    wvdb_lod_count(file: number): number; wvdb_total_lod_count(file: number): number;
+    wvdb_lod_start(file: number, lod: number): number;
+    wvdb_lod_end(file: number, lod: number): number;
+    wvdb_grid_count(file: number): number;
+    wvdb_grid_name(file: number, grid: number): number;
+    wvdb_grid_name_len(file: number, grid: number): number;
+    wvdb_brick(file: number, density: number, heat: number, lod: number, format: number, densityScale: number): number;
+    wvdb_color_brick(file: number, grid: number, lod: number): number;
     brick_data(brick: number): number; brick_data_len(brick: number): number; brick_info(brick: number): number; brick_destroy(brick: number): void;
     vdb_error(): number; vdb_error_len(): number;
   }
@@ -7929,6 +8059,10 @@ declare module "starhermit:volume" {
     static fromBytes(bytes: Uint8Array): VolumeGrid;
     /** A `.vdb` read at run time through starhermit-volume-kernel: density and temperature picked by name, resampled so the longest side is `maxSide` (default 128; RangeError past 1..2048), its voxel size from the file's transform; an Error with the kernel's message for a file it cannot read. Interpreted (first and dev runs) a large file takes a while: load inside `engine.setBusy`. */
     static fromVdb(kernel: VolumeKernel, bytes: Uint8Array, maxSide?: number): VolumeGrid;
+    /** WebVDB version 1 at its intrinsic LOD (-1 is finest), without resampling. Density and heat are grid indices, or -1 to pick by name; heat -2 is none. */
+    static fromWvdb(kernel: VolumeKernel, bytes: Uint8Array, lod?: number, density?: number, heat?: number, densityScale?: number): VolumeGrid;
+    /** Shares the exact texture with this grid; disposing the instance does not dispose the source. */
+    instance(): VolumeGrid;
     readonly texture: Data3DTexture;
     readonly width: number;
     readonly height: number;
@@ -7936,16 +8070,127 @@ declare module "starhermit:volume" {
     readonly voxelSize: readonly [number, number, number];
     readonly densityMax: number;
     readonly heatMax: number;
+    /** Mean density of non-zero voxels, in source and normalized stored units. */
+    readonly meanDensity: number;
+    readonly normalizedMeanDensity: number;
+    /** Mean source heat over all voxels, and its normalized stored equivalent. */
+    readonly meanHeat: number;
+    readonly normalizedMeanHeat: number;
+    /** Lazy CPU mip chain, finest first. Instances share all of its textures. */
+    readonly mipLevels: readonly VolumeGrid[];
     readonly worldSize: [number, number, number];
     dispose(): void;
   }
 
+  /** An RGBA8 base-color grid, with the same box and instance semantics as VolumeGrid. */
+  export class VolumeColorGrid {
+    constructor(data: Uint8Array, width: number, height: number, depth: number, voxelSize?: readonly [number, number, number]);
+    static fromWvdb(kernel: VolumeKernel, bytes: Uint8Array, grid?: number, lod?: number): VolumeColorGrid;
+    instance(): VolumeColorGrid;
+    readonly texture: Data3DTexture;
+    readonly width: number;
+    readonly height: number;
+    readonly depth: number;
+    readonly voxelSize: readonly [number, number, number];
+    readonly worldSize: [number, number, number];
+    dispose(): void;
+  }
+
+  /** Every decoded WebVDB LOD, coarse first. The file is decoded once; attachments select a texture explicitly. */
+  export class VolumeGridLods {
+    private constructor();
+    static fromWvdb(kernel: VolumeKernel, bytes: Uint8Array, density?: number, heat?: number, maxLod?: number, densityScale?: number): VolumeGridLods;
+    readonly grids: readonly VolumeGrid[];
+    readonly count: number;
+    readonly totalCount: number;
+    readonly complete: boolean;
+    attach(effect: VolumeEffect, lod?: number): VolumeLodBinding;
+    dispose(): void;
+  }
+  export interface VolumeLods {
+    readonly grids: readonly VolumeGrid[];
+    readonly totalCount: number;
+  }
+  export interface VolumeWvdbProgress {
+    lod: number;
+    lods: number;
+    lodComplete: boolean;
+    done: boolean;
+    bytesLoaded: number;
+    bytesTotal: number | null;
+  }
+  /** Progressive WebVDB loading with contiguous prefix reads and live LOD attachments. */
+  export class VolumeWvdbLoader implements VolumeLods {
+    constructor(kernel: VolumeKernel, density?: number | string, heat?: number, maxLod?: number, gridScales?: Readonly<Record<string, number>>);
+    grids: VolumeGrid[];
+    readonly count: number;
+    totalCount: number;
+    readonly complete: boolean;
+    readonly done: boolean;
+    readonly cancelled: boolean;
+    attach(effect: VolumeEffect): VolumeLodBinding;
+    load(path: string, onProgress?: (progress: VolumeWvdbProgress) => void, onlyLod?: number): Promise<this>;
+    cancel(): void;
+    dispose(): void;
+  }
+  export interface VolumeWvdbAnimationProgress {
+    lod: number;
+    loadedFrames: number;
+    totalFrames: number;
+  }
+  export type VolumeWvdbAnimationOptions = Omit<VolumeEffectOptions, "maskGrid" | "emissiveGrid" | "baseColorGrid"> & {
+    maxLod?: number;
+    concurrency?: number;
+    maskGrid?: VolumeGrid | string | null;
+    emissiveGrid?: VolumeGrid | string | null;
+    baseColorGrid?: VolumeColorGrid | string | null;
+  };
+  /** A WebVDB sequence that starts after every frame's coarsest LOD, then refines in the background. */
+  export class VolumeWvdbAnimationLoader {
+    constructor(kernel: VolumeKernel, options?: VolumeWvdbAnimationOptions);
+    animation: VolumeAnimation | null;
+    done: Promise<void> | null;
+    load(paths: readonly string[], onProgress?: (progress: VolumeWvdbAnimationProgress) => void): Promise<VolumeAnimation>;
+    cancel(): void;
+  }
+
+  /** A live LOD attachment. It owns neither the grids nor the effect. */
+  export class VolumeLodBinding {
+    constructor(lods: VolumeLods, effect: VolumeEffect);
+    readonly lod: number;
+    setLod(lod: number): void;
+    detach(): void;
+  }
+
+  export type VolumeEnvironmentLighting = "outward" | "directional" | "spherical-harmonics";
+  export interface VolumeEnvironmentLight {
+    readonly direction: Vector3;
+    readonly color: Color;
+  }
+  export interface VolumePunctualLight {
+    readonly position: Vector3;
+    readonly direction: Vector3;
+    readonly color: Color;
+    readonly distance: number;
+    readonly decay: number;
+    readonly cosOuter: number;
+    readonly cosInner: number;
+    readonly spot: boolean;
+  }
   /** The light an effect is shaded with (linear colours times intensity; the sun direction points toward the sun). */
   export interface VolumeLighting {
     readonly sunDirection: Vector3;
     readonly sunColor: Color;
     readonly skyColor: Color;
     readonly groundColor: Color;
+    environment?: readonly VolumeEnvironmentLight[];
+    environmentUnshadowed?: Color;
+    /** At most four point/spot lights. */
+    punctual?: readonly VolumePunctualLight[];
+    ambientSkyColor?: Color;
+    ambientGroundColor?: Color;
+    hemisphereSkyColor?: Color;
+    hemisphereGroundColor?: Color;
   }
 
   /** One effect from a preset or options (overrides on top). TypeError for an unknown preset or shape, or a "grid" without a VolumeGrid. */
@@ -7963,6 +8208,49 @@ declare module "starhermit:volume" {
     emission: number; temperatureMin: number; temperatureMax: number;
     steps: number; shadowSteps: number; shadowLength: number; noiseScale: number;
     life: number; loop: boolean; opacity: number; seed: number;
+    multipleScattering: VolumeMultipleScattering | null;
+    neuralStrength: number | null;
+    scatteringOctaves: number | null;
+    scatteringOctaveExtinction: number | null;
+    scatteringOctaveContribution: number | null;
+    scatteringOctavePhase: number | null;
+    phase: VolumePhase | null;
+    phaseGExponent: number | null;
+    spectral: boolean | null;
+    angstromExponent: VolumeAngstromExponent | number;
+    readonly extinctionScale: Vector3;
+    densityCutoff: number;
+    normalizeDensity: boolean;
+    absorbance: number;
+    readonly scatterColor: Color;
+    readonly offset3D: Vector3;
+    wrap3D: 0 | 1 | 2;
+    emissionSpectrum: VolumeEmissionSpectrum;
+    sootExponent: number;
+    emissionProbe: boolean;
+    emissionProbeIntensity: number;
+    emissionProbeDistance: number;
+    mipmaps: boolean | null;
+    castShadows: boolean | null;
+    volumeShadowResolution: number;
+    maskGrid: VolumeGrid | null;
+    emissiveGrid: VolumeGrid | null;
+    baseColorGrid: VolumeColorGrid | null;
+    emissiveScale: number | null;
+    lights: number;
+    /** Alias of `albedo`, matching FrameVolume's baseColor. */
+    readonly baseColor: Color;
+    phaseG: number;
+    phaseBackG: number;
+    phaseBackWeight: number;
+    densityScale: number;
+    emissiveIntensity: number;
+    temperatureRange: readonly [number, number];
+    /** Replaces a grid effect's texture, keeping its material and optical settings. */
+    setGrid(grid: VolumeGrid): void;
+    setMaskGrid(grid: VolumeGrid | null): void;
+    setEmissiveGrid(grid: VolumeGrid | null): void;
+    setBaseColorGrid(grid: VolumeColorGrid | null): void;
     /** End rays at the scene's depth (default true; turn off for passes into targets seen from another camera). */
     depthAware: boolean;
     /** Seconds since made or triggered, and how fast it runs. */
@@ -7980,12 +8268,116 @@ declare module "starhermit:volume" {
     dispose(): void;
   }
 
+  export type VolumeAuxiliaryGridKind = "maskGrid" | "emissiveGrid" | "baseColorGrid";
+  export interface VolumeAuxiliaryFrame {
+    maskGrid?: VolumeGrid;
+    emissiveGrid?: VolumeGrid;
+    baseColorGrid?: VolumeColorGrid;
+  }
+  /** A grid-effect sequence. One texture shows at a time; every frame shares a world box. */
+  export class VolumeAnimation extends VolumeEffect {
+    constructor(frames?: readonly VolumeGrid[], options?: VolumeEffectOptions);
+    readonly frames: VolumeGrid[];
+    readonly auxiliaryFrames: VolumeAuxiliaryFrame[];
+    setFrameAuxiliary(frame: number, kind: VolumeAuxiliaryGridKind, grid: VolumeGrid | VolumeColorGrid): void;
+    fps: number;
+    loop: boolean;
+    playing: boolean;
+    time: number;
+    readonly currentFrame: number;
+    addFrame(grid: VolumeGrid): number;
+    setFrame(frame: number): void;
+    play(): void;
+    pause(): void;
+    update(dt: number, lighting: VolumeLighting, fog?: Fog | FogExp2 | null): void;
+    /** Playback-independent animation whose frames share this one's textures. */
+    instance(options?: VolumeEffectOptions): VolumeAnimation;
+  }
+
+  export interface VolumeFrameSettings {
+    width: number;
+    height: number;
+    pixelsPerFroxel: number;
+    depth: number;
+    subSteps: number;
+    near: number;
+    far: number;
+    shadowResolution: number;
+    shadowCascades: number;
+    shadowDistance: number;
+    shadowSteps: number;
+    gridPassBudget: number;
+    castShadowMapSize: number;
+    castShadowSteps: number;
+    castShadowCascades: number;
+    castShadowDistance: number;
+    castShadowUpdatesPerFrame: number;
+    castShadowCoarse: boolean;
+    emissionResolution: number;
+    emissionRange: number;
+    emissionCascades: number;
+    emissionDistance: number;
+    /** Zero or Infinity disables view-distance fading. */
+    fadeRadius: number;
+    /** Follows Graphics unless followGraphics is false. */
+    jitter: boolean;
+  }
+  export interface VolumeShadowMapState {
+    readonly atlas: RenderTarget;
+    readonly spectrum: RenderTarget;
+    readonly material: ShaderMaterial;
+    readonly tileCount: number;
+    readonly readyCount: number;
+    readonly updatesLast: number;
+  }
+  export interface VolumeEmissionGridState {
+    readonly atlas: RenderTarget;
+    readonly material: ShaderMaterial;
+    readonly emitterCount: number;
+    readonly cascadeCount: number;
+    readonly updates: number;
+  }
+
+  /** Shared world-density/emission grids and frustum-aligned froxels for a VolumeEffects group. */
+  export class VolumeFrameRenderer extends Mesh {
+    constructor(group: VolumeEffects);
+    readonly settings: VolumeFrameSettings;
+    readonly worldTarget: WebGL3DRenderTarget;
+    readonly emissionTarget: WebGL3DRenderTarget;
+    readonly albedoTarget: WebGL3DRenderTarget;
+    readonly froxelTarget: RenderTarget;
+    readonly neuralTarget: RenderTarget;
+    readonly beerTarget: RenderTarget;
+    readonly shadowMaps: VolumeShadowMapState;
+    readonly emissionGrid: VolumeEmissionGridState;
+    readonly depth: number;
+    /** Follow Options → Graphics each frame (default true); false keeps custom settings. */
+    followGraphics: boolean;
+    /** Null follows Options → Graphics. */
+    castShadows: boolean | null;
+    readonly shaderError: string | null;
+    /** Install Beer–Lambert transmittance and emission-probe irradiance on shadow-receiving lit materials. */
+    applyShadows(root?: Object3D): number;
+    render(camera?: Camera | null): boolean;
+    disable(): void;
+    dispose(): void;
+  }
+
   /** Effects sharing the scene's light and fog: add it to the scene, make effects with `create`, call `update(dt)` once a frame before it renders. */
   export class VolumeEffects extends Group {
     constructor();
     /** From the scene each update while `autoLighting`: the first visible DirectionalLight, plus HemisphereLights and AmbientLights. */
     readonly lighting: VolumeLighting;
     autoLighting: boolean;
+    /** Independent box marches or shared frame grids; null follows Options → Graphics. */
+    lightingMode: "volume" | "frame" | null;
+    readonly frameRenderer: VolumeFrameRenderer;
+    /** Null follows Options → Graphics. */
+    environmentLighting: VolumeEnvironmentLighting | null;
+    environmentSamples: number | null;
+    environmentShOrder: number | null;
+    temporal: boolean | null;
+    temporalBlend: number | null;
     /** Apply `scene.fog` (default true). */
     sceneFog: boolean;
     /** Noise slices baked a frame until ready (16). */
@@ -7994,7 +8386,11 @@ declare module "starhermit:volume" {
     readonly ready: boolean;
     readonly shaderError: string | null;
     readonly effects: readonly VolumeEffect[];
+    /** Optional subset included in frame grids; null includes every effect. */
+    frameEffects: readonly VolumeEffect[] | null;
     create(options: VolumeEffectOptions | VolumePresetName, position?: readonly [number, number, number], overrides?: VolumeEffectOptions): VolumeEffect;
+    /** A temporal layer following this group's overrides and Options → Graphics, or null when disabled. */
+    createLayer(width: number, height: number): VolumeLayer | null;
     update(dt: number): void;
     dispose(): void;
   }
