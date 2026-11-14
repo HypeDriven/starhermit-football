@@ -1,5 +1,7 @@
 # StarHermit Football
 
+**[▶ Play Football on StarHermit](https://dashboard.starhermit.com/play/d6336bc2-3469-4e69-aa63-d94b4c07adac)**
+
 Realtime 3D multiplayer football (soccer) for the StarHermit runtime, hosted on
 the StarHermit platform. Up to **22 players (11v11)**, minimum **1 vs 1**
 against an AI opponent; keyboard and mouse, gamepads and touch.
