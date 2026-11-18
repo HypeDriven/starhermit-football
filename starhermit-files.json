@@ -2,10 +2,13 @@
   "files": {
     "CLAUDE.md": {"sha256": "298e2d1c82a123a5dabf56777bdb754dd938769c28b6ff91499244269e982e7e", "size": 2836},
     "LICENSE.md": {"sha256": "13324de5e020665146bea6eafc542805d5058daacbf163d89d9434f9367f33b8", "size": 4463},
-    "README.md": {"sha256": "1ebc70fce009f43c66ccf1e2c2e522236489f27365731e9b0f76bbb0ad495796", "size": 5881},
+    "README.md": {"sha256": "e00e975decdc2ce6fe7741d183343d9b8588fa1b1a8eb310f01ce1ef29229faf", "size": 5996},
     "assets/crest-blue.webp": {"sha256": "1cee0fdb699c1a6bee2f64bf6c56fb1e212e641a9626de36bba65fc6aaa1c645", "size": 4854},
+    "assets/crest-blue.webp.ktx2": {"sha256": "86114ae425bef468ba8500a43012607400ab183b4a9eaa69d1822dc8e58f9c22", "size": 87776},
     "assets/crest-red.webp": {"sha256": "d7eddd1b7f341426e0705b792aa7dd1dd82adcaeb7714b2fc8304bb223746b08", "size": 5122},
+    "assets/crest-red.webp.ktx2": {"sha256": "537a7dcf4c8c6c9ece8233979544b80db95023621690813b4576b30752b6c644", "size": 87776},
     "assets/keyart-night-stadium.webp": {"sha256": "465bc1fdcb936a4abdc160e851e97becf71cb7003ee6a3768991a8ec90732dd5", "size": 94500},
+    "assets/keyart-night-stadium.webp.ktx2": {"sha256": "e35af3026094946da1a750c2eb6027dca798168b6f7570afa83b079691c1ec15", "size": 1116528},
     "assets/localization/CJK-OFL.txt": {"sha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2", "size": 4301},
     "assets/localization/Hebrew-OFL.txt": {"sha256": "9b9fe028b5ba74d231659a1bbaf0ed09b11e759d1ca6a070999e16d151616b47", "size": 4382},
     "assets/localization/Hebrew.ttf": {"sha256": "821a4d9a64a97dcce5753ca32d1c8037757e1c0547631ed27689422541fd5920", "size": 18972},
@@ -73,9 +76,10 @@
     "engine/src/world/rigMath.ts": {"sha256": "6f6f1292664caae70c2e4358fde4e2c7d42452857a7f0b7ac36423ecc6d76698", "size": 12829},
     "engine/src/world/stadium.ts": {"sha256": "b1f5a3dc2f1117798ef21d7216c34cc408b8fb9dfd98fe402f3fcf17ef73e8ec", "size": 63096},
     "icon.png": {"sha256": "2c8eaa4a5320ab35826f421574675909ac4c59a7be22cb83240e49038208e1a8", "size": 9579},
-    "index.html": {"sha256": "d87b21dd60781f410ebe82ba5f59f9e0e75c9ef1829fea6952dc4e9ee3e6f0d6", "size": 1930},
+    "icon.png.ktx2": {"sha256": "f29779752ad578e0de6f88984ad52f567a03cfb7b85879ffae958f0332be613e", "size": 87776},
+    "index.html": {"sha256": "09c3c311e5264d5598e02b9cdc08c7f712801d8d5a3804301f726d566436fb41", "size": 1772},
     "leaderboards.json": {"sha256": "7d871b691e91dbb0dd69c14f512aab836c896073cc7b614e9b2fd011942d8dd0", "size": 137},
-    "publication.json": {"sha256": "73aceb0e0e0af12067a9e5978dc6f84c9eeeff1be32cc32225398171bd854d1d", "size": 3395},
+    "publication.json": {"sha256": "7af19214f9a561bada79f3e37158fa3086bf64efcc888d7559ce766223bc216d", "size": 3395},
     "server.js": {"sha256": "a95928a4a8c5f7baf7abb7faca077f87ebcca4722db029cec7fe2ea6a3254bd9", "size": 78992},
     "sfx/ball-bounce.opus": {"sha256": "23300d17f503532823ad0480808e34fa2694fc7710195bf0209af79b04303ae6", "size": 12266},
     "sfx/coin-flip.opus": {"sha256": "d0fb584bdd96b742b630155e2178d88b57b2f5061af2edd718fb9620fefd36d1", "size": 36243},
@@ -99,8 +103,8 @@
     "sfx/whistle-long.opus": {"sha256": "83277873d61e0c3a04b865df41e71e104e9cda4e3ba681d2a1db7cf8ec60a86f", "size": 35099},
     "sfx/whistle-short.opus": {"sha256": "a6d8da0535a483f98cf9485749beed378857a70809ce3291807dcc820b4bd24c", "size": 12965},
     "sh-language.js": {"sha256": "307a2066b6df3cd7fd9b41202d32342389583059386a67436b12d07d50740b01", "size": 13930},
-    "spec.md": {"sha256": "ab411f000894e317ce902a88c8cc34eb8b1c53f83e96d107771def8bd913be51", "size": 48676},
-    "starhermit.txt": {"sha256": "c39f10e7c88eb00893773476de5bd1a0b9c9999533d2a8b037dc5882a1142d73", "size": 3283}
+    "spec.md": {"sha256": "54d01c5ac92c6da118454e1ce1dbd3b8803d59b6b309d96bb3f35cabc4eb7bac", "size": 48986},
+    "starhermit.txt": {"sha256": "2f2e905f0bb2c3024dbd070d406ee6e8e8751c84d46ccf31c29d0488ee34eede", "size": 3335}
   },
   "excluded": ["engine/starhermit.d.ts", "engine/tests/", "engine/tsconfig.json", "node_modules/", "package-lock.json", "package.json", "tests/"],
   "format": 1
