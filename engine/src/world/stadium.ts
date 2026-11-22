@@ -1323,6 +1323,7 @@ export async function buildStadium(scene: Scene, pitch: Pitch | null, q: Content
     renderer.ao = want.ao ? gtao(want.ao) : null;
     renderer.grade = want.grade ? GRADE : null;
     renderer.antialias = want.antialias;
+    renderer.motionBlur = want.bloomRes !== null ? { intensity: 0.25, samples: 8, maxPixels: 16, targetFps: 60, camera: false } : null;
   }
   // the pitch textures exist before the stadium shows
   requested = `${q.grass}|${q.lines}|${q.detail}`;

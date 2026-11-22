@@ -2,7 +2,7 @@
   "files": {
     "CLAUDE.md": {"sha256": "298e2d1c82a123a5dabf56777bdb754dd938769c28b6ff91499244269e982e7e", "size": 2836},
     "LICENSE.md": {"sha256": "13324de5e020665146bea6eafc542805d5058daacbf163d89d9434f9367f33b8", "size": 4463},
-    "README.md": {"sha256": "e00e975decdc2ce6fe7741d183343d9b8588fa1b1a8eb310f01ce1ef29229faf", "size": 5996},
+    "README.md": {"sha256": "bdb861947f25f7eef8f2646a9bcf0ba5ce253cc83fd113db2583572c101bbcf2", "size": 5996},
     "assets/crest-blue.webp": {"sha256": "1cee0fdb699c1a6bee2f64bf6c56fb1e212e641a9626de36bba65fc6aaa1c645", "size": 4854},
     "assets/crest-blue.webp.ktx2": {"sha256": "86114ae425bef468ba8500a43012607400ab183b4a9eaa69d1822dc8e58f9c22", "size": 87776},
     "assets/crest-red.webp": {"sha256": "d7eddd1b7f341426e0705b792aa7dd1dd82adcaeb7714b2fc8304bb223746b08", "size": 5122},
@@ -74,12 +74,12 @@
     "engine/src/world/resources.ts": {"sha256": "d62b05df73c6c1ca84a96ff352100cb4fbdad1c6ca180c36ebf028131ab4b542", "size": 1219},
     "engine/src/world/rig.ts": {"sha256": "dbcb6a5c4b3362ef5a9bae7383c61a06a2b4abe88a0f926022afa0575fe1fae7", "size": 7537},
     "engine/src/world/rigMath.ts": {"sha256": "6f6f1292664caae70c2e4358fde4e2c7d42452857a7f0b7ac36423ecc6d76698", "size": 12829},
-    "engine/src/world/stadium.ts": {"sha256": "b1f5a3dc2f1117798ef21d7216c34cc408b8fb9dfd98fe402f3fcf17ef73e8ec", "size": 63096},
+    "engine/src/world/stadium.ts": {"sha256": "d57fbe631681345343fa5d1207765abbcd934c6c1efc378cbe7d975d966d6d6a", "size": 63232},
     "icon.png": {"sha256": "2c8eaa4a5320ab35826f421574675909ac4c59a7be22cb83240e49038208e1a8", "size": 9579},
     "icon.png.ktx2": {"sha256": "f29779752ad578e0de6f88984ad52f567a03cfb7b85879ffae958f0332be613e", "size": 87776},
-    "index.html": {"sha256": "09c3c311e5264d5598e02b9cdc08c7f712801d8d5a3804301f726d566436fb41", "size": 1772},
+    "index.html": {"sha256": "a205010cec214955f1ebc8b2d2e80151139d8987dc741f353e499ff2b366833a", "size": 1772},
     "leaderboards.json": {"sha256": "7d871b691e91dbb0dd69c14f512aab836c896073cc7b614e9b2fd011942d8dd0", "size": 137},
-    "publication.json": {"sha256": "7af19214f9a561bada79f3e37158fa3086bf64efcc888d7559ce766223bc216d", "size": 3395},
+    "publication.json": {"sha256": "8a83baff2b28b95304dedade01db050b3248f899a9e0f36b66961ab4539949b4", "size": 4285},
     "server.js": {"sha256": "a95928a4a8c5f7baf7abb7faca077f87ebcca4722db029cec7fe2ea6a3254bd9", "size": 78992},
     "sfx/ball-bounce.opus": {"sha256": "23300d17f503532823ad0480808e34fa2694fc7710195bf0209af79b04303ae6", "size": 12266},
     "sfx/coin-flip.opus": {"sha256": "d0fb584bdd96b742b630155e2178d88b57b2f5061af2edd718fb9620fefd36d1", "size": 36243},
@@ -103,8 +103,8 @@
     "sfx/whistle-long.opus": {"sha256": "83277873d61e0c3a04b865df41e71e104e9cda4e3ba681d2a1db7cf8ec60a86f", "size": 35099},
     "sfx/whistle-short.opus": {"sha256": "a6d8da0535a483f98cf9485749beed378857a70809ce3291807dcc820b4bd24c", "size": 12965},
     "sh-language.js": {"sha256": "307a2066b6df3cd7fd9b41202d32342389583059386a67436b12d07d50740b01", "size": 13930},
-    "spec.md": {"sha256": "54d01c5ac92c6da118454e1ce1dbd3b8803d59b6b309d96bb3f35cabc4eb7bac", "size": 48986},
-    "starhermit.txt": {"sha256": "2f2e905f0bb2c3024dbd070d406ee6e8e8751c84d46ccf31c29d0488ee34eede", "size": 3335}
+    "spec.md": {"sha256": "5597b5a7b1fc38b63871c97bc02ab86c5b6196b9ec89f960407c242850c77667", "size": 49398},
+    "starhermit.txt": {"sha256": "ae196b205150426099eccaefdac4376286090ff60c5b212f5b44d069da532ad0", "size": 3358}
   },
   "excluded": ["engine/starhermit.d.ts", "engine/tests/", "engine/tsconfig.json", "node_modules/", "package-lock.json", "package.json", "tests/"],
   "format": 1
