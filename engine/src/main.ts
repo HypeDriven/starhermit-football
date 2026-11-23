@@ -1,3 +1,4 @@
+import { showCursor } from "./cursor.js";
 import { localizedDrawOptions as __l10nDrawOptions } from "./l10n/font.js";
 import { withLanguageRender as __l10nRender } from "./l10n/menu.js";
 // localization-runtime:attached
@@ -801,6 +802,7 @@ function loadingScreen(text: string): void {
 
 // ── lifecycle ──
 onStart(() => {
+  showCursor();
   setFixedRate(60);
   createImageBitmap("assets/keyart-night-stadium.webp")
     .then((img) => {

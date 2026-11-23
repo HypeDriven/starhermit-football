@@ -13,7 +13,8 @@ import { settings } from "starhermit:storage";
 import * as ui from "starhermit:ui";
 import { me } from "./platform.ts";
 
-export const LOCALES = ["en-US", "en-GB", "es-419", "es-ES", "de-DE", "fr-FR", "fr-CA", "pt-BR", "it-IT"] as const;
+strings.load("assets/strings.json");
+export const LOCALES = strings.locales;
 const SETTING = "ui.language";
 
 interface ShLanguageInstance {
@@ -29,7 +30,6 @@ interface ShLanguage {
   create(opts: Record<string, unknown>): ShLanguageInstance;
 }
 
-strings.load("assets/strings.json");
 strings.defaultLocale = "en-US";
 strings.setLanguage("en-US");
 let SL: ShLanguage | null = null;

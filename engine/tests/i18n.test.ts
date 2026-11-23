@@ -2,7 +2,7 @@
 // client shows: every key it passes to T() is translated in every locale with
 // its placeholders intact (en-GB, es-ES and fr-CA inherit from en-US, es-419
 // and fr-FR), every row is text the client shows, the account strings cover
-// the nine locales, and the platform's resolver (sh-language.js) picks the
+// the shipped locales, and the platform's resolver (sh-language.js) picks the
 // locale i18n.ts asks it for.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -11,8 +11,8 @@ import { createContext, runInContext } from "node:vm";
 
 const repo = process.env["FOOTBALL_REPO"] ?? ".";
 const STRINGS = JSON.parse(readFileSync(`${repo}/assets/strings.json`, "utf8")) as Record<string, Record<string, string>>;
-const FULL = ["es-419", "de-DE", "fr-FR", "pt-BR", "it-IT"];
-const LOCALES = ["en-US", "en-GB", "es-419", "es-ES", "de-DE", "fr-FR", "fr-CA", "pt-BR", "it-IT"];
+const FULL = Object.keys(STRINGS);
+const LOCALES = Object.keys(STRINGS);
 
 /** The client's sources (the tables themselves left out). */
 function sources(): string {
@@ -84,7 +84,8 @@ test("the platform's resolver picks the locale i18n.ts asks for", () => {
   assert.equal(pick("auto", "de-DE", ["fr-FR"]), "de-DE");
   assert.equal(pick("auto", null, ["fr-CA"]), "fr-CA");
   assert.equal(pick("es-ES", "de-DE", []), "es-ES");
-  assert.equal(pick("auto", null, ["ja-JP"]), "en-US");
+  assert.equal(pick("auto", null, ["ja-JP"]), "ja-JP");
+  assert.equal(pick("auto", null, ["zz-ZZ"]), "en-US");
   assert.equal(SL.validChoice("fr-CA", LOCALES), "fr-CA");
   assert.equal(SL.validChoice("auto", LOCALES), "auto");
   // a key with a row reads in the chosen locale, one an inheriting locale lacks from its parent
