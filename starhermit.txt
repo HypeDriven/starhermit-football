@@ -50,8 +50,8 @@ cover=cover.jpg
 # default pad controls; players rebind keys and pads in the runtime's Options.
 engine.api=1
 engine.entry=engine/src/main.ts
-engine.version=1.50.0
-engine.minor=50
+engine.version=1.51.0
+engine.minor=51
 engine.pipelines=async
 engine.capabilities=platform,voice,clipboard,storage
 engine.ray_tracing=auto
