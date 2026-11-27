@@ -12,7 +12,7 @@
     "metadataSource": "starhermit.txt",
     "createdAt": "2026-07-22T17:14:03.776177+00:00",
     "coverArtSource": "manifest",
-    "coverArtUpdatedAt": "2026-11-26T20:31:07.314414+00:00",
+    "coverArtUpdatedAt": "2026-11-27T17:06:39.387985+00:00",
     "submittedByUserId": "2712e04e-461b-4d23-81ae-e40b429128a8",
     "submittedByUsername": "starhermit",
     "hosting": {
@@ -22,9 +22,9 @@
       "pinnedCommitSha": null,
       "deployedCommitSha": null,
       "deployError": null,
-      "deployedAt": "2026-11-26T20:31:07.295441+00:00",
+      "deployedAt": "2026-11-27T17:06:39.370121+00:00",
       "externalLaunchUrl": null,
-      "engineVersion": "1.51.0",
+      "engineVersion": "1.53.0",
       "deployWarning": null
     },
     "description": "Dribble, pass, tackle, and shoot in fast-paced 3D football matches with human and AI teammates.",
@@ -36,19 +36,19 @@
     "links": [],
     "isDisabled": false
   },
-  "publishedAt": "2026-11-26T20:31:07.490Z",
-  "sourceCommit": "671fd01d9d5621753461638f0fa0641328a9af41",
-  "bytesReceived": 3032372,
-  "archiveSha256": "02d287f96e8039c4ca9d68e20ef71abebb98087d088cca0b9df27c43b545ac11",
+  "publishedAt": "2026-11-27T17:06:39.553Z",
+  "sourceCommit": "5a0cd8e06a6b754fdec40d09d4d83181118e72e5",
+  "bytesReceived": 3032741,
+  "archiveSha256": "e4a5935c523e3ac403056c39407c8f4432dc59badfdcda64a41b219eb47e1d28",
   "indexSha256": "9f18463952fda9d364998244cada421ef3dea83e26f2532ea084976f68391674",
   "result": {
     "clientPublished": true,
     "serverImageLoaded": false,
     "imageDigest": null,
-    "bytesReceived": 3032372,
+    "bytesReceived": 3032741,
     "mode": "replace",
     "filesRemoved": 0,
-    "engineVersion": "1.51.0",
+    "engineVersion": "1.53.0",
     "deployWarning": null
   },
   "liveVerification": {
