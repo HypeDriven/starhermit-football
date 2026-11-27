@@ -80,9 +80,9 @@
     "favicon.png.ktx2": {"sha256": "f29779752ad578e0de6f88984ad52f567a03cfb7b85879ffae958f0332be613e", "size": 87776},
     "icon.png": {"sha256": "2c8eaa4a5320ab35826f421574675909ac4c59a7be22cb83240e49038208e1a8", "size": 9579},
     "icon.png.ktx2": {"sha256": "f29779752ad578e0de6f88984ad52f567a03cfb7b85879ffae958f0332be613e", "size": 87776},
-    "index.html": {"sha256": "12ddc133cedf40dfe35b0f08395cb773bac7edc2abd541d730929a330e536d7a", "size": 1775},
+    "index.html": {"sha256": "9a9b35badaedcb5a769cdee8b6db0e451d47e73c37c698dccc4e5d1b627df05c", "size": 1775},
     "leaderboards.json": {"sha256": "7d871b691e91dbb0dd69c14f512aab836c896073cc7b614e9b2fd011942d8dd0", "size": 137},
-    "publication.json": {"sha256": "7bc0f365d461442accf25b942e54ba3367c8ad1d4030795ae5076bebd7e75c47", "size": 4285},
+    "publication.json": {"sha256": "3947ae5af2596b09232008c149aa755286095a1f0f797df89963e79ee5c846fe", "size": 4285},
     "server.js": {"sha256": "a95928a4a8c5f7baf7abb7faca077f87ebcca4722db029cec7fe2ea6a3254bd9", "size": 78992},
     "sfx/ball-bounce.opus": {"sha256": "23300d17f503532823ad0480808e34fa2694fc7710195bf0209af79b04303ae6", "size": 12266},
     "sfx/coin-flip.opus": {"sha256": "d0fb584bdd96b742b630155e2178d88b57b2f5061af2edd718fb9620fefd36d1", "size": 36243},
@@ -106,8 +106,8 @@
     "sfx/whistle-long.opus": {"sha256": "83277873d61e0c3a04b865df41e71e104e9cda4e3ba681d2a1db7cf8ec60a86f", "size": 35099},
     "sfx/whistle-short.opus": {"sha256": "a6d8da0535a483f98cf9485749beed378857a70809ce3291807dcc820b4bd24c", "size": 12965},
     "sh-language.js": {"sha256": "307a2066b6df3cd7fd9b41202d32342389583059386a67436b12d07d50740b01", "size": 13930},
-    "spec.md": {"sha256": "d50d0b757a53bbc3ef799e703f899ed833ac49dfecb31f3dc79fbabef4425464", "size": 49398},
-    "starhermit.txt": {"sha256": "a31a8a07321176e04f94e5df035be9f2d0712f4c11b9f7f9222c0e6797be4882", "size": 3358}
+    "spec.md": {"sha256": "535818210f6a753d565827bef6585bd834a39e129f171c2507f2476643cf28b8", "size": 49672},
+    "starhermit.txt": {"sha256": "32db65b898ed2aa93aaaf23cc1967560df319ead803c87b9f32e9c7143ca16a4", "size": 3358}
   },
   "excluded": ["engine/starhermit.d.ts", "engine/tests/", "engine/tsconfig.json", "package-lock.json", "package.json", "tests/"],
   "format": 1
